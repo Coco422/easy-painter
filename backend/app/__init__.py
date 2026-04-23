@@ -1,0 +1,1 @@
+"""Easy Painter backend package."""

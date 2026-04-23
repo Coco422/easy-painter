@@ -1,0 +1,13 @@
+.DS_Store
+.env
+backend/.venv
+backend/.pytest_cache
+backend/.python-version
+backend/__pycache__
+backend/**/__pycache__
+frontend/dist
+frontend/node_modules
+frontend/.vite
+data/minio
+data/postgres
+data/redis
