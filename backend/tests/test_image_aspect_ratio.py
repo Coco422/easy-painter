@@ -19,7 +19,7 @@ def test_create_job_request_rejects_unsupported_aspect_ratio():
 def test_upstream_size_matches_selected_aspect_ratio():
     client = UpstreamImageClient()
 
-    assert client._size_for_aspect_ratio("auto") == "auto"
+    assert client._size_for_aspect_ratio("auto") == "1024x1024"
     assert client._size_for_aspect_ratio("1:1") == "1024x1024"
     assert client._size_for_aspect_ratio("3:4") == "1024x1536"
     assert client._size_for_aspect_ratio("9:16") == "1024x1792"

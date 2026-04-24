@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import base64
+import logging
 from dataclasses import dataclass
 
 import httpx
 
 from app.core.config import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class UpstreamServiceError(RuntimeError):
@@ -59,8 +63,20 @@ class UpstreamImageClient:
             raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True) from exc
 
         if response.status_code >= 500:
+            logger.warning(
+                "Upstream image generation failed with %s for model=%s size=%s.",
+                response.status_code,
+                model,
+                payload["size"],
+            )
             raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True)
         if response.status_code >= 400:
+            logger.warning(
+                "Upstream image generation rejected request with %s for model=%s size=%s.",
+                response.status_code,
+                model,
+                payload["size"],
+            )
             raise UpstreamServiceError("生成请求未能完成，请稍后调整提示词再试。", retryable=False)
 
         try:
@@ -94,7 +110,7 @@ class UpstreamImageClient:
 
     def _size_for_aspect_ratio(self, aspect_ratio: str) -> str:
         if aspect_ratio == "auto":
-            return "auto"
+            return self.settings.upstream_default_size
 
         sizes = {
             "1:1": "1024x1024",
