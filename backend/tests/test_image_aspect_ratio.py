@@ -25,3 +25,9 @@ def test_upstream_size_matches_selected_aspect_ratio():
     assert client._size_for_aspect_ratio("9:16") == "1024x1792"
     assert client._size_for_aspect_ratio("4:3") == "1536x1024"
     assert client._size_for_aspect_ratio("16:9") == "1792x1024"
+
+
+def test_upstream_content_type_uses_image_bytes():
+    assert UpstreamImageClient._content_type_for_bytes(b"\x89PNG\r\n\x1a\n...") == "image/png"
+    assert UpstreamImageClient._content_type_for_bytes(b"\xff\xd8\xff...") == "image/jpeg"
+    assert UpstreamImageClient._content_type_for_bytes(b"RIFF....WEBP...") == "image/webp"

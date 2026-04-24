@@ -90,7 +90,7 @@ class UpstreamImageClient:
 
         if image_data.get("b64_json"):
             image_bytes = base64.b64decode(image_data["b64_json"])
-            content_type = self._content_type_for_format(self.settings.upstream_default_output_format)
+            content_type = self._content_type_for_bytes(image_bytes)
             source_type = "b64_json"
         elif image_data.get("url"):
             image_bytes, content_type = self._download_image(image_data["url"])
@@ -142,6 +142,16 @@ class UpstreamImageClient:
             raise UpstreamServiceError("生成图像下载失败，请稍后再试。", retryable=True) from exc
 
         return response.content, response.headers.get("content-type", "image/jpeg")
+
+    @staticmethod
+    def _content_type_for_bytes(image_bytes: bytes) -> str:
+        if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if image_bytes.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+            return "image/webp"
+        return "application/octet-stream"
 
     @staticmethod
     def _content_type_for_format(output_format: str) -> str:
