@@ -66,6 +66,7 @@ def generate_image_task(self, job_id: str) -> None:
             )
             _mark_succeeded(db=db, job=job, result=result, object_key=stored.object_key, public_url=stored.public_url)
         except UpstreamServiceError as exc:
+            logger.warning("Upstream generation error for job %s retryable=%s: %s", job.id, exc.retryable, exc.user_message)
             if exc.retryable:
                 try:
                     raise self.retry(exc=exc, countdown=15 * (self.request.retries + 1))
@@ -74,12 +75,13 @@ def generate_image_task(self, job_id: str) -> None:
             else:
                 _mark_failed(db=db, job=job, message=exc.user_message)
         except StorageError:
+            logger.exception("Storage error for generation job %s.", job.id)
             try:
                 raise self.retry(countdown=15 * (self.request.retries + 1))
             except MaxRetriesExceededError:
                 _mark_failed(db=db, job=job, message="图片保存失败，请稍后重试。")
         except Exception:
-            logger.error("Unexpected generation task failure.")
+            logger.exception("Unexpected generation task failure for job %s.", job.id)
             _mark_failed(db=db, job=job, message="生成任务执行失败，请稍后重试。")
     finally:
         db.close()
@@ -101,6 +103,7 @@ def _mark_succeeded(
     job.finished_at = utcnow()
     job.error_message = None
     db.commit()
+    logger.info("Generation job %s succeeded object_key=%s.", job.id, object_key)
 
 
 def _mark_failed(*, db, job: GenerationJob, message: str) -> None:
@@ -108,3 +111,4 @@ def _mark_failed(*, db, job: GenerationJob, message: str) -> None:
     job.error_message = message
     job.finished_at = utcnow()
     db.commit()
+    logger.info("Generation job %s failed message=%s.", job.id, message)

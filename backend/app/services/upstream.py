@@ -35,7 +35,7 @@ class UpstreamImageClient:
         if not self.settings.upstream_base_url or not self.settings.upstream_api_key:
             raise UpstreamServiceError("生成服务尚未配置完成。", retryable=False)
 
-        payload = {
+        request_payload = {
             "model": model,
             "prompt": prompt,
             "n": 1,
@@ -56,7 +56,7 @@ class UpstreamImageClient:
 
         try:
             with httpx.Client(timeout=self.settings.upstream_timeout_seconds) as client:
-                response = client.post(endpoint, json=payload, headers=headers)
+                response = client.post(endpoint, json=request_payload, headers=headers)
         except httpx.TimeoutException as exc:
             raise UpstreamServiceError("生成服务响应超时，请稍后再试。", retryable=True) from exc
         except httpx.HTTPError as exc:
@@ -67,7 +67,7 @@ class UpstreamImageClient:
                 "Upstream image generation failed with %s for model=%s size=%s.",
                 response.status_code,
                 model,
-                payload["size"],
+                request_payload["size"],
             )
             raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True)
         if response.status_code >= 400:
@@ -75,26 +75,36 @@ class UpstreamImageClient:
                 "Upstream image generation rejected request with %s for model=%s size=%s.",
                 response.status_code,
                 model,
-                payload["size"],
+                request_payload["size"],
             )
             raise UpstreamServiceError("生成请求未能完成，请稍后调整提示词再试。", retryable=False)
 
         try:
-            payload = response.json()
-            image_data = payload["data"][0]
+            response_payload = response.json()
+            image_data = response_payload["data"][0]
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise UpstreamServiceError("生成服务返回了无法识别的数据。", retryable=True) from exc
 
         revised_prompt = image_data.get("revised_prompt")
-        created = payload.get("created")
+        created = response_payload.get("created")
 
         if image_data.get("b64_json"):
             image_bytes = base64.b64decode(image_data["b64_json"])
             content_type = self._content_type_for_format(self.settings.upstream_default_output_format)
+            source_type = "b64_json"
         elif image_data.get("url"):
             image_bytes, content_type = self._download_image(image_data["url"])
+            source_type = "url"
         else:
             raise UpstreamServiceError("生成服务未返回图像数据。", retryable=True)
+
+        logger.info(
+            "Upstream image generation succeeded model=%s size=%s source=%s bytes=%s.",
+            model,
+            request_payload["size"],
+            source_type,
+            len(image_bytes),
+        )
 
         return GeneratedImageResult(
             image_bytes=image_bytes,
@@ -104,7 +114,7 @@ class UpstreamImageClient:
                 "created": created,
                 "model": model,
                 "aspect_ratio": aspect_ratio,
-                "size": payload["size"],
+                "size": request_payload["size"],
             },
         )
 
