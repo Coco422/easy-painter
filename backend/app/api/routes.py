@@ -73,7 +73,12 @@ def create_job(
             detail="当前 IP 请求过于频繁，请 1 分钟后再试。",
         )
 
-    job = GenerationJob(prompt=prompt, model=payload.model, status=JobStatus.QUEUED)
+    job = GenerationJob(
+        prompt=prompt,
+        model=payload.model,
+        aspect_ratio=payload.aspect_ratio,
+        status=JobStatus.QUEUED,
+    )
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -107,6 +112,7 @@ def get_job(job_id: str, db: Session = Depends(get_db)) -> JobDetailResponse:
         prompt=job.prompt,
         revised_prompt=job.revised_prompt,
         model=job.model,
+        aspect_ratio=job.aspect_ratio,
         error_message=job.error_message,
         created_at=job.created_at,
         finished_at=job.finished_at,
@@ -132,6 +138,7 @@ def get_gallery(
             prompt=job.prompt,
             revised_prompt=job.revised_prompt,
             model=job.model,
+            aspect_ratio=job.aspect_ratio,
             finished_at=job.finished_at,
         )
         for job in jobs

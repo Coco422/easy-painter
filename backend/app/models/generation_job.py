@@ -33,6 +33,7 @@ class GenerationJob(Base):
     prompt: Mapped[str] = mapped_column(Text)
     revised_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(String(128))
+    aspect_ratio: Mapped[str] = mapped_column(String(16), default="auto")
     object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

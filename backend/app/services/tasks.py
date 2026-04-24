@@ -54,7 +54,11 @@ def generate_image_task(self, job_id: str) -> None:
         db.commit()
 
         try:
-            result = UpstreamImageClient().generate_image(prompt=job.prompt, model=job.model)
+            result = UpstreamImageClient().generate_image(
+                prompt=job.prompt,
+                model=job.model,
+                aspect_ratio=job.aspect_ratio,
+            )
             stored = MinioStorageService().upload_generated_image(
                 job_id=job.id,
                 image_bytes=result.image_bytes,

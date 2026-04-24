@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+ImageAspectRatio = Literal["auto", "1:1", "3:4", "9:16", "4:3", "16:9"]
 
 
 class PublicModel(BaseModel):
@@ -22,6 +26,7 @@ class PublicMetaResponse(BaseModel):
 class CreateJobRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=32000)
     model: str = Field(min_length=1, max_length=128)
+    aspect_ratio: ImageAspectRatio = "auto"
 
 
 class CreateJobResponse(BaseModel):
@@ -43,6 +48,7 @@ class JobDetailResponse(BaseModel):
     prompt: str
     revised_prompt: str | None = None
     model: str
+    aspect_ratio: str
     error_message: str | None = None
     created_at: datetime
     finished_at: datetime | None = None
@@ -54,6 +60,7 @@ class GalleryItem(BaseModel):
     prompt: str
     revised_prompt: str | None = None
     model: str
+    aspect_ratio: str
     finished_at: datetime
 
 

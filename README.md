@@ -30,43 +30,52 @@ cp .env.example .env
 
 把 `.env` 中的 `UPSTREAM_BASE_URL` 和 `UPSTREAM_API_KEY` 替换成你的私有上游配置，不要把真实值写进前端或提交到仓库。
 
-### 2. 启动基础服务
+### 2. 准备本地工具
 
 ```bash
-docker compose up -d postgres redis minio minio-init
+uv --version
+node --version
+docker --version
 ```
 
-### 3. 启动后端
+需要本机具备：
+
+- Python 3.12
+- `uv`
+- Node.js / npm
+- Docker / Docker Compose
+
+### 3. 启动依赖服务和 Celery
 
 ```bash
-cd backend
-uv sync
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+make deps
 ```
 
-### 4. 启动 Celery Worker
+这个命令会以前台方式启动 `postgres`、`redis`、`minio`、`minio-init`、`worker`，便于调试日志；退出命令时会自动把这些容器关掉。
+
+### 4. 启动后端 API
 
 ```bash
-cd backend
-uv run celery -A app.worker.celery_app worker --loglevel=INFO
+make backend
 ```
 
 ### 5. 启动前端
 
 ```bash
-cd frontend
-npm install
-npm run dev
+make frontend
 ```
 
-开发环境下前端会把 `/api` 转发到 `http://127.0.0.1:8000`，把 `/media` 转发到 `http://127.0.0.1:8080`。
+开发环境下：
+
+- 前端会把 `/api` 转发到 `http://127.0.0.1:8000`
+- `/media` 仍然走 `http://127.0.0.1:8080`
+- `make backend` 会自动把数据库、Redis、MinIO 连接改成本机端口，配合 `make deps` 启动的容器使用
 
 ## 一键部署
 
 ```bash
 cp .env.example .env
-docker compose build
-docker compose up -d
+make deploy
 ```
 
 部署完成后：

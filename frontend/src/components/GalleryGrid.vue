@@ -13,11 +13,7 @@ const emit = defineEmits<{
 <template>
   <section class="gallery-section" id="gallery">
     <div class="section-heading">
-      <div>
-        <p class="section-label">最近完成的画图任务</p>
-        <h2>灵感画廊</h2>
-      </div>
-      <p class="section-caption">点击作品卡片查看完整提示词与修订提示词</p>
+      <h2>最近作品</h2>
     </div>
 
     <div class="gallery-grid">
@@ -29,10 +25,6 @@ const emit = defineEmits<{
         @click="emit('select', item)"
       >
         <img :src="item.image_url" :alt="item.prompt" loading="lazy" />
-        <div class="gallery-overlay">
-          <p>{{ item.prompt }}</p>
-          <span>{{ item.model }}</span>
-        </div>
       </button>
     </div>
   </section>

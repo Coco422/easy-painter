@@ -27,7 +27,7 @@ class UpstreamImageClient:
     def __init__(self) -> None:
         self.settings = get_settings()
 
-    def generate_image(self, prompt: str, model: str) -> GeneratedImageResult:
+    def generate_image(self, prompt: str, model: str, aspect_ratio: str = "auto") -> GeneratedImageResult:
         if not self.settings.upstream_base_url or not self.settings.upstream_api_key:
             raise UpstreamServiceError("生成服务尚未配置完成。", retryable=False)
 
@@ -35,7 +35,7 @@ class UpstreamImageClient:
             "model": model,
             "prompt": prompt,
             "n": 1,
-            "size": self.settings.upstream_default_size,
+            "size": self._size_for_aspect_ratio(aspect_ratio),
             "quality": self.settings.upstream_default_quality,
             "output_format": self.settings.upstream_default_output_format,
             "output_compression": self.settings.upstream_default_output_compression,
@@ -84,8 +84,26 @@ class UpstreamImageClient:
             image_bytes=image_bytes,
             content_type=content_type,
             revised_prompt=revised_prompt,
-            provider_meta={"created": created, "model": model},
+            provider_meta={
+                "created": created,
+                "model": model,
+                "aspect_ratio": aspect_ratio,
+                "size": payload["size"],
+            },
         )
+
+    def _size_for_aspect_ratio(self, aspect_ratio: str) -> str:
+        if aspect_ratio == "auto":
+            return "auto"
+
+        sizes = {
+            "1:1": "1024x1024",
+            "3:4": "1024x1536",
+            "9:16": "1024x1792",
+            "4:3": "1536x1024",
+            "16:9": "1792x1024",
+        }
+        return sizes.get(aspect_ratio, self.settings.upstream_default_size)
 
     def _download_image(self, image_url: str) -> tuple[bytes, str]:
         try:

@@ -5,9 +5,7 @@ import AppHeader from '@/components/AppHeader.vue'
 import CurrentJobCard from '@/components/CurrentJobCard.vue'
 import GalleryGrid from '@/components/GalleryGrid.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
-import HeroSection from '@/components/HeroSection.vue'
 import PromptModal from '@/components/PromptModal.vue'
-import SiteFooter from '@/components/SiteFooter.vue'
 import { usePollingJob } from '@/composables/usePollingJob'
 import { createJob, fetchGallery, fetchPublicMeta } from '@/lib/api'
 import type { GalleryItem, PublicMetaResponse } from '@/lib/types'
@@ -17,6 +15,7 @@ const gallery = ref<GalleryItem[]>([])
 const selectedItem = ref<GalleryItem | null>(null)
 const prompt = ref('')
 const selectedModel = ref('')
+const selectedAspectRatio = ref<'auto' | '1:1' | '3:4' | '9:16' | '4:3' | '16:9'>('auto')
 const loading = ref(true)
 const submitting = ref(false)
 const feedback = ref('')
@@ -66,6 +65,7 @@ async function submitPrompt() {
     const result = await createJob({
       prompt: prompt.value.trim(),
       model: selectedModel.value,
+      aspect_ratio: selectedAspectRatio.value,
     })
     feedback.value =
       result.rate_limit_remaining > 0
@@ -79,10 +79,6 @@ async function submitPrompt() {
   }
 }
 
-function pickExample(example: string) {
-  prompt.value = example
-}
-
 onMounted(() => {
   void bootstrap()
 })
@@ -90,26 +86,23 @@ onMounted(() => {
 
 <template>
   <div class="page-shell">
-    <div class="background-orb background-orb-left" />
-    <div class="background-orb background-orb-right" />
-
-    <AppHeader :site-name="meta?.site_name ?? '公益绘画站'" />
+    <AppHeader :site-name="meta?.site_name ?? '安落滢绘画站'" />
 
     <main class="page-content">
-      <HeroSection>
+      <section class="create-section">
         <GeneratePanel
           :prompt="prompt"
           :selected-model="selectedModel"
+          :selected-aspect-ratio="selectedAspectRatio"
           :models="availableModels"
-          :example-prompts="meta?.example_prompts ?? []"
           :max-length="meta?.prompt_max_length ?? 500"
           :submitting="submitting"
           @update:prompt="prompt = $event"
           @update:model="selectedModel = $event"
-          @pick-example="pickExample"
+          @update:aspect-ratio="selectedAspectRatio = $event"
           @submit="submitPrompt"
         />
-      </HeroSection>
+      </section>
 
       <p v-if="feedback" class="feedback-banner">{{ feedback }}</p>
 
@@ -117,8 +110,6 @@ onMounted(() => {
 
       <div v-if="loading" class="loading-state">正在加载首页内容…</div>
       <GalleryGrid v-else :items="gallery" @select="selectedItem = $event" />
-
-      <SiteFooter />
     </main>
 
     <PromptModal :item="selectedItem" @close="selectedItem = null" />

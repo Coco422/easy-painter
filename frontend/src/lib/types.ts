@@ -17,6 +17,7 @@ export interface PublicMetaResponse {
 export interface CreateJobRequest {
   prompt: string
   model: string
+  aspect_ratio: ImageAspectRatio
 }
 
 export interface CreateJobResponse {
@@ -33,6 +34,7 @@ export interface JobDetailResponse {
   prompt: string
   revised_prompt: string | null
   model: string
+  aspect_ratio: ImageAspectRatio
   error_message: string | null
   created_at: string
   finished_at: string | null
@@ -44,5 +46,8 @@ export interface GalleryItem {
   prompt: string
   revised_prompt: string | null
   model: string
+  aspect_ratio: ImageAspectRatio
   finished_at: string
 }
+
+export type ImageAspectRatio = 'auto' | '1:1' | '3:4' | '9:16' | '4:3' | '16:9'

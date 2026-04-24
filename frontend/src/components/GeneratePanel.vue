@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import type { PublicModel } from '@/lib/types'
+import type { ImageAspectRatio, PublicModel } from '@/lib/types'
 
 const props = defineProps<{
   prompt: string
   selectedModel: string
+  selectedAspectRatio: ImageAspectRatio
   models: PublicModel[]
-  examplePrompts: string[]
   maxLength: number
   submitting: boolean
 }>()
@@ -15,11 +15,19 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:prompt': [value: string]
   'update:model': [value: string]
+  'update:aspect-ratio': [value: ImageAspectRatio]
   submit: []
-  pickExample: [value: string]
 }>()
 
 const promptLength = computed(() => props.prompt.length)
+const aspectRatios: Array<{ value: ImageAspectRatio; label: string }> = [
+  { value: 'auto', label: '自动' },
+  { value: '1:1', label: '方形 1:1' },
+  { value: '3:4', label: '竖版 3:4' },
+  { value: '9:16', label: '故事 9:16' },
+  { value: '4:3', label: '横屏 4:3' },
+  { value: '16:9', label: '宽屏 16:9' },
+]
 
 function handleSubmit() {
   emit('submit')
@@ -28,16 +36,11 @@ function handleSubmit() {
 
 <template>
   <div class="generate-panel" id="create">
-    <div class="panel-topline">
-      <span>仅支持文生图</span>
-      <span>同一 IP 每分钟最多 2 次</span>
-    </div>
-
     <textarea
       :value="prompt"
       class="prompt-textarea"
       :maxlength="maxLength"
-      placeholder="描述一幅你想看到的画面，例如：春天傍晚的湖边小镇，暖灯、薄雾和回家的小船。"
+      placeholder="请输入画面描述"
       @input="emit('update:prompt', ($event.target as HTMLTextAreaElement).value)"
     />
 
@@ -55,6 +58,19 @@ function handleSubmit() {
         </select>
       </label>
 
+      <label class="field-label">
+        <span>比例</span>
+        <select
+          :value="selectedAspectRatio"
+          class="model-select"
+          @change="emit('update:aspect-ratio', ($event.target as HTMLSelectElement).value as ImageAspectRatio)"
+        >
+          <option v-for="ratio in aspectRatios" :key="ratio.value" :value="ratio.value">
+            {{ ratio.label }}
+          </option>
+        </select>
+      </label>
+
       <button class="primary-button" :disabled="submitting" @click="handleSubmit">
         {{ submitting ? '正在提交...' : '开始创作' }}
       </button>
@@ -62,17 +78,6 @@ function handleSubmit() {
 
     <div class="panel-footer">
       <p class="char-count">{{ promptLength }} / {{ maxLength }}</p>
-      <div class="example-list">
-        <button
-          v-for="example in examplePrompts"
-          :key="example"
-          class="example-chip"
-          type="button"
-          @click="emit('pickExample', example)"
-        >
-          {{ example }}
-        </button>
-      </div>
     </div>
   </div>
 </template>
