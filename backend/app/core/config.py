@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "easy-painter-media"
+    minio_reference_bucket: str = "easy-painter-references"
     minio_secure: bool = False
 
     upstream_base_url: str = ""

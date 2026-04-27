@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import type { ImageAspectRatio, PublicModel } from '@/lib/types'
 
@@ -7,6 +7,7 @@ const props = defineProps<{
   prompt: string
   selectedModel: string
   selectedAspectRatio: ImageAspectRatio
+  referenceImage: File | null
   models: PublicModel[]
   maxLength: number
   submitting: boolean
@@ -16,6 +17,7 @@ const emit = defineEmits<{
   'update:prompt': [value: string]
   'update:model': [value: string]
   'update:aspect-ratio': [value: ImageAspectRatio]
+  'update:reference-image': [value: File | null]
   submit: []
 }>()
 
@@ -28,9 +30,36 @@ const aspectRatios: Array<{ value: ImageAspectRatio; label: string }> = [
   { value: '4:3', label: '横屏 4:3' },
   { value: '16:9', label: '宽屏 16:9' },
 ]
+const previewUrl = ref<string | null>(null)
+
+watch(
+  () => props.referenceImage,
+  (file) => {
+    if (previewUrl.value) {
+      URL.revokeObjectURL(previewUrl.value)
+      previewUrl.value = null
+    }
+    if (file) {
+      previewUrl.value = URL.createObjectURL(file)
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+  }
+})
 
 function handleSubmit() {
   emit('submit')
+}
+
+function handleReferenceImageChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  emit('update:reference-image', input.files?.[0] ?? null)
+  input.value = ''
 }
 </script>
 
@@ -43,6 +72,19 @@ function handleSubmit() {
       placeholder="请输入画面描述"
       @input="emit('update:prompt', ($event.target as HTMLTextAreaElement).value)"
     />
+
+    <div class="reference-uploader">
+      <label class="reference-upload-button">
+        <input type="file" accept="image/png,image/jpeg,image/webp" @change="handleReferenceImageChange" />
+        <span>参考图</span>
+      </label>
+
+      <div v-if="referenceImage && previewUrl" class="reference-preview">
+        <img :src="previewUrl" :alt="referenceImage.name" />
+        <span>{{ referenceImage.name }}</span>
+        <button type="button" @click="emit('update:reference-image', null)">清除</button>
+      </div>
+    </div>
 
     <div class="panel-actions">
       <label class="field-label">

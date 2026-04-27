@@ -18,6 +18,7 @@ export interface CreateJobRequest {
   prompt: string
   model: string
   aspect_ratio: ImageAspectRatio
+  reference_image?: File | null
 }
 
 export interface CreateJobResponse {

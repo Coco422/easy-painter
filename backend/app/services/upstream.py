@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import logging
 from dataclasses import dataclass
+from io import BytesIO
 
 import httpx
 
@@ -27,11 +28,24 @@ class GeneratedImageResult:
     provider_meta: dict[str, int | str | None]
 
 
+@dataclass(slots=True)
+class ReferenceImageForUpstream:
+    filename: str
+    content_type: str
+    image_bytes: bytes
+
+
 class UpstreamImageClient:
     def __init__(self) -> None:
         self.settings = get_settings()
 
-    def generate_image(self, prompt: str, model: str, aspect_ratio: str = "auto") -> GeneratedImageResult:
+    def generate_image(
+        self,
+        prompt: str,
+        model: str,
+        aspect_ratio: str = "auto",
+        reference_image: ReferenceImageForUpstream | None = None,
+    ) -> GeneratedImageResult:
         if not self.settings.upstream_base_url or not self.settings.upstream_api_key:
             raise UpstreamServiceError("生成服务尚未配置完成。", retryable=False)
 
@@ -53,10 +67,24 @@ class UpstreamImageClient:
             "Content-Type": "application/json",
         }
         endpoint = f"{self.settings.upstream_base_url.rstrip('/')}/images/generations"
+        request_kwargs = {"json": request_payload, "headers": headers}
+        if reference_image:
+            endpoint = f"{self.settings.upstream_base_url.rstrip('/')}/images/edits"
+            request_kwargs = {
+                "data": {key: self._form_value(value) for key, value in request_payload.items()},
+                "headers": {"Authorization": headers["Authorization"]},
+                "files": {
+                    "image": (
+                        reference_image.filename,
+                        BytesIO(reference_image.image_bytes),
+                        reference_image.content_type,
+                    )
+                },
+            }
 
         try:
             with httpx.Client(timeout=self.settings.upstream_timeout_seconds) as client:
-                response = client.post(endpoint, json=request_payload, headers=headers)
+                response = client.post(endpoint, **request_kwargs)
         except httpx.TimeoutException as exc:
             raise UpstreamServiceError("生成服务响应超时，请稍后再试。", retryable=True) from exc
         except httpx.HTTPError as exc:
@@ -130,6 +158,12 @@ class UpstreamImageClient:
             "16:9": "1792x1024",
         }
         return sizes.get(aspect_ratio, self.settings.upstream_default_size)
+
+    @staticmethod
+    def _form_value(value: object) -> str:
+        if isinstance(value, bool):
+            return str(value).lower()
+        return str(value)
 
     def _download_image(self, image_url: str) -> tuple[bytes, str]:
         try:

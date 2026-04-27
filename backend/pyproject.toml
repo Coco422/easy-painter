@@ -12,6 +12,7 @@ dependencies = [
     "orjson>=3.10.16",
     "psycopg[binary]>=3.2.6",
     "pydantic-settings>=2.8.1",
+    "python-multipart>=0.0.20",
     "redis>=5.2.1",
     "sqlalchemy>=2.0.40",
     "uvicorn[standard]>=0.34.2",

@@ -16,6 +16,7 @@ const selectedItem = ref<GalleryItem | null>(null)
 const prompt = ref('')
 const selectedModel = ref('')
 const selectedAspectRatio = ref<'auto' | '1:1' | '3:4' | '9:16' | '4:3' | '16:9'>('auto')
+const selectedReferenceImage = ref<File | null>(null)
 const loading = ref(true)
 const submitting = ref(false)
 const feedback = ref('')
@@ -66,6 +67,7 @@ async function submitPrompt() {
       prompt: prompt.value.trim(),
       model: selectedModel.value,
       aspect_ratio: selectedAspectRatio.value,
+      reference_image: selectedReferenceImage.value,
     })
     feedback.value =
       result.rate_limit_remaining > 0
@@ -94,12 +96,14 @@ onMounted(() => {
           :prompt="prompt"
           :selected-model="selectedModel"
           :selected-aspect-ratio="selectedAspectRatio"
+          :reference-image="selectedReferenceImage"
           :models="availableModels"
           :max-length="meta?.prompt_max_length ?? 500"
           :submitting="submitting"
           @update:prompt="prompt = $event"
           @update:model="selectedModel = $event"
           @update:aspect-ratio="selectedAspectRatio = $event"
+          @update:reference-image="selectedReferenceImage = $event"
           @submit="submitPrompt"
         />
       </section>

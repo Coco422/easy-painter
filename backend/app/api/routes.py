@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import ValidationError
 from redis import Redis
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
@@ -20,12 +23,20 @@ from app.schemas.job import (
     PublicMetaResponse,
 )
 from app.services.rate_limit import GenerationRateLimiter
+from app.services.reference_images import ReferenceImagePayload, ReferenceImageValidationError, validate_reference_image
 from app.services.redis_client import get_redis
+from app.services.storage import MinioStorageService, StorageError
 from app.services.tasks import generate_image_task
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@dataclass(slots=True)
+class ParsedCreateJobPayload:
+    request: CreateJobRequest
+    reference_image: ReferenceImagePayload | None = None
 
 
 @router.get("/meta/public", response_model=PublicMetaResponse)
@@ -40,13 +51,14 @@ def get_public_meta(settings: Settings = Depends(get_settings)) -> PublicMetaRes
 
 
 @router.post("/jobs", response_model=CreateJobResponse, status_code=status.HTTP_202_ACCEPTED)
-def create_job(
-    payload: CreateJobRequest,
+async def create_job(
     request: Request,
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
 ) -> CreateJobResponse:
+    parsed_payload = await _parse_create_job_payload(request)
+    payload = parsed_payload.request
     prompt = payload.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="提示词不能为空。")
@@ -80,8 +92,32 @@ def create_job(
         status=JobStatus.QUEUED,
     )
     db.add(job)
-    db.commit()
-    db.refresh(job)
+    try:
+        db.flush()
+        if parsed_payload.reference_image:
+            try:
+                object_key = MinioStorageService().upload_reference_image(
+                    job_id=job.id,
+                    image_bytes=parsed_payload.reference_image.image_bytes,
+                    content_type=parsed_payload.reference_image.content_type,
+                    filename=parsed_payload.reference_image.filename,
+                )
+            except StorageError:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="参考图保存失败，请稍后重试。",
+                ) from None
+            job.reference_image_key = object_key
+            job.reference_image_content_type = parsed_payload.reference_image.content_type
+            job.reference_image_filename = parsed_payload.reference_image.filename
+        db.commit()
+        db.refresh(job)
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
     try:
         generate_image_task.delay(job.id)
@@ -98,6 +134,41 @@ def create_job(
         poll_url=f"{settings.api_v1_prefix}/jobs/{job.id}",
         rate_limit_remaining=rate_limit_result.remaining,
     )
+
+
+async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        raw_payload = {
+            "prompt": form.get("prompt"),
+            "model": form.get("model"),
+            "aspect_ratio": form.get("aspect_ratio") or "auto",
+        }
+        try:
+            payload = CreateJobRequest.model_validate(raw_payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+
+        upload = form.get("reference_image")
+        reference_image = None
+        if isinstance(upload, StarletteUploadFile):
+            image_bytes = await upload.read()
+            try:
+                reference_image = validate_reference_image(
+                    filename=upload.filename,
+                    content_type=upload.content_type,
+                    image_bytes=image_bytes,
+                )
+            except ReferenceImageValidationError as exc:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        return ParsedCreateJobPayload(request=payload, reference_image=reference_image)
+
+    try:
+        payload = CreateJobRequest.model_validate(await request.json())
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+    return ParsedCreateJobPayload(request=payload)
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)

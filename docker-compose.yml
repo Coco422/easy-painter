@@ -84,6 +84,7 @@ services:
       echo 'MinIO is ready.';
       /usr/bin/mc mb --ignore-existing local/${MINIO_BUCKET};
       /usr/bin/mc anonymous set download local/${MINIO_BUCKET};
+      /usr/bin/mc mb --ignore-existing local/${MINIO_REFERENCE_BUCKET:-easy-painter-references};
       exit 0;
       "
     restart: "no"
