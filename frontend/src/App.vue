@@ -8,14 +8,14 @@ import GeneratePanel from '@/components/GeneratePanel.vue'
 import PromptModal from '@/components/PromptModal.vue'
 import { usePollingJob } from '@/composables/usePollingJob'
 import { createJob, fetchGallery, fetchPublicMeta } from '@/lib/api'
-import type { GalleryItem, PublicMetaResponse } from '@/lib/types'
+import type { GalleryItem, ImageSize, PublicMetaResponse } from '@/lib/types'
 
 const meta = ref<PublicMetaResponse | null>(null)
 const gallery = ref<GalleryItem[]>([])
 const selectedItem = ref<GalleryItem | null>(null)
 const prompt = ref('')
 const selectedModel = ref('')
-const selectedAspectRatio = ref<'auto' | '1:1' | '3:4' | '9:16' | '4:3' | '16:9'>('auto')
+const selectedSize = ref<ImageSize>('auto')
 const selectedReferenceImage = ref<File | null>(null)
 const loading = ref(true)
 const submitting = ref(false)
@@ -66,7 +66,7 @@ async function submitPrompt() {
     const result = await createJob({
       prompt: prompt.value.trim(),
       model: selectedModel.value,
-      aspect_ratio: selectedAspectRatio.value,
+      size: selectedSize.value,
       reference_image: selectedReferenceImage.value,
     })
     feedback.value =
@@ -95,14 +95,14 @@ onMounted(() => {
         <GeneratePanel
           :prompt="prompt"
           :selected-model="selectedModel"
-          :selected-aspect-ratio="selectedAspectRatio"
+          :selected-size="selectedSize"
           :reference-image="selectedReferenceImage"
           :models="availableModels"
           :max-length="meta?.prompt_max_length ?? 500"
           :submitting="submitting"
           @update:prompt="prompt = $event"
           @update:model="selectedModel = $event"
-          @update:aspect-ratio="selectedAspectRatio = $event"
+          @update:size="selectedSize = $event"
           @update:reference-image="selectedReferenceImage = $event"
           @submit="submitPrompt"
         />

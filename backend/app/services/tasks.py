@@ -70,6 +70,7 @@ def generate_image_task(self, job_id: str) -> None:
             result = UpstreamImageClient().generate_image(
                 prompt=job.prompt,
                 model=job.model,
+                size=job.size,
                 aspect_ratio=job.aspect_ratio,
                 reference_image=reference_image,
             )

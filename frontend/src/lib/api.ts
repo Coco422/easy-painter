@@ -42,7 +42,7 @@ export function createJob(payload: CreateJobRequest) {
     const formData = new FormData()
     formData.append('prompt', payload.prompt)
     formData.append('model', payload.model)
-    formData.append('aspect_ratio', payload.aspect_ratio)
+    formData.append('size', payload.size)
     formData.append('reference_image', payload.reference_image)
     return apiRequest<CreateJobResponse>('/api/v1/jobs', {
       method: 'POST',
@@ -55,7 +55,7 @@ export function createJob(payload: CreateJobRequest) {
     body: JSON.stringify({
       prompt: payload.prompt,
       model: payload.model,
-      aspect_ratio: payload.aspect_ratio,
+      size: payload.size,
     }),
   })
 }

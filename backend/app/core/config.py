@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     upstream_timeout_seconds: int = 180
 
     default_model: str = "gpt-image-2"
-    upstream_default_size: str = "1024x1024"
+    upstream_default_size: str = "auto"
     upstream_default_quality: str = "high"
     upstream_default_output_format: str = "jpeg"
     upstream_default_output_compression: int = 85

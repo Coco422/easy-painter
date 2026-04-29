@@ -43,7 +43,8 @@ class UpstreamImageClient:
         self,
         prompt: str,
         model: str,
-        aspect_ratio: str = "auto",
+        size: str | None = None,
+        aspect_ratio: str | None = None,
         reference_image: ReferenceImageForUpstream | None = None,
     ) -> GeneratedImageResult:
         if not self.settings.upstream_base_url or not self.settings.upstream_api_key:
@@ -53,7 +54,7 @@ class UpstreamImageClient:
             "model": model,
             "prompt": prompt,
             "n": 1,
-            "size": self._size_for_aspect_ratio(aspect_ratio),
+            "size": self._resolve_size(size=size, aspect_ratio=aspect_ratio),
             "quality": self.settings.upstream_default_quality,
             "output_format": self.settings.upstream_default_output_format,
             "output_compression": self.settings.upstream_default_output_compression,
@@ -141,14 +142,22 @@ class UpstreamImageClient:
             provider_meta={
                 "created": created,
                 "model": model,
-                "aspect_ratio": aspect_ratio,
                 "size": request_payload["size"],
             },
         )
 
+    def _resolve_size(self, *, size: str | None, aspect_ratio: str | None = None) -> str:
+        if size and size != "auto":
+            return size
+        if aspect_ratio and aspect_ratio != "auto":
+            return self._size_for_aspect_ratio(aspect_ratio)
+        if size:
+            return size
+        return self._size_for_aspect_ratio(aspect_ratio or "auto")
+
     def _size_for_aspect_ratio(self, aspect_ratio: str) -> str:
         if aspect_ratio == "auto":
-            return self.settings.upstream_default_size
+            return "auto"
 
         sizes = {
             "1:1": "1024x1024",

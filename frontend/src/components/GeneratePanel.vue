@@ -1,12 +1,13 @@
 <script setup lang="ts">
+import { FileImage, UploadCloud, X } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
-import type { ImageAspectRatio, PublicModel } from '@/lib/types'
+import type { ImageSize, PublicModel } from '@/lib/types'
 
 const props = defineProps<{
   prompt: string
   selectedModel: string
-  selectedAspectRatio: ImageAspectRatio
+  selectedSize: ImageSize
   referenceImage: File | null
   models: PublicModel[]
   maxLength: number
@@ -16,21 +17,29 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:prompt': [value: string]
   'update:model': [value: string]
-  'update:aspect-ratio': [value: ImageAspectRatio]
+  'update:size': [value: ImageSize]
   'update:reference-image': [value: File | null]
   submit: []
 }>()
 
 const promptLength = computed(() => props.prompt.length)
-const aspectRatios: Array<{ value: ImageAspectRatio; label: string }> = [
+const sizeOptions: Array<{ value: ImageSize; label: string }> = [
   { value: 'auto', label: '自动' },
-  { value: '1:1', label: '方形 1:1' },
-  { value: '3:4', label: '竖版 3:4' },
-  { value: '9:16', label: '故事 9:16' },
-  { value: '4:3', label: '横屏 4:3' },
-  { value: '16:9', label: '宽屏 16:9' },
+  { value: '1024x1024', label: '1024 x 1024 方图' },
+  { value: '1536x1024', label: '1536 x 1024 横图' },
+  { value: '1024x1536', label: '1024 x 1536 竖图' },
+  { value: '2048x2048', label: '2048 x 2048 2K 方图' },
+  { value: '2048x1152', label: '2048 x 1152 2K 横图' },
+  { value: '1152x2048', label: '1152 x 2048 2K 竖图' },
+  { value: '3840x2160', label: '3840 x 2160 4K 横图' },
+  { value: '2160x3840', label: '2160 x 3840 4K 竖图' },
 ]
 const previewUrl = ref<string | null>(null)
+const referenceMeta = computed(() => {
+  if (!props.referenceImage) return ''
+  const sizeInMb = props.referenceImage.size / 1024 / 1024
+  return sizeInMb >= 1 ? `${sizeInMb.toFixed(1)} MB` : `${Math.max(1, Math.round(props.referenceImage.size / 1024))} KB`
+})
 
 watch(
   () => props.referenceImage,
@@ -61,28 +70,52 @@ function handleReferenceImageChange(event: Event) {
   emit('update:reference-image', input.files?.[0] ?? null)
   input.value = ''
 }
+
+function clearReferenceImage() {
+  emit('update:reference-image', null)
+}
 </script>
 
 <template>
   <div class="generate-panel" id="create">
-    <textarea
-      :value="prompt"
-      class="prompt-textarea"
-      :maxlength="maxLength"
-      placeholder="请输入画面描述"
-      @input="emit('update:prompt', ($event.target as HTMLTextAreaElement).value)"
-    />
+    <div class="prompt-stack">
+      <div class="panel-topline">
+        <span class="section-label">创作提示</span>
+        <p class="char-count">{{ promptLength }} / {{ maxLength }}</p>
+      </div>
+      <textarea
+        :value="prompt"
+        class="prompt-textarea"
+        :maxlength="maxLength"
+        placeholder="请输入画面描述"
+        @input="emit('update:prompt', ($event.target as HTMLTextAreaElement).value)"
+      />
+    </div>
 
     <div class="reference-uploader">
-      <label class="reference-upload-button">
+      <label class="reference-upload-dropzone">
         <input type="file" accept="image/png,image/jpeg,image/webp" @change="handleReferenceImageChange" />
-        <span>参考图</span>
+        <span class="upload-logo" aria-hidden="true">
+          <UploadCloud :size="24" />
+        </span>
+        <span class="upload-copy">
+          <strong>上传参考图</strong>
+          <small>PNG / JPG / WebP</small>
+        </span>
       </label>
 
       <div v-if="referenceImage && previewUrl" class="reference-preview">
         <img :src="previewUrl" :alt="referenceImage.name" />
-        <span>{{ referenceImage.name }}</span>
-        <button type="button" @click="emit('update:reference-image', null)">清除</button>
+        <span class="reference-file">
+          <FileImage :size="16" />
+          <span>
+            <strong>{{ referenceImage.name }}</strong>
+            <small>{{ referenceMeta }}</small>
+          </span>
+        </span>
+        <button type="button" title="清除参考图" aria-label="清除参考图" @click="clearReferenceImage">
+          <X :size="18" />
+        </button>
       </div>
     </div>
 
@@ -101,14 +134,14 @@ function handleReferenceImageChange(event: Event) {
       </label>
 
       <label class="field-label">
-        <span>比例</span>
+        <span>尺寸</span>
         <select
-          :value="selectedAspectRatio"
+          :value="selectedSize"
           class="model-select"
-          @change="emit('update:aspect-ratio', ($event.target as HTMLSelectElement).value as ImageAspectRatio)"
+          @change="emit('update:size', ($event.target as HTMLSelectElement).value as ImageSize)"
         >
-          <option v-for="ratio in aspectRatios" :key="ratio.value" :value="ratio.value">
-            {{ ratio.label }}
+          <option v-for="option in sizeOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
           </option>
         </select>
       </label>
@@ -116,10 +149,6 @@ function handleReferenceImageChange(event: Event) {
       <button class="primary-button" :disabled="submitting" @click="handleSubmit">
         {{ submitting ? '正在提交...' : '开始创作' }}
       </button>
-    </div>
-
-    <div class="panel-footer">
-      <p class="char-count">{{ promptLength }} / {{ maxLength }}</p>
     </div>
   </div>
 </template>

@@ -33,6 +33,7 @@ class GenerationJob(Base):
     prompt: Mapped[str] = mapped_column(Text)
     revised_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(String(128))
+    size: Mapped[str] = mapped_column(String(32), default="auto")
     aspect_ratio: Mapped[str] = mapped_column(String(16), default="auto")
     reference_image_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     reference_image_content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)

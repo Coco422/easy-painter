@@ -25,14 +25,14 @@ def make_request(*, content_type: str, body: bytes) -> Request:
 async def test_parse_json_create_job_payload():
     request = make_request(
         content_type="application/json",
-        body=b'{"prompt":"hello","model":"gpt-image-2-c","aspect_ratio":"1:1"}',
+        body=b'{"prompt":"hello","model":"gpt-image-2-c","size":"3840x2160"}',
     )
 
     payload = await _parse_create_job_payload(request)
 
     assert payload.request.prompt == "hello"
     assert payload.request.model == "gpt-image-2-c"
-    assert payload.request.aspect_ratio == "1:1"
+    assert payload.request.size == "3840x2160"
     assert payload.reference_image is None
 
 
@@ -47,8 +47,8 @@ async def test_parse_multipart_create_job_payload_with_reference_image():
         'Content-Disposition: form-data; name="model"\r\n\r\n'
         "gpt-image-2-c\r\n"
         f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="aspect_ratio"\r\n\r\n'
-        "1:1\r\n"
+        'Content-Disposition: form-data; name="size"\r\n\r\n'
+        "2160x3840\r\n"
         f"--{boundary}\r\n"
         'Content-Disposition: form-data; name="reference_image"; filename="sample.png"\r\n'
         "Content-Type: image/png\r\n\r\n"
@@ -59,6 +59,7 @@ async def test_parse_multipart_create_job_payload_with_reference_image():
 
     assert payload.request.prompt == "hello"
     assert payload.request.model == "gpt-image-2-c"
+    assert payload.request.size == "2160x3840"
     assert payload.reference_image is not None
     assert payload.reference_image.filename == "sample.png"
     assert payload.reference_image.content_type == "image/png"
@@ -137,6 +138,7 @@ def test_upstream_uses_edits_endpoint_for_reference_image(monkeypatch):
     assert "files" in captured["kwargs"]
     assert captured["kwargs"]["files"]["image"][0] == "sample.png"
     assert captured["kwargs"]["data"]["prompt"] == "画一朵花"
+    assert captured["kwargs"]["data"]["size"] == "auto"
     assert captured["kwargs"]["data"]["stream"] == "false"
     assert result.content_type == "image/png"
 
@@ -175,3 +177,4 @@ def test_upstream_uses_generations_endpoint_without_reference_image(monkeypatch)
     assert captured["endpoint"].endswith("/images/generations")
     assert "json" in captured["kwargs"]
     assert "files" not in captured["kwargs"]
+    assert captured["kwargs"]["json"]["size"] == "auto"
