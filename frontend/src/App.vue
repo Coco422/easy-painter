@@ -6,7 +6,7 @@ import CurrentJobCard from '@/components/CurrentJobCard.vue'
 import GalleryGrid from '@/components/GalleryGrid.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import PromptModal from '@/components/PromptModal.vue'
-import { ApiError, createJob, fetchGallery, fetchJob, fetchPublicMeta } from '@/lib/api'
+import { createJob, fetchGallery, fetchJob, fetchPublicMeta } from '@/lib/api'
 import type {
   BatchCount,
   CreateJobResponse,
@@ -31,11 +31,9 @@ const loading = ref(true)
 const submitting = ref(false)
 const feedback = ref('')
 const pollingTimers = new Map<string, number>()
-const pollingFailures = new Map<string, number>()
 
 const pollingInterval = computed(() => meta.value?.polling_interval_ms ?? 2000)
 const availableModels = computed(() => meta.value?.models ?? [])
-const MAX_POLLING_FAILURES = 3
 
 async function loadMeta() {
   meta.value = await fetchPublicMeta()
@@ -112,7 +110,6 @@ function clearJobTimer(jobId: string) {
 
 function removeActiveJob(jobId: string) {
   clearJobTimer(jobId)
-  pollingFailures.delete(jobId)
   uncacheJob(jobId)
   activeJobs.value = activeJobs.value.filter((item) => item.job_id !== jobId)
 }
@@ -133,26 +130,8 @@ function makeQueuedJob(result: CreateJobResponse, promptText: string, model: str
   }
 }
 
-function markJobFailedLocally(jobId: string, message: string) {
-  clearJobTimer(jobId)
-  pollingFailures.delete(jobId)
-  uncacheJob(jobId)
-
-  const existingJob = activeJobs.value.find((item) => item.job_id === jobId)
-  if (!existingJob) return
-
-  upsertActiveJob({
-    ...existingJob,
-    status: 'failed',
-    error_message: message,
-    finished_at: existingJob.finished_at ?? new Date().toISOString(),
-  })
-  feedback.value = message
-}
-
 async function handleSettledJob(job: JobDetailResponse) {
   clearJobTimer(job.job_id)
-  pollingFailures.delete(job.job_id)
   uncacheJob(job.job_id)
 
   if (job.status === 'succeeded') {
@@ -178,20 +157,8 @@ function pollJob(jobId: string) {
       }
       upsertActiveJob(job)
       cacheJob(job.job_id)
-      pollingFailures.delete(job.job_id)
-    } catch (error) {
-      const failures = (pollingFailures.get(jobId) ?? 0) + 1
-      pollingFailures.set(jobId, failures)
-
-      if (error instanceof ApiError && error.status === 404) {
-        markJobFailedLocally(jobId, '任务不存在或已失效，请重新生成。')
-        return
-      }
-      if (failures >= MAX_POLLING_FAILURES) {
-        markJobFailedLocally(jobId, '连续获取任务状态失败，请重试或结束。')
-        return
-      }
-      feedback.value = '任务状态暂时获取失败，正在重试同步。'
+    } catch {
+      feedback.value = '任务状态暂时获取失败，正在继续同步。'
     }
 
     pollingTimers.set(jobId, window.setTimeout(run, pollingInterval.value))
