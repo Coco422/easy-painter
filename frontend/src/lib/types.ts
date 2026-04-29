@@ -64,3 +64,5 @@ export type ImageSize =
   | '1152x2048'
   | '3840x2160'
   | '2160x3840'
+
+export type BatchCount = 1 | 2 | 4

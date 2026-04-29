@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     prompt_max_length: int = 500
     gallery_limit: int = 24
-    generate_rate_limit_count: int = 2
+    generate_rate_limit_count: int = 12
     generate_rate_limit_window_seconds: int = 60
     polling_interval_ms: int = 2000
 

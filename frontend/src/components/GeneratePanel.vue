@@ -2,12 +2,13 @@
 import { FileImage, UploadCloud, X } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
-import type { ImageSize, PublicModel } from '@/lib/types'
+import type { BatchCount, ImageSize, PublicModel } from '@/lib/types'
 
 const props = defineProps<{
   prompt: string
   selectedModel: string
   selectedSize: ImageSize
+  selectedBatchCount: BatchCount
   referenceImage: File | null
   models: PublicModel[]
   maxLength: number
@@ -18,6 +19,7 @@ const emit = defineEmits<{
   'update:prompt': [value: string]
   'update:model': [value: string]
   'update:size': [value: ImageSize]
+  'update:batch-count': [value: BatchCount]
   'update:reference-image': [value: File | null]
   submit: []
 }>()
@@ -34,6 +36,7 @@ const sizeOptions: Array<{ value: ImageSize; label: string }> = [
   { value: '3840x2160', label: '3840 x 2160 4K 横图' },
   { value: '2160x3840', label: '2160 x 3840 4K 竖图' },
 ]
+const batchOptions: BatchCount[] = [1, 2, 4]
 const previewUrl = ref<string | null>(null)
 const referenceMeta = computed(() => {
   if (!props.referenceImage) return ''
@@ -144,6 +147,22 @@ function clearReferenceImage() {
             {{ option.label }}
           </option>
         </select>
+      </label>
+
+      <label class="field-label">
+        <span>数量</span>
+        <span class="batch-segmented" role="group" aria-label="生成数量">
+          <button
+            v-for="count in batchOptions"
+            :key="count"
+            type="button"
+            :class="{ active: selectedBatchCount === count }"
+            :aria-pressed="selectedBatchCount === count"
+            @click="emit('update:batch-count', count)"
+          >
+            {{ count }} 张
+          </button>
+        </span>
       </label>
 
       <button class="primary-button" :disabled="submitting" @click="handleSubmit">

@@ -6,6 +6,16 @@ import type {
   PublicMetaResponse,
 } from './types'
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   if (!(init?.body instanceof FormData)) {
@@ -27,7 +37,7 @@ async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
     } catch {
       // Keep the generic message.
     }
-    throw new Error(message)
+    throw new ApiError(message, response.status)
   }
 
   return (await response.json()) as T
