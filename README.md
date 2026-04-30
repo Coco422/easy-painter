@@ -29,6 +29,8 @@ cp .env.example .env
 ```
 
 把 `.env` 中的 `UPSTREAM_BASE_URL` 和 `UPSTREAM_API_KEY` 替换成你的私有上游配置，不要把真实值写进前端或提交到仓库。
+模型下拉列表、参考图能力和尺寸限制由 `PUBLIC_MODELS_JSON` 控制；如果生产环境要开放新模型，需要同步更新服务器上的 `.env`。
+部分绘图模型生成时间可能达到 30 到 600 秒，生产环境的 `UPSTREAM_TIMEOUT_SECONDS` 应保持在 700 左右。
 
 ### 2. 准备本地工具
 

@@ -50,19 +50,7 @@ class UpstreamImageClient:
         if not self.settings.upstream_base_url or not self.settings.upstream_api_key:
             raise UpstreamServiceError("生成服务尚未配置完成。", retryable=False)
 
-        request_payload = {
-            "model": model,
-            "prompt": prompt,
-            "n": 1,
-            "size": self._resolve_size(size=size, aspect_ratio=aspect_ratio),
-            "quality": self.settings.upstream_default_quality,
-            "output_format": self.settings.upstream_default_output_format,
-            "output_compression": self.settings.upstream_default_output_compression,
-            "background": self.settings.upstream_default_background,
-            "moderation": self.settings.upstream_default_moderation,
-            "stream": False,
-            "partial_images": 0,
-        }
+        request_payload = self._generation_payload(prompt=prompt, model=model, size=size, aspect_ratio=aspect_ratio)
         headers = {
             "Authorization": f"Bearer {self.settings.upstream_api_key}",
             "Content-Type": "application/json",
@@ -72,7 +60,10 @@ class UpstreamImageClient:
         if reference_image:
             endpoint = f"{self.settings.upstream_base_url.rstrip('/')}/images/edits"
             request_kwargs = {
-                "data": {key: self._form_value(value) for key, value in request_payload.items()},
+                "data": {
+                    key: self._form_value(value)
+                    for key, value in self._edit_payload(request_payload, model=model).items()
+                },
                 "headers": {"Authorization": headers["Authorization"]},
                 "files": {
                     "image": (
@@ -145,6 +136,46 @@ class UpstreamImageClient:
                 "size": request_payload["size"],
             },
         )
+
+    def _generation_payload(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        size: str | None,
+        aspect_ratio: str | None,
+    ) -> dict[str, int | str | bool]:
+        payload: dict[str, int | str | bool] = {
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "size": self._resolve_size(size=size, aspect_ratio=aspect_ratio),
+            "quality": self.settings.upstream_default_quality,
+            "output_format": self.settings.upstream_default_output_format,
+            "output_compression": self.settings.upstream_default_output_compression,
+            "background": self.settings.upstream_default_background,
+            "moderation": self.settings.upstream_default_moderation,
+            "stream": False,
+            "partial_images": 0,
+        }
+        if self._is_doubao_seedream(model):
+            payload["watermark"] = False
+        return payload
+
+    def _edit_payload(self, request_payload: dict[str, int | str | bool], *, model: str) -> dict[str, int | str | bool]:
+        if not self._is_doubao_seedream(model):
+            return request_payload
+
+        return {
+            "model": request_payload["model"],
+            "prompt": request_payload["prompt"],
+            "size": request_payload["size"],
+            "watermark": False,
+        }
+
+    @staticmethod
+    def _is_doubao_seedream(model: str) -> bool:
+        return model.startswith("doubao-seedream-")
 
     def _resolve_size(self, *, size: str | None, aspect_ratio: str | None = None) -> str:
         if size and size != "auto":

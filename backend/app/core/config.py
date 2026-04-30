@@ -14,6 +14,58 @@ DEFAULT_EXAMPLE_PROMPTS = [
     "雨后古城的小巷，青石路反射暖色灯光，电影感场景设计",
 ]
 
+MODEL_REFERENCE_IMAGE_SUPPORT = {
+    "gpt-image-2-b": True,
+    "gpt-image-2-c": False,
+    "grok-4.1-image": True,
+    "grok-imagine-image": True,
+    "doubao-seedream-5-0-260128": True,
+}
+
+GROK_SUPPORTED_SIZES = ["1024x1024", "1280x720", "1792x1024", "720x1280", "1024x1792"]
+MODEL_SUPPORTED_SIZES = {
+    "grok-4.1-image": GROK_SUPPORTED_SIZES,
+    "grok-imagine-image": GROK_SUPPORTED_SIZES,
+}
+
+DEFAULT_PUBLIC_MODELS = [
+    {
+        "id": "gpt-image-2-c",
+        "label": "GPT-Image-2 C（文字生成）",
+        "enabled": True,
+        "supports_reference_image": False,
+        "supported_sizes": [],
+    },
+    {
+        "id": "gpt-image-2-b",
+        "label": "GPT-Image-2 B（支持参考图）",
+        "enabled": True,
+        "supports_reference_image": True,
+        "supported_sizes": [],
+    },
+    {
+        "id": "grok-4.1-image",
+        "label": "Grok 4.1 Image",
+        "enabled": True,
+        "supports_reference_image": True,
+        "supported_sizes": GROK_SUPPORTED_SIZES,
+    },
+    {
+        "id": "grok-imagine-image",
+        "label": "Grok Imagine",
+        "enabled": True,
+        "supports_reference_image": True,
+        "supported_sizes": GROK_SUPPORTED_SIZES,
+    },
+    {
+        "id": "doubao-seedream-5-0-260128",
+        "label": "豆包 Seedream 5.0",
+        "enabled": True,
+        "supports_reference_image": True,
+        "supported_sizes": [],
+    },
+]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -42,7 +94,7 @@ class Settings(BaseSettings):
 
     upstream_base_url: str = ""
     upstream_api_key: str = ""
-    upstream_timeout_seconds: int = 180
+    upstream_timeout_seconds: int = 700
 
     default_model: str = "gpt-image-2"
     upstream_default_size: str = "auto"
@@ -63,7 +115,7 @@ class Settings(BaseSettings):
     allowed_origins_json: str | None = None
 
     @property
-    def public_models(self) -> list[dict[str, str | bool]]:
+    def public_models(self) -> list[dict[str, str | bool | list[str]]]:
         if self.public_models_json:
             data = json.loads(self.public_models_json)
             return [
@@ -71,10 +123,20 @@ class Settings(BaseSettings):
                     "id": item["id"],
                     "label": item.get("label", item["id"]),
                     "enabled": bool(item.get("enabled", True)),
+                    "supports_reference_image": bool(
+                        item.get(
+                            "supports_reference_image",
+                            MODEL_REFERENCE_IMAGE_SUPPORT.get(item["id"], True),
+                        )
+                    ),
+                    "supported_sizes": [
+                        str(size)
+                        for size in item.get("supported_sizes", MODEL_SUPPORTED_SIZES.get(item["id"], []))
+                    ],
                 }
                 for item in data
             ]
-        return [{"id": self.default_model, "label": "GPT-Image-2", "enabled": True}]
+        return DEFAULT_PUBLIC_MODELS
 
     @property
     def example_prompts(self) -> list[str]:

@@ -23,6 +23,8 @@ class PublicModel(BaseModel):
     id: str
     label: str
     enabled: bool = True
+    supports_reference_image: bool = True
+    supported_sizes: list[str] = Field(default_factory=list)
 
 
 class PublicMetaResponse(BaseModel):

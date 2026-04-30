@@ -28,6 +28,10 @@ const promptLength = computed(() => props.prompt.length)
 const sizeOptions: Array<{ value: ImageSize; label: string }> = [
   { value: 'auto', label: '自动' },
   { value: '1024x1024', label: '1024 x 1024 方图' },
+  { value: '1280x720', label: '1280 x 720 横图' },
+  { value: '720x1280', label: '720 x 1280 竖图' },
+  { value: '1792x1024', label: '1792 x 1024 横图' },
+  { value: '1024x1792', label: '1024 x 1792 竖图' },
   { value: '1536x1024', label: '1536 x 1024 横图' },
   { value: '1024x1536', label: '1024 x 1536 竖图' },
   { value: '2048x2048', label: '2048 x 2048 2K 方图' },
@@ -76,6 +80,19 @@ function handleReferenceImageChange(event: Event) {
 
 function clearReferenceImage() {
   emit('update:reference-image', null)
+}
+
+function modelSupportsCurrentInput(model: PublicModel) {
+  return model.enabled && (!props.referenceImage || model.supports_reference_image !== false)
+}
+
+function selectedModelConfig() {
+  return props.models.find((model) => model.id === props.selectedModel)
+}
+
+function sizeSupportedBySelectedModel(size: ImageSize) {
+  const model = selectedModelConfig()
+  return !model?.supported_sizes.length || model.supported_sizes.includes(size)
 }
 </script>
 
@@ -130,8 +147,8 @@ function clearReferenceImage() {
           class="model-select"
           @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
         >
-          <option v-for="model in models" :key="model.id" :value="model.id" :disabled="!model.enabled">
-            {{ model.label }}
+          <option v-for="model in models" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
+            {{ model.label }}{{ referenceImage && model.supports_reference_image === false ? '（不支持参考图）' : '' }}
           </option>
         </select>
       </label>
@@ -143,8 +160,13 @@ function clearReferenceImage() {
           class="model-select"
           @change="emit('update:size', ($event.target as HTMLSelectElement).value as ImageSize)"
         >
-          <option v-for="option in sizeOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
+          <option
+            v-for="option in sizeOptions"
+            :key="option.value"
+            :value="option.value"
+            :disabled="!sizeSupportedBySelectedModel(option.value)"
+          >
+            {{ option.label }}{{ !sizeSupportedBySelectedModel(option.value) ? '（当前模型不支持）' : '' }}
           </option>
         </select>
       </label>

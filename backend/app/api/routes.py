@@ -68,9 +68,21 @@ async def create_job(
             detail=f"提示词不能超过 {settings.prompt_max_length} 个字符。",
         )
 
-    enabled_models = {item["id"] for item in settings.public_models if item["enabled"]}
-    if payload.model not in enabled_models:
+    enabled_models = {item["id"]: item for item in settings.public_models if item["enabled"]}
+    model_config = enabled_models.get(payload.model)
+    if not model_config:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前模型不可用。")
+    if parsed_payload.reference_image and not model_config.get("supports_reference_image", True):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="当前模型不支持参考图，请切换到支持参考图的模型。",
+        )
+    supported_sizes = model_config.get("supported_sizes", [])
+    if isinstance(supported_sizes, list) and supported_sizes and payload.size not in supported_sizes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="当前模型不支持该尺寸，请切换尺寸或模型。",
+        )
 
     limiter = GenerationRateLimiter(
         redis_client=redis_client,

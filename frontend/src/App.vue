@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import AppHeader from '@/components/AppHeader.vue'
 import CurrentJobCard from '@/components/CurrentJobCard.vue'
@@ -13,6 +13,7 @@ import type {
   GalleryItem,
   ImageSize,
   JobDetailResponse,
+  PublicModel,
   PublicMetaResponse,
 } from '@/lib/types'
 
@@ -59,6 +60,28 @@ async function bootstrap() {
 
 function isLiveJob(job: JobDetailResponse) {
   return job.status === 'queued' || job.status === 'processing'
+}
+
+function supportsCurrentReferenceInput(model: PublicModel | undefined) {
+  return Boolean(model?.enabled) && (!selectedReferenceImage.value || model?.supports_reference_image !== false)
+}
+
+function supportsCurrentSize(model: PublicModel | undefined, size: ImageSize) {
+  return Boolean(model) && (!model.supported_sizes.length || model.supported_sizes.includes(size))
+}
+
+function ensureSelectableModel() {
+  const currentModel = availableModels.value.find((item) => item.id === selectedModel.value)
+  if (supportsCurrentReferenceInput(currentModel)) return
+
+  selectedModel.value = availableModels.value.find((item) => supportsCurrentReferenceInput(item))?.id ?? ''
+}
+
+function ensureSelectableSize() {
+  const currentModel = availableModels.value.find((item) => item.id === selectedModel.value)
+  if (!currentModel || supportsCurrentSize(currentModel, selectedSize.value)) return
+
+  selectedSize.value = (currentModel.supported_sizes[0] as ImageSize | undefined) ?? 'auto'
 }
 
 function readCachedJobIds() {
@@ -285,6 +308,9 @@ onBeforeUnmount(() => {
   pollingTimers.forEach((timer) => window.clearTimeout(timer))
   pollingTimers.clear()
 })
+
+watch([availableModels, selectedReferenceImage], ensureSelectableModel)
+watch([availableModels, selectedModel, selectedSize], ensureSelectableSize)
 
 onMounted(() => {
   void bootstrap()

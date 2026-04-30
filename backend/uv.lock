@@ -252,7 +252,7 @@ wheels = [
 
 [[package]]
 name = "easy-painter-backend"
-version = "0.3.1"
+version = "0.3.2"
 source = { virtual = "." }
 dependencies = [
     { name = "celery", extra = ["redis"] },

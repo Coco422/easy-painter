@@ -4,6 +4,8 @@ export interface PublicModel {
   id: string
   label: string
   enabled: boolean
+  supports_reference_image: boolean
+  supported_sizes: string[]
 }
 
 export interface PublicMetaResponse {
@@ -57,6 +59,10 @@ export type ImageAspectRatio = 'auto' | '1:1' | '3:4' | '9:16' | '4:3' | '16:9'
 export type ImageSize =
   | 'auto'
   | '1024x1024'
+  | '1280x720'
+  | '720x1280'
+  | '1792x1024'
+  | '1024x1792'
   | '1536x1024'
   | '1024x1536'
   | '2048x2048'
