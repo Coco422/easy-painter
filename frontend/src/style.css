@@ -507,6 +507,199 @@ a {
     linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(241, 246, 255, 0.88));
 }
 
+.loading-ritual-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+  height: 100%;
+  overflow: hidden;
+  padding: 18px;
+  color: #edf7ff;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(145deg, #172033 0%, #1f2a36 52%, #163630 100%);
+  background-size:
+    22px 22px,
+    22px 22px,
+    auto;
+}
+
+.loading-ritual-panel::before,
+.loading-ritual-panel::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+}
+
+.loading-ritual-panel::before {
+  border: 1px solid rgba(159, 229, 216, 0.22);
+  box-shadow: inset 0 0 42px rgba(116, 201, 190, 0.1);
+}
+
+.loading-ritual-panel::after {
+  transform: translateX(-72%);
+  background: linear-gradient(90deg, transparent, rgba(247, 204, 114, 0.12), transparent);
+  animation: ritual-scan 5.8s ease-in-out infinite;
+}
+
+.ritual-topline,
+.ritual-stage,
+.ritual-main,
+.ritual-log-list,
+.ritual-progress-track,
+.ritual-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.ritual-topline,
+.ritual-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ritual-kicker,
+.ritual-percent,
+.ritual-footer,
+.ritual-log-list span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.ritual-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(159, 229, 216, 0.35);
+  border-radius: 999px;
+  color: #9fe5d8;
+  background: rgba(12, 24, 35, 0.48);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.ritual-percent {
+  color: #f7cc72;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.ritual-stage {
+  margin: 22px 0 8px;
+  color: #9fe5d8;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.ritual-main {
+  display: flex;
+  align-items: center;
+  min-height: 82px;
+  margin: 0;
+  color: #ffffff;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.type-caret {
+  flex: 0 0 auto;
+  width: 2px;
+  height: 1.2em;
+  margin-left: 5px;
+  background: #f7cc72;
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+.ritual-log-list {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.ritual-log-list span {
+  display: block;
+  overflow: hidden;
+  min-height: 30px;
+  padding: 7px 9px;
+  border: 1px solid rgba(179, 201, 225, 0.14);
+  border-radius: 9px;
+  color: rgba(237, 247, 255, 0.76);
+  background: rgba(8, 17, 28, 0.28);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateY(calc(var(--line-index) * 1px));
+  animation: log-float 4.2s ease-in-out infinite;
+  animation-delay: calc(var(--line-index) * -720ms);
+}
+
+.ritual-progress-track {
+  height: 9px;
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(237, 247, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(8, 17, 28, 0.54);
+}
+
+.ritual-progress-track span {
+  display: block;
+  width: 8%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #9fe5d8, #f7cc72);
+  box-shadow: 0 0 18px rgba(159, 229, 216, 0.32);
+  transition: width 700ms ease;
+}
+
+.ritual-footer {
+  margin-top: 10px;
+  color: rgba(237, 247, 255, 0.62);
+  font-size: 12px;
+}
+
+@keyframes ritual-scan {
+  0%,
+  36% {
+    transform: translateX(-72%);
+  }
+  68%,
+  100% {
+    transform: translateX(72%);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  46%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes log-float {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .gallery-section {
   margin-top: 42px;
 }
@@ -687,5 +880,26 @@ a {
 
   .gallery-grid {
     columns: 1;
+  }
+
+  .ritual-main {
+    min-height: 72px;
+    font-size: 21px;
+  }
+
+  .ritual-log-list span {
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-ritual-panel::after,
+  .type-caret,
+  .ritual-log-list span {
+    animation: none;
+  }
+
+  .ritual-progress-track span {
+    transition: none;
   }
 }
