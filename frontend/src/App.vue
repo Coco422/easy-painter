@@ -3,10 +3,12 @@ import { onMounted, ref } from 'vue'
 import AppHeader from '@/components/AppHeader.vue'
 import { fetchPublicMeta } from '@/lib/api'
 import { fetchCurrentUser, isLoggedIn } from '@/lib/auth'
+import { initTheme } from '@/lib/theme'
 
 const siteName = ref('安落滢绘画站')
 
 onMounted(async () => {
+  initTheme()
   try {
     const meta = await fetchPublicMeta()
     siteName.value = meta.site_name
