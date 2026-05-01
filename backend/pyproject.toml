@@ -5,6 +5,7 @@ description = "FastAPI backend for the Easy Painter public image generation site
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "bcrypt>=4.0.0",
     "celery[redis]>=5.4.0",
     "fastapi>=0.115.12",
     "httpx>=0.28.1",
@@ -12,6 +13,7 @@ dependencies = [
     "orjson>=3.10.16",
     "psycopg[binary]>=3.2.6",
     "pydantic-settings>=2.8.1",
+    "PyJWT>=2.8.0",
     "python-multipart>=0.0.20",
     "redis>=5.2.1",
     "sqlalchemy>=2.0.40",

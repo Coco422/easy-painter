@@ -72,3 +72,26 @@ export type ImageSize =
   | '2160x3840'
 
 export type BatchCount = 1 | 2 | 4
+
+export interface UserInfo {
+  id: string
+  username: string
+  display_name: string
+  is_public: boolean
+  created_at: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: string
+}
+
+export interface AdminJobItem {
+  job_id: string
+  status: string
+  prompt: string
+  model: string
+  username: string | null
+  created_at: string
+  finished_at: string | null
+}

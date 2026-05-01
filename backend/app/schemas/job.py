@@ -117,6 +117,7 @@ class GalleryItem(BaseModel):
     size: str
     aspect_ratio: str | None = None
     finished_at: datetime
+    username: str | None = None
 
 
 class HealthResponse(BaseModel):

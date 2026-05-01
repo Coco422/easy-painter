@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     minio_reference_bucket: str = "easy-painter-references"
     minio_secure: bool = False
 
+    jwt_secret_key: str = "change-me-jwt-secret"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 1440
+    admin_secret_key: str = ""
+    default_username: str = "admin"
+    default_password: str = ""
+
     upstream_base_url: str = ""
     upstream_api_key: str = ""
     upstream_timeout_seconds: int = 700

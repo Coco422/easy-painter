@@ -10,10 +10,12 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from app.core.auth import get_current_user_optional
 from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.user import User
 from app.schemas.job import (
     CreateJobRequest,
     CreateJobResponse,
@@ -56,6 +58,7 @@ async def create_job(
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> CreateJobResponse:
     parsed_payload = await _parse_create_job_payload(request)
     payload = parsed_payload.request
@@ -89,8 +92,8 @@ async def create_job(
         limit=settings.generate_rate_limit_count,
         window_seconds=settings.generate_rate_limit_window_seconds,
     )
-    client_identity = rate_limit_identity(extract_client_ip(request))
-    rate_limit_result = limiter.check(client_identity)
+    rate_identity = f"user:{current_user.id}" if current_user else rate_limit_identity(extract_client_ip(request))
+    rate_limit_result = limiter.check(rate_identity)
     if not rate_limit_result.allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -103,6 +106,7 @@ async def create_job(
         size=payload.size,
         aspect_ratio=payload.aspect_ratio or "auto",
         status=JobStatus.QUEUED,
+        user_id=current_user.id if current_user else None,
     )
     db.add(job)
     try:
@@ -209,10 +213,62 @@ def get_job(job_id: str, db: Session = Depends(get_db)) -> JobDetailResponse:
 def get_gallery(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> list[GalleryItem]:
+    if current_user:
+        stmt = (
+            select(GenerationJob)
+            .where(GenerationJob.status == JobStatus.SUCCEEDED)
+            .where(GenerationJob.user_id == current_user.id)
+            .order_by(desc(GenerationJob.finished_at))
+            .limit(settings.gallery_limit)
+        )
+    else:
+        public_user_ids = db.scalars(
+            select(User.id).where(User.is_public == True)
+        ).all()
+        if public_user_ids:
+            user_filter = (GenerationJob.user_id.in_(public_user_ids)) | (GenerationJob.user_id.is_(None))
+        else:
+            user_filter = GenerationJob.user_id.is_(None)
+        stmt = (
+            select(GenerationJob)
+            .where(GenerationJob.status == JobStatus.SUCCEEDED)
+            .where(user_filter)
+            .order_by(desc(GenerationJob.finished_at))
+            .limit(settings.gallery_limit)
+        )
+    jobs = db.scalars(stmt).all()
+    return [
+        GalleryItem(
+            job_id=job.id,
+            image_url=job.public_url or "",
+            prompt=job.prompt,
+            revised_prompt=job.revised_prompt,
+            model=job.model,
+            size=job.size,
+            aspect_ratio=job.aspect_ratio,
+            finished_at=job.finished_at,
+            username=_get_username(db, job.user_id),
+        )
+        for job in jobs
+        if job.public_url and job.finished_at
+    ]
+
+
+@router.get("/gallery/{username}", response_model=list[GalleryItem])
+def get_user_gallery(
+    username: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> list[GalleryItem]:
+    user = db.scalar(select(User).where(User.username == username))
+    if not user or not user.is_public:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该用户不存在或未公开画廊。")
     stmt = (
         select(GenerationJob)
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
+        .where(GenerationJob.user_id == user.id)
         .order_by(desc(GenerationJob.finished_at))
         .limit(settings.gallery_limit)
     )
@@ -227,10 +283,18 @@ def get_gallery(
             size=job.size,
             aspect_ratio=job.aspect_ratio,
             finished_at=job.finished_at,
+            username=username,
         )
         for job in jobs
         if job.public_url and job.finished_at
     ]
+
+
+def _get_username(db: Session, user_id: str | None) -> str | None:
+    if not user_id:
+        return None
+    user = db.get(User, user_id)
+    return user.username if user else None
 
 
 @router.get("/healthz", response_model=HealthResponse)

@@ -38,6 +38,7 @@ class GenerationJob(Base):
     reference_image_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     reference_image_content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reference_image_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

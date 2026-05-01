@@ -1,14 +1,19 @@
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text
 
+from app.core.auth import hash_password
+from app.core.config import get_settings
 from app.db.base import Base
-from app.db.session import engine
+from app.db.session import SessionLocal, engine
 from app.models.generation_job import GenerationJob
+from app.models.user import User
 
 
 def init_db() -> None:
     _ = GenerationJob
+    _ = User
     Base.metadata.create_all(bind=engine)
     _ensure_generation_job_columns()
+    _ensure_default_user()
 
 
 def _ensure_generation_job_columns() -> None:
@@ -20,6 +25,7 @@ def _ensure_generation_job_columns() -> None:
         "reference_image_key": "ALTER TABLE generation_jobs ADD COLUMN reference_image_key VARCHAR(512)",
         "reference_image_content_type": "ALTER TABLE generation_jobs ADD COLUMN reference_image_content_type VARCHAR(128)",
         "reference_image_filename": "ALTER TABLE generation_jobs ADD COLUMN reference_image_filename VARCHAR(255)",
+        "user_id": "ALTER TABLE generation_jobs ADD COLUMN user_id VARCHAR(36)",
     }
 
     with engine.begin() as connection:
@@ -42,3 +48,24 @@ def _ensure_generation_job_columns() -> None:
                 """
             )
         )
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_user_id ON generation_jobs (user_id)"))
+
+
+def _ensure_default_user() -> None:
+    settings = get_settings()
+    if not settings.default_password:
+        return
+    db = SessionLocal()
+    try:
+        existing = db.scalar(select(User).limit(1))
+        if existing:
+            return
+        user = User(
+            username=settings.default_username,
+            password_hash=hash_password(settings.default_password),
+            display_name=settings.default_username,
+        )
+        db.add(user)
+        db.commit()
+    finally:
+        db.close()

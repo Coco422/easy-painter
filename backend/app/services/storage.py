@@ -92,6 +92,18 @@ class MinioStorageService:
             raise StorageError("Failed to read reference image.") from exc
         return StoredReferenceImage(object_key=object_key, image_bytes=image_bytes, content_type=content_type)
 
+    def delete_object(self, object_key: str) -> None:
+        try:
+            self.client.remove_object(self.bucket, object_key)
+        except S3Error:
+            pass
+
+    def delete_reference_image(self, object_key: str) -> None:
+        try:
+            self.client.remove_object(self.reference_bucket, object_key)
+        except S3Error:
+            pass
+
     @staticmethod
     def _guess_extension(content_type: str) -> str:
         if "png" in content_type:

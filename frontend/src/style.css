@@ -903,3 +903,315 @@ a {
     transition: none;
   }
 }
+
+/* Header navigation */
+.site-header {
+  justify-content: space-between;
+}
+
+.brand-title {
+  text-decoration: none;
+  color: var(--headline);
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.nav-user {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.nav-link {
+  font-size: 14px;
+  color: var(--primary);
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+
+.nav-link:hover {
+  color: var(--primary-strong);
+}
+
+.nav-admin {
+  color: var(--accent);
+}
+
+.nav-logout {
+  color: var(--muted);
+}
+
+/* Auth pages */
+.auth-page {
+  display: flex;
+  justify-content: center;
+  padding-top: 48px;
+}
+
+.auth-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  border: 1px solid rgba(200, 200, 200, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  padding: 32px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.auth-title {
+  margin: 0 0 24px;
+  font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  font-size: 24px;
+  text-align: center;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.auth-input {
+  padding: 10px 12px;
+  border: 1px solid rgba(200, 200, 200, 0.4);
+  border-radius: 8px;
+  font-size: 15px;
+  background: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.auth-input:focus {
+  border-color: var(--primary);
+}
+
+.auth-error {
+  margin: 0;
+  color: #d44;
+  font-size: 14px;
+  text-align: center;
+}
+
+.auth-submit {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-submit:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* Gallery heading */
+.gallery-heading {
+  margin: 8px 0 16px;
+  font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  font-size: 20px;
+  color: var(--headline);
+}
+
+/* Public gallery page */
+.public-gallery-page {
+  min-height: 40vh;
+}
+
+.gallery-error {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--muted);
+}
+
+.gallery-error p {
+  margin: 0 0 16px;
+  font-size: 16px;
+}
+
+.back-link {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+/* Admin page */
+.admin-page {
+  min-height: 40vh;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.admin-title {
+  margin: 0;
+  font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  font-size: 24px;
+}
+
+.admin-logout-btn {
+  padding: 6px 16px;
+  border: 1px solid rgba(200, 200, 200, 0.4);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.admin-section {
+  margin-bottom: 32px;
+}
+
+.admin-section-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+}
+
+.admin-create-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.admin-input {
+  padding: 8px 12px;
+  border: 1px solid rgba(200, 200, 200, 0.4);
+  border-radius: 8px;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  outline: none;
+  min-width: 160px;
+}
+
+.admin-input:focus {
+  border-color: var(--primary);
+}
+
+.admin-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.admin-btn:hover {
+  opacity: 0.9;
+}
+
+.admin-success {
+  color: #2a7;
+  font-size: 14px;
+  margin: 8px 0 0;
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(200, 200, 200, 0.3);
+}
+
+.admin-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.td-id {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.td-prompt {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-delete-btn {
+  padding: 4px 12px;
+  border: 1px solid #d44;
+  border-radius: 6px;
+  background: transparent;
+  color: #d44;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.admin-delete-btn:hover {
+  background: #d44;
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .site-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-nav {
+    gap: 12px;
+  }
+
+  .admin-create-form {
+    flex-direction: column;
+  }
+
+  .admin-input {
+    min-width: 0;
+    width: 100%;
+  }
+}
