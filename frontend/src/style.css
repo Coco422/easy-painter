@@ -1104,25 +1104,31 @@ a {
 /* ---- Gallery Tabs ---- */
 .gallery-tabs {
   display: flex;
-  gap: 2px;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 6px;
+  margin: 32px 0 18px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 3px;
+  border-radius: var(--radius-lg);
+  padding: 6px;
   width: fit-content;
+  box-shadow: var(--shadow-sm);
 }
 
 .gallery-tab {
-  padding: 8px 20px;
+  min-width: 112px;
+  min-height: 40px;
+  padding: 0 22px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
   font-size: 14px;
+  line-height: 1;
   font-family: inherit;
   cursor: pointer;
   color: var(--text-muted);
   font-weight: 700;
+  white-space: nowrap;
   transition: all 200ms;
 }
 
@@ -1518,6 +1524,15 @@ a {
 
   .primary-button {
     width: 100%;
+  }
+
+  .gallery-tabs {
+    width: 100%;
+  }
+
+  .gallery-tab {
+    flex: 1;
+    min-width: 0;
   }
 
   .gallery-grid {

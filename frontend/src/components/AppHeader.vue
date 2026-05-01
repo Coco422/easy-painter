@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Moon, Sun } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+import logoUrl from '@/assets/brand/logo.png'
 import { authState, isAdmin, isLoggedIn, logout } from '@/lib/auth'
 import { themeState, toggleTheme } from '@/lib/theme'
 
@@ -19,7 +20,7 @@ async function handleLogout() {
 <template>
   <header class="site-header">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
+      <img class="brand-logo" :src="logoUrl" alt="" aria-hidden="true" />
       <router-link to="/" class="brand-title">{{ siteName }}</router-link>
     </div>
     <nav class="header-nav">
@@ -43,19 +44,19 @@ async function handleLogout() {
 </template>
 
 <style scoped>
-.brand-mark {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: var(--accent);
-  transform: rotate(45deg);
-  flex-shrink: 0;
-}
-
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-logo {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 10px rgba(196, 149, 54, 0.16));
 }
 
 .theme-toggle {
