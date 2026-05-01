@@ -36,3 +36,9 @@ class AdminCreateUserRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64, pattern=r"^[a-zA-Z0-9_]+$")
     password: str = Field(min_length=6, max_length=128)
     display_name: str = Field(default="", max_length=128)
+
+
+class AdminUpdateUserRequest(BaseModel):
+    password: str | None = Field(default=None, min_length=6, max_length=128)
+    display_name: str | None = Field(default=None, max_length=128)
+    is_public: bool | None = None

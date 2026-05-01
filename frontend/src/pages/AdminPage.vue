@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { adminCreateUser, adminDeleteJob, adminFetchJobs, adminFetchUsers } from '@/lib/api'
+import { adminCreateUser, adminDeleteJob, adminDeleteUser, adminFetchJobs, adminFetchUsers, adminUpdateUser } from '@/lib/api'
 import { adminLogout, adminVerify, isAdmin } from '@/lib/auth'
 import type { AdminJobItem, UserInfo } from '@/lib/types'
 
@@ -17,6 +17,12 @@ const newPassword = ref('')
 const newUserDisplayName = ref('')
 const createUserError = ref('')
 const createUserSuccess = ref('')
+
+const editingUserId = ref<string | null>(null)
+const editPassword = ref('')
+const editDisplayName = ref('')
+const editIsPublic = ref(false)
+const editError = ref('')
 
 async function handleVerify() {
   if (!secretKey.value) {
@@ -81,6 +87,45 @@ async function handleCreateUser() {
   }
 }
 
+function startEditUser(user: UserInfo) {
+  editingUserId.value = user.id
+  editPassword.value = ''
+  editDisplayName.value = user.display_name
+  editIsPublic.value = user.is_public
+  editError.value = ''
+}
+
+function cancelEdit() {
+  editingUserId.value = null
+}
+
+async function saveEditUser() {
+  if (!editingUserId.value) return
+  editError.value = ''
+  try {
+    const data: { password?: string; display_name?: string; is_public?: boolean } = {}
+    if (editPassword.value) data.password = editPassword.value
+    data.display_name = editDisplayName.value
+    data.is_public = editIsPublic.value
+    const updated = await adminUpdateUser(editingUserId.value, data)
+    const idx = users.value.findIndex((u) => u.id === updated.id)
+    if (idx >= 0) users.value.splice(idx, 1, updated)
+    editingUserId.value = null
+  } catch (e) {
+    editError.value = e instanceof Error ? e.message : '保存失败。'
+  }
+}
+
+async function handleDeleteUser(userId: string) {
+  if (!confirm('确定要删除该用户吗？该用户的任务不会被自动删除。')) return
+  try {
+    await adminDeleteUser(userId)
+    users.value = users.value.filter((u) => u.id !== userId)
+  } catch (e) {
+    alert(e instanceof Error ? e.message : '删除失败。')
+  }
+}
+
 function handleLogout() {
   adminLogout()
   secretKey.value = ''
@@ -138,18 +183,36 @@ onMounted(() => {
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>用户名</th><th>显示名称</th><th>公开画廊</th><th>注册时间</th></tr>
+              <tr><th>用户名</th><th>显示名称</th><th>公开画廊</th><th>注册时间</th><th>操作</th></tr>
             </thead>
             <tbody>
-              <tr v-for="user in users" :key="user.id">
-                <td>{{ user.username }}</td>
-                <td>{{ user.display_name }}</td>
-                <td>{{ user.is_public ? '是' : '否' }}</td>
-                <td>{{ new Date(user.created_at).toLocaleString() }}</td>
-              </tr>
+              <template v-for="user in users" :key="user.id">
+                <tr v-if="editingUserId !== user.id">
+                  <td>{{ user.username }}</td>
+                  <td>{{ user.display_name }}</td>
+                  <td>{{ user.is_public ? '是' : '否' }}</td>
+                  <td>{{ new Date(user.created_at).toLocaleString() }}</td>
+                  <td class="td-actions">
+                    <button class="admin-edit-btn" @click="startEditUser(user)">编辑</button>
+                    <button class="admin-delete-btn" @click="handleDeleteUser(user.id)">删除</button>
+                  </td>
+                </tr>
+                <tr v-else class="edit-row">
+                  <td>{{ user.username }}</td>
+                  <td><input v-model="editDisplayName" class="admin-input-inline" maxlength="128" /></td>
+                  <td><input v-model="editIsPublic" type="checkbox" /></td>
+                  <td>{{ new Date(user.created_at).toLocaleString() }}</td>
+                  <td class="td-actions">
+                    <input v-model="editPassword" type="password" placeholder="新密码（留空不改）" class="admin-input-inline admin-input-password" />
+                    <button class="admin-save-btn" @click="saveEditUser">保存</button>
+                    <button class="admin-cancel-btn" @click="cancelEdit">取消</button>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
+        <p v-if="editError" class="auth-error">{{ editError }}</p>
       </section>
 
       <section class="admin-section">

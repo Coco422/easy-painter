@@ -47,6 +47,7 @@ async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
     throw new ApiError(message, response.status)
   }
 
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
 
@@ -83,6 +84,16 @@ export function fetchJob(jobId: string) {
 
 export function fetchGallery() {
   return apiRequest<GalleryItem[]>('/api/v1/gallery')
+}
+
+export async function fetchPublicDiscovery() {
+  const response = await fetch('/api/v1/gallery')
+  if (!response.ok) throw new ApiError('加载公开画廊失败。', response.status)
+  return (await response.json()) as GalleryItem[]
+}
+
+export function deleteJob(jobId: string) {
+  return apiRequest<void>(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
 }
 
 export function fetchPublicGallery(username: string) {
@@ -139,4 +150,15 @@ export function adminCreateUser(data: { username: string; password: string; disp
     method: 'POST',
     body: JSON.stringify(data),
   })
+}
+
+export function adminUpdateUser(userId: string, data: { password?: string; display_name?: string; is_public?: boolean }) {
+  return adminApiRequest<UserInfo>(`/api/v1/admin/users/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminDeleteUser(userId: string) {
+  return adminApiRequest<void>(`/api/v1/admin/users/${userId}`, { method: 'DELETE' })
 }

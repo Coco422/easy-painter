@@ -11,7 +11,7 @@ from app.core.auth import hash_password, require_admin
 from app.db.session import get_db
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.user import User
-from app.schemas.auth import AdminCreateUserRequest, UserResponse
+from app.schemas.auth import AdminCreateUserRequest, AdminUpdateUserRequest, UserResponse
 from app.services.storage import MinioStorageService
 
 logger = logging.getLogger(__name__)
@@ -116,3 +116,40 @@ def admin_create_user(
         id=user.id, username=user.username, display_name=user.display_name,
         is_public=user.is_public, created_at=user.created_at,
     )
+
+
+@admin_router.put("/admin/users/{user_id}", response_model=UserResponse)
+def admin_update_user(
+    user_id: str,
+    body: AdminUpdateUserRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> UserResponse:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在。")
+    if body.password is not None:
+        user.password_hash = hash_password(body.password)
+    if body.display_name is not None:
+        user.display_name = body.display_name
+    if body.is_public is not None:
+        user.is_public = body.is_public
+    db.commit()
+    db.refresh(user)
+    return UserResponse(
+        id=user.id, username=user.username, display_name=user.display_name,
+        is_public=user.is_public, created_at=user.created_at,
+    )
+
+
+@admin_router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> None:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在。")
+    db.delete(user)
+    db.commit()

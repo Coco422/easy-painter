@@ -10,7 +10,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from app.core.auth import get_current_user_optional
+from app.core.auth import get_current_user_optional, require_current_user
 from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
@@ -58,7 +58,7 @@ async def create_job(
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(require_current_user),
 ) -> CreateJobResponse:
     parsed_payload = await _parse_create_job_payload(request)
     payload = parsed_payload.request
@@ -92,7 +92,7 @@ async def create_job(
         limit=settings.generate_rate_limit_count,
         window_seconds=settings.generate_rate_limit_window_seconds,
     )
-    rate_identity = f"user:{current_user.id}" if current_user else rate_limit_identity(extract_client_ip(request))
+    rate_identity = f"user:{current_user.id}"
     rate_limit_result = limiter.check(rate_identity)
     if not rate_limit_result.allowed:
         raise HTTPException(
@@ -106,7 +106,7 @@ async def create_job(
         size=payload.size,
         aspect_ratio=payload.aspect_ratio or "auto",
         status=JobStatus.QUEUED,
-        user_id=current_user.id if current_user else None,
+        user_id=current_user.id,
     )
     db.add(job)
     try:
@@ -207,6 +207,29 @@ def get_job(job_id: str, db: Session = Depends(get_db)) -> JobDetailResponse:
         created_at=job.created_at,
         finished_at=job.finished_at,
     )
+
+
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> None:
+    job = db.get(GenerationJob, job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
+    if job.object_key:
+        try:
+            MinioStorageService().delete_object(job.object_key)
+        except Exception:
+            logger.warning("Failed to delete MinIO object %s", job.object_key)
+    if job.reference_image_key:
+        try:
+            MinioStorageService().delete_reference_image(job.reference_image_key)
+        except Exception:
+            logger.warning("Failed to delete MinIO reference %s", job.reference_image_key)
+    db.delete(job)
+    db.commit()
 
 
 @router.get("/gallery", response_model=list[GalleryItem])

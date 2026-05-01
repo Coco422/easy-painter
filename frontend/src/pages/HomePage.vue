@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { useRouter } from 'vue-router'
+
 import CurrentJobCard from '@/components/CurrentJobCard.vue'
 import GalleryGrid from '@/components/GalleryGrid.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import PromptModal from '@/components/PromptModal.vue'
-import { createJob, fetchGallery, fetchJob, fetchPublicMeta } from '@/lib/api'
+import { createJob, deleteJob, fetchGallery, fetchJob, fetchPublicDiscovery, fetchPublicMeta } from '@/lib/api'
 import { isLoggedIn } from '@/lib/auth'
 import type {
   BatchCount,
@@ -19,8 +21,12 @@ import type {
 
 const ACTIVE_JOB_STORAGE_KEY = 'easy-painter:active-job-ids'
 
+const router = useRouter()
+
 const meta = ref<PublicMetaResponse | null>(null)
 const gallery = ref<GalleryItem[]>([])
+const publicGallery = ref<GalleryItem[]>([])
+const galleryTab = ref<'mine' | 'public'>('public')
 const selectedItem = ref<GalleryItem | null>(null)
 const prompt = ref('')
 const selectedModel = ref('')
@@ -47,9 +53,27 @@ async function loadGallery() {
   gallery.value = await fetchGallery()
 }
 
+async function loadPublicGallery() {
+  publicGallery.value = await fetchPublicDiscovery()
+}
+
+function switchGalleryTab(tab: 'mine' | 'public') {
+  galleryTab.value = tab
+  if (tab === 'public' && publicGallery.value.length === 0) {
+    void loadPublicGallery()
+  }
+}
+
 async function bootstrap() {
   try {
-    await Promise.all([loadMeta(), loadGallery()])
+    await loadMeta()
+    if (isLoggedIn()) {
+      galleryTab.value = 'mine'
+      await loadGallery()
+    } else {
+      galleryTab.value = 'public'
+      await loadPublicGallery()
+    }
     await restoreCachedJobs()
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '页面初始化失败，请刷新重试。'
@@ -243,6 +267,10 @@ async function submitJobs(options: {
 }
 
 async function submitPrompt() {
+  if (!isLoggedIn()) {
+    router.push('/login')
+    return
+  }
   const promptText = prompt.value.trim()
   if (!promptText) {
     feedback.value = '先写下一句你想看到的画面吧。'
@@ -287,7 +315,19 @@ async function retryJob(job: JobDetailResponse) {
   }
 }
 
-const galleryTitle = computed(() => (isLoggedIn() ? '我的画廊' : '公开画廊'))
+const displayedGallery = computed(() =>
+  galleryTab.value === 'mine' ? gallery.value : publicGallery.value,
+)
+
+async function handleDeleteItem(item: GalleryItem) {
+  if (!confirm('确定要删除这幅作品吗？')) return
+  try {
+    await deleteJob(item.job_id)
+    gallery.value = gallery.value.filter((g) => g.job_id !== item.job_id)
+  } catch (e) {
+    feedback.value = e instanceof Error ? e.message : '删除失败。'
+  }
+}
 
 onBeforeUnmount(() => {
   pollingTimers.forEach((timer) => window.clearTimeout(timer))
@@ -337,8 +377,26 @@ onMounted(() => {
 
   <div v-if="loading" class="loading-state">正在加载首页内容…</div>
   <template v-else>
-    <h2 class="gallery-heading">{{ galleryTitle }}</h2>
-    <GalleryGrid :items="gallery" @select="selectedItem = $event" />
+    <div class="gallery-tabs" v-if="isLoggedIn()">
+      <button
+        class="gallery-tab"
+        :class="{ active: galleryTab === 'mine' }"
+        @click="switchGalleryTab('mine')"
+      >我的画廊</button>
+      <button
+        class="gallery-tab"
+        :class="{ active: galleryTab === 'public' }"
+        @click="switchGalleryTab('public')"
+      >公开画廊</button>
+    </div>
+    <h2 class="gallery-heading">{{ galleryTab === 'mine' ? '我的画廊' : '公开画廊' }}</h2>
+    <GalleryGrid
+      :items="displayedGallery"
+      :show-username="galleryTab === 'public'"
+      :deletable="galleryTab === 'mine'"
+      @select="selectedItem = $event"
+      @delete="handleDeleteItem"
+    />
   </template>
 
   <PromptModal :item="selectedItem" @close="selectedItem = null" />
