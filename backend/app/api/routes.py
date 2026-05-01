@@ -24,6 +24,7 @@ from app.schemas.job import (
     JobDetailResponse,
     PublicMetaResponse,
 )
+from app.services.model_service import load_models_from_db
 from app.services.rate_limit import GenerationRateLimiter
 from app.services.reference_images import ReferenceImagePayload, ReferenceImageValidationError, validate_reference_image
 from app.services.redis_client import get_redis
@@ -35,6 +36,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _load_models(db: Session, settings: Settings) -> list[dict[str, str | bool | list[str]]]:
+    try:
+        return load_models_from_db(db)
+    except Exception:
+        logger.exception("Failed to load model configs from database; falling back to settings.")
+    return settings.public_models
+
+
 @dataclass(slots=True)
 class ParsedCreateJobPayload:
     request: CreateJobRequest
@@ -42,13 +51,16 @@ class ParsedCreateJobPayload:
 
 
 @router.get("/meta/public", response_model=PublicMetaResponse)
-def get_public_meta(settings: Settings = Depends(get_settings)) -> PublicMetaResponse:
+def get_public_meta(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> PublicMetaResponse:
     return PublicMetaResponse(
         site_name=settings.site_name,
         prompt_max_length=settings.prompt_max_length,
         polling_interval_ms=settings.polling_interval_ms,
         example_prompts=settings.example_prompts,
-        models=settings.public_models,
+        models=_load_models(db, settings),
     )
 
 
@@ -71,7 +83,7 @@ async def create_job(
             detail=f"提示词不能超过 {settings.prompt_max_length} 个字符。",
         )
 
-    enabled_models = {item["id"]: item for item in settings.public_models if item["enabled"]}
+    enabled_models = {item["id"]: item for item in _load_models(db, settings) if item["enabled"]}
     model_config = enabled_models.get(payload.model)
     if not model_config:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前模型不可用。")

@@ -5,7 +5,9 @@ import type {
   CreateJobResponse,
   GalleryItem,
   JobDetailResponse,
+  ModelConfig,
   PublicMetaResponse,
+  UpstreamProvider,
   UserInfo,
 } from './types'
 
@@ -161,4 +163,71 @@ export function adminUpdateUser(userId: string, data: { password?: string; displ
 
 export function adminDeleteUser(userId: string) {
   return adminApiRequest<void>(`/api/v1/admin/users/${userId}`, { method: 'DELETE' })
+}
+
+// ---- Admin Provider APIs ----
+
+export function adminFetchProviders() {
+  return adminApiRequest<UpstreamProvider[]>('/api/v1/admin/providers')
+}
+
+export function adminCreateProvider(data: {
+  name: string
+  base_url: string
+  api_key: string
+  timeout_seconds?: number
+  default_size?: string
+  default_quality?: string
+  default_output_format?: string
+  default_output_compression?: number
+  default_background?: string
+  default_moderation?: string
+}) {
+  return adminApiRequest<UpstreamProvider>('/api/v1/admin/providers', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminUpdateProvider(providerId: string, data: Partial<UpstreamProvider>) {
+  return adminApiRequest<UpstreamProvider>(`/api/v1/admin/providers/${providerId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminDeleteProvider(providerId: string) {
+  return adminApiRequest<void>(`/api/v1/admin/providers/${providerId}`, { method: 'DELETE' })
+}
+
+// ---- Admin Model APIs ----
+
+export function adminFetchModels() {
+  return adminApiRequest<ModelConfig[]>('/api/v1/admin/models')
+}
+
+export function adminCreateModel(data: {
+  id: string
+  provider_id: string
+  label: string
+  enabled?: boolean
+  supports_reference_image?: boolean
+  supported_sizes?: string[]
+  sort_order?: number
+}) {
+  return adminApiRequest<ModelConfig>('/api/v1/admin/models', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminUpdateModel(modelId: string, data: Partial<ModelConfig>) {
+  return adminApiRequest<ModelConfig>(`/api/v1/admin/models/${modelId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminDeleteModel(modelId: string) {
+  return adminApiRequest<void>(`/api/v1/admin/models/${modelId}`, { method: 'DELETE' })
 }

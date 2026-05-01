@@ -1,3 +1,4 @@
+from app.api import routes
 from app.core.config import Settings
 
 
@@ -54,3 +55,13 @@ def test_public_models_json_allows_explicit_reference_image_capability():
 
 def test_default_upstream_timeout_allows_slow_image_models():
     assert Settings().upstream_timeout_seconds == 700
+
+
+def test_empty_model_config_table_does_not_fall_back_to_env(monkeypatch):
+    monkeypatch.setattr(routes, "load_models_from_db", lambda db: [])
+
+    settings = Settings(
+        public_models_json='[{"id":"fallback-model","label":"Fallback","enabled":true}]',
+    )
+
+    assert routes._load_models(object(), settings) == []

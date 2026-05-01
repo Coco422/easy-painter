@@ -187,7 +187,7 @@ def test_upstream_uses_edits_endpoint_for_reference_image(monkeypatch):
 
     monkeypatch.setattr("app.services.upstream.httpx.Client", FakeClient)
 
-    result = UpstreamImageClient().generate_image(
+    result = UpstreamImageClient({"base_url": "https://test.example.com", "api_key": "test-key"}).generate_image(
         prompt="画一朵花",
         model="gpt-image-2-c",
         reference_image=ReferenceImageForUpstream(
@@ -246,7 +246,7 @@ def test_upstream_uses_compact_edit_payload_for_doubao_reference_image(monkeypat
 
     monkeypatch.setattr("app.services.upstream.httpx.Client", FakeClient)
 
-    UpstreamImageClient().generate_image(
+    UpstreamImageClient({"base_url": "https://test.example.com", "api_key": "test-key"}).generate_image(
         prompt="画一朵花",
         model="doubao-seedream-5-0-260128",
         size="1024x1024",
@@ -295,7 +295,7 @@ def test_upstream_uses_generations_endpoint_without_reference_image(monkeypatch)
 
     monkeypatch.setattr("app.services.upstream.httpx.Client", FakeClient)
 
-    UpstreamImageClient().generate_image(prompt="画一朵花", model="gpt-image-2-c")
+    UpstreamImageClient({"base_url": "https://test.example.com", "api_key": "test-key"}).generate_image(prompt="画一朵花", model="gpt-image-2-c")
 
     assert captured["endpoint"].endswith("/images/generations")
     assert "json" in captured["kwargs"]

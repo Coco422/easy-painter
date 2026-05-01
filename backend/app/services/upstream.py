@@ -4,10 +4,9 @@ import base64
 import logging
 from dataclasses import dataclass
 from io import BytesIO
+from typing import Any
 
 import httpx
-
-from app.core.config import get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -36,8 +35,8 @@ class ReferenceImageForUpstream:
 
 
 class UpstreamImageClient:
-    def __init__(self) -> None:
-        self.settings = get_settings()
+    def __init__(self, provider_config: dict[str, Any]) -> None:
+        self.config = provider_config
 
     def generate_image(
         self,
@@ -47,18 +46,20 @@ class UpstreamImageClient:
         aspect_ratio: str | None = None,
         reference_image: ReferenceImageForUpstream | None = None,
     ) -> GeneratedImageResult:
-        if not self.settings.upstream_base_url or not self.settings.upstream_api_key:
+        base_url = self.config.get("base_url", "")
+        api_key = self.config.get("api_key", "")
+        if not base_url or not api_key:
             raise UpstreamServiceError("生成服务尚未配置完成。", retryable=False)
 
         request_payload = self._generation_payload(prompt=prompt, model=model, size=size, aspect_ratio=aspect_ratio)
         headers = {
-            "Authorization": f"Bearer {self.settings.upstream_api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        endpoint = f"{self.settings.upstream_base_url.rstrip('/')}/images/generations"
-        request_kwargs = {"json": request_payload, "headers": headers}
+        endpoint = f"{base_url.rstrip('/')}/images/generations"
+        request_kwargs: dict[str, Any] = {"json": request_payload, "headers": headers}
         if reference_image:
-            endpoint = f"{self.settings.upstream_base_url.rstrip('/')}/images/edits"
+            endpoint = f"{base_url.rstrip('/')}/images/edits"
             request_kwargs = {
                 "data": {
                     key: self._form_value(value)
@@ -74,8 +75,10 @@ class UpstreamImageClient:
                 },
             }
 
+        timeout = self.config.get("timeout_seconds", 700)
+
         try:
-            with httpx.Client(timeout=self.settings.upstream_timeout_seconds) as client:
+            with httpx.Client(timeout=timeout) as client:
                 response = client.post(endpoint, **request_kwargs)
         except httpx.TimeoutException as exc:
             raise UpstreamServiceError("生成服务响应超时，请稍后再试。", retryable=True) from exc
@@ -150,11 +153,11 @@ class UpstreamImageClient:
             "prompt": prompt,
             "n": 1,
             "size": self._resolve_size(size=size, aspect_ratio=aspect_ratio),
-            "quality": self.settings.upstream_default_quality,
-            "output_format": self.settings.upstream_default_output_format,
-            "output_compression": self.settings.upstream_default_output_compression,
-            "background": self.settings.upstream_default_background,
-            "moderation": self.settings.upstream_default_moderation,
+            "quality": self.config.get("default_quality", "high"),
+            "output_format": self.config.get("default_output_format", "jpeg"),
+            "output_compression": self.config.get("default_output_compression", 85),
+            "background": self.config.get("default_background", "auto"),
+            "moderation": self.config.get("default_moderation", "auto"),
             "stream": False,
             "partial_images": 0,
         }
@@ -197,7 +200,7 @@ class UpstreamImageClient:
             "4:3": "1536x1024",
             "16:9": "1792x1024",
         }
-        return sizes.get(aspect_ratio, self.settings.upstream_default_size)
+        return sizes.get(aspect_ratio, self.config.get("default_size", "auto"))
 
     @staticmethod
     def _form_value(value: object) -> str:
@@ -206,8 +209,9 @@ class UpstreamImageClient:
         return str(value)
 
     def _download_image(self, image_url: str) -> tuple[bytes, str]:
+        timeout = self.config.get("timeout_seconds", 700)
         try:
-            with httpx.Client(timeout=self.settings.upstream_timeout_seconds) as client:
+            with httpx.Client(timeout=timeout) as client:
                 response = client.get(image_url)
                 response.raise_for_status()
         except httpx.TimeoutException as exc:

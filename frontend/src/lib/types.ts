@@ -95,3 +95,27 @@ export interface AdminJobItem {
   created_at: string
   finished_at: string | null
 }
+
+export interface UpstreamProvider {
+  id: string
+  name: string
+  base_url: string
+  api_key: string
+  timeout_seconds: number
+  default_size: string
+  default_quality: string
+  default_output_format: string
+  default_output_compression: number
+  default_background: string
+  default_moderation: string
+}
+
+export interface ModelConfig {
+  id: string
+  provider_id: string
+  label: string
+  enabled: boolean
+  supports_reference_image: boolean
+  supported_sizes: string[]
+  sort_order: number
+}

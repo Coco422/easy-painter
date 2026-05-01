@@ -22,20 +22,23 @@ def test_create_job_request_maps_legacy_aspect_ratio_to_size():
     assert payload.size == "1024x1792"
 
 
+TEST_PROVIDER_CONFIG = {"base_url": "https://test.example.com", "api_key": "test-key"}
+
+
 def test_upstream_uses_size_parameter_directly():
-    client = UpstreamImageClient()
+    client = UpstreamImageClient(TEST_PROVIDER_CONFIG)
 
     assert client._resolve_size(size="3840x2160") == "3840x2160"
 
 
 def test_upstream_falls_back_to_legacy_aspect_ratio_when_size_is_auto():
-    client = UpstreamImageClient()
+    client = UpstreamImageClient(TEST_PROVIDER_CONFIG)
 
     assert client._resolve_size(size="auto", aspect_ratio="9:16") == "1024x1792"
 
 
 def test_upstream_size_matches_legacy_aspect_ratio():
-    client = UpstreamImageClient()
+    client = UpstreamImageClient(TEST_PROVIDER_CONFIG)
 
     assert client._size_for_aspect_ratio("auto") == "auto"
     assert client._size_for_aspect_ratio("1:1") == "1024x1024"

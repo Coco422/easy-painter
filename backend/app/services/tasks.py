@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.models.generation_job import GenerationJob, JobStatus
+from app.services.model_service import load_provider_for_model
 from app.services.storage import MinioStorageService, StorageError
 from app.services.upstream import GeneratedImageResult, ReferenceImageForUpstream, UpstreamImageClient, UpstreamServiceError
 
@@ -54,6 +55,11 @@ def generate_image_task(self, job_id: str) -> None:
         db.commit()
 
         try:
+            provider_config = load_provider_for_model(db, job.model)
+            if not provider_config:
+                _mark_failed(db=db, job=job, message="模型配置不存在，请联系管理员。")
+                return
+
             storage = MinioStorageService()
             reference_image = None
             if job.reference_image_key and job.reference_image_content_type:
@@ -67,7 +73,7 @@ def generate_image_task(self, job_id: str) -> None:
                     image_bytes=stored_reference.image_bytes,
                 )
 
-            result = UpstreamImageClient().generate_image(
+            result = UpstreamImageClient(provider_config.as_dict()).generate_image(
                 prompt=job.prompt,
                 model=job.model,
                 size=job.size,
