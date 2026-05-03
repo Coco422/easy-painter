@@ -1278,7 +1278,7 @@ a {
 .gallery-card-owner-actions {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 8px;
   display: flex;
   gap: 4px;
   opacity: 0;

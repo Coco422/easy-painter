@@ -282,7 +282,7 @@ def like_gallery_item(
     current_user: User = Depends(require_current_user),
 ) -> dict[str, int]:
     job = db.get(GenerationJob, job_id)
-    if not job or not job.public_url or not job.is_public:
+    if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品不存在。")
     existing = db.scalar(
         select(GalleryLike).where(
