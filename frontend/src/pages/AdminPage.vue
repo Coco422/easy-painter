@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { Server, Cpu, Users, ListTodo, LogOut, Menu, X, Eye } from 'lucide-vue-next'
 import {
   adminCreateModel,
   adminCreateProvider,
@@ -22,6 +23,17 @@ import type { AdminJobItem, ModelConfig, UpstreamProvider, UserInfo } from '@/li
 const secretKey = ref('')
 const verifyError = ref('')
 const verifying = ref(false)
+
+type SectionKey = 'providers' | 'models' | 'users' | 'jobs'
+const activeSection = ref<SectionKey>('providers')
+const sidebarOpen = ref(false)
+
+const navItems: { key: SectionKey; label: string; icon: typeof Server }[] = [
+  { key: 'providers', label: '上游管理', icon: Server },
+  { key: 'models', label: '模型管理', icon: Cpu },
+  { key: 'users', label: '用户管理', icon: Users },
+  { key: 'jobs', label: '任务管理', icon: ListTodo },
+]
 
 const jobs = ref<AdminJobItem[]>([])
 const users = ref<UserInfo[]>([])
@@ -46,7 +58,7 @@ const newProviderName = ref('')
 const newProviderBaseUrl = ref('')
 const newProviderApiKey = ref('')
 const createProviderError = ref('')
-const createProviderSuccess = ref('')
+const revealedKeys = ref(new Set<string>())
 const editingProviderId = ref<string | null>(null)
 const editProvider = ref<Partial<UpstreamProvider>>({})
 const editProviderError = ref('')
@@ -58,11 +70,27 @@ const newModelProviderId = ref('')
 const newModelSupportsRef = ref(true)
 const newModelSizes = ref('')
 const createModelError = ref('')
-const createModelSuccess = ref('')
 const editingModelId = ref<string | null>(null)
 const editModel = ref<Partial<ModelConfig>>({})
 const editModelSizes = ref('')
 const editModelError = ref('')
+
+// Modal state
+const selectedJob = ref<AdminJobItem | null>(null)
+const showCreateProviderModal = ref(false)
+const showCreateModelModal = ref(false)
+
+function formatDuration(start: string | null, end: string | null): string {
+  if (!start || !end) return '-'
+  const ms = new Date(end).getTime() - new Date(start).getTime()
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function formatMeta(meta: Record<string, unknown> | null): string {
+  if (!meta) return '-'
+  return JSON.stringify(meta, null, 2)
+}
 
 async function handleVerify() {
   if (!secretKey.value) {
@@ -185,7 +213,6 @@ async function handleCreateProvider() {
     return
   }
   createProviderError.value = ''
-  createProviderSuccess.value = ''
   try {
     const p = await adminCreateProvider({
       name: newProviderName.value,
@@ -193,10 +220,10 @@ async function handleCreateProvider() {
       api_key: newProviderApiKey.value,
     })
     providers.value.push(p)
-    createProviderSuccess.value = `上游 "${p.name}" 创建成功。`
     newProviderName.value = ''
     newProviderBaseUrl.value = ''
     newProviderApiKey.value = ''
+    showCreateProviderModal.value = false
   } catch (e) {
     createProviderError.value = e instanceof Error ? e.message : '创建失败。'
   }
@@ -243,7 +270,6 @@ async function handleCreateModel() {
     return
   }
   createModelError.value = ''
-  createModelSuccess.value = ''
   const sizes = newModelSizes.value
     .split(',')
     .map((s) => s.trim())
@@ -257,11 +283,11 @@ async function handleCreateModel() {
       supported_sizes: sizes,
     })
     models.value.push(m)
-    createModelSuccess.value = `模型 "${m.label}" 创建成功。`
     newModelId.value = ''
     newModelLabel.value = ''
     newModelSupportsRef.value = true
     newModelSizes.value = ''
+    showCreateModelModal.value = false
   } catch (e) {
     createModelError.value = e instanceof Error ? e.message : '创建失败。'
   }
@@ -314,6 +340,21 @@ function getProviderName(providerId: string): string {
   return providers.value.find((p) => p.id === providerId)?.name ?? providerId
 }
 
+function maskKey(key: string): string {
+  if (key.length <= 8) return '****'
+  return key.slice(0, 3) + '****' + key.slice(-4)
+}
+
+function toggleKeyReveal(providerId: string) {
+  const set = new Set(revealedKeys.value)
+  if (set.has(providerId)) {
+    set.delete(providerId)
+  } else {
+    set.add(providerId)
+  }
+  revealedKeys.value = set
+}
+
 onMounted(() => {
   if (isAdmin()) {
     void loadData()
@@ -340,35 +381,62 @@ onMounted(() => {
     </template>
 
     <template v-else>
-      <div class="admin-header">
-        <h1 class="admin-title">管理后台</h1>
-        <button class="admin-logout-btn" @click="handleLogout">退出管理</button>
-      </div>
+      <div class="admin-layout">
+        <!-- Top Bar -->
+        <header class="admin-topbar">
+          <button class="admin-hamburger" @click="sidebarOpen = !sidebarOpen">
+            <Menu :size="20" />
+          </button>
+          <h1 class="admin-topbar-title">管理后台</h1>
+          <button class="admin-logout-btn" @click="handleLogout">
+            <LogOut :size="16" />
+            <span>退出管理</span>
+          </button>
+        </header>
 
-      <div v-if="loading" class="loading-state">正在加载数据…</div>
+        <!-- Sidebar -->
+        <aside class="admin-sidebar" :class="{ open: sidebarOpen }">
+          <nav class="admin-nav">
+            <button
+              v-for="item in navItems"
+              :key="item.key"
+              :class="['admin-nav-item', { active: activeSection === item.key }]"
+              @click="activeSection = item.key; sidebarOpen = false"
+            >
+              <component :is="item.icon" :size="18" />
+              <span>{{ item.label }}</span>
+            </button>
+          </nav>
+        </aside>
 
-      <!-- Upstream Providers -->
-      <section class="admin-section">
-        <h2 class="admin-section-title">上游管理</h2>
-        <form class="admin-create-form" @submit.prevent="handleCreateProvider">
-          <input v-model="newProviderName" type="text" placeholder="名称" class="admin-input" maxlength="128" />
-          <input v-model="newProviderBaseUrl" type="text" placeholder="API 地址" class="admin-input admin-input-wide" maxlength="512" />
-          <input v-model="newProviderApiKey" type="password" placeholder="API 密钥" class="admin-input admin-input-wide" maxlength="512" />
-          <button type="submit" class="admin-btn">新增上游</button>
-        </form>
-        <p v-if="createProviderError" class="auth-error">{{ createProviderError }}</p>
-        <p v-if="createProviderSuccess" class="admin-success">{{ createProviderSuccess }}</p>
+        <!-- Mobile Backdrop -->
+        <div v-if="sidebarOpen" class="admin-sidebar-backdrop" @click="sidebarOpen = false" />
+
+        <!-- Main Content -->
+        <main class="admin-main">
+          <div v-if="loading" class="loading-state">正在加载数据…</div>
+
+          <!-- Upstream Providers -->
+          <section v-show="activeSection === 'providers'" class="admin-section">
+        <div class="admin-section-header">
+          <h2 class="admin-section-title">上游管理</h2>
+          <button class="admin-btn" @click="createProviderError = ''; showCreateProviderModal = true">新增上游</button>
+        </div>
 
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>名称</th><th>API 地址</th><th>超时</th><th>默认格式</th><th>操作</th></tr>
+              <tr><th>名称</th><th>API 地址</th><th>API Key</th><th>超时</th><th>默认格式</th><th>操作</th></tr>
             </thead>
             <tbody>
               <template v-for="p in providers" :key="p.id">
                 <tr v-if="editingProviderId !== p.id">
                   <td>{{ p.name }}</td>
                   <td class="td-url">{{ p.base_url }}</td>
+                  <td class="td-key" @click="toggleKeyReveal(p.id)">
+                    <span v-if="revealedKeys.has(p.id)" class="key-full">{{ p.api_key }}</span>
+                    <span v-else class="key-masked">{{ maskKey(p.api_key) }}</span>
+                  </td>
                   <td>{{ p.timeout_seconds }}s</td>
                   <td>{{ p.default_output_format }} / {{ p.default_quality }}</td>
                   <td class="td-actions">
@@ -407,24 +475,11 @@ onMounted(() => {
       </section>
 
       <!-- Model Configs -->
-      <section class="admin-section">
-        <h2 class="admin-section-title">模型管理</h2>
-        <form class="admin-create-form" @submit.prevent="handleCreateModel">
-          <input v-model="newModelId" type="text" placeholder="模型 ID" class="admin-input" maxlength="128" />
-          <input v-model="newModelLabel" type="text" placeholder="显示名称" class="admin-input" maxlength="256" />
-          <select v-model="newModelProviderId" class="admin-input">
-            <option value="" disabled>选择上游</option>
-            <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
-          <label class="admin-checkbox-label">
-            <input v-model="newModelSupportsRef" type="checkbox" />
-            支持参考图
-          </label>
-          <input v-model="newModelSizes" type="text" placeholder="支持尺寸(逗号分隔)" class="admin-input admin-input-wide" />
-          <button type="submit" class="admin-btn">新增模型</button>
-        </form>
-        <p v-if="createModelError" class="auth-error">{{ createModelError }}</p>
-        <p v-if="createModelSuccess" class="admin-success">{{ createModelSuccess }}</p>
+      <section v-show="activeSection === 'models'" class="admin-section">
+        <div class="admin-section-header">
+          <h2 class="admin-section-title">模型管理</h2>
+          <button class="admin-btn" @click="createModelError = ''; showCreateModelModal = true">新增模型</button>
+        </div>
 
         <div class="admin-table-wrap">
           <table class="admin-table">
@@ -468,7 +523,7 @@ onMounted(() => {
       </section>
 
       <!-- Users -->
-      <section class="admin-section">
+      <section v-show="activeSection === 'users'" class="admin-section">
         <h2 class="admin-section-title">新增用户</h2>
         <form class="admin-create-form" @submit.prevent="handleCreateUser">
           <input v-model="newUsername" type="text" placeholder="用户名" class="admin-input" maxlength="64" />
@@ -480,7 +535,7 @@ onMounted(() => {
         <p v-if="createUserSuccess" class="admin-success">{{ createUserSuccess }}</p>
       </section>
 
-      <section class="admin-section">
+      <section v-show="activeSection === 'users'" class="admin-section">
         <h2 class="admin-section-title">用户列表</h2>
         <div class="admin-table-wrap">
           <table class="admin-table">
@@ -518,22 +573,26 @@ onMounted(() => {
       </section>
 
       <!-- Jobs -->
-      <section class="admin-section">
+      <section v-show="activeSection === 'jobs'" class="admin-section">
         <h2 class="admin-section-title">任务列表</h2>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>ID</th><th>状态</th><th>提示词</th><th>模型</th><th>用户</th><th>创建时间</th><th>操作</th></tr>
+              <tr><th>ID</th><th>状态</th><th>提示词</th><th>模型</th><th>用户</th><th>耗时</th><th>创建时间</th><th>操作</th></tr>
             </thead>
             <tbody>
               <tr v-for="job in jobs" :key="job.job_id">
                 <td class="td-id">{{ job.job_id.slice(0, 8) }}</td>
-                <td>{{ job.status }}</td>
+                <td>
+                  <span :class="['status-badge', `status-${job.status}`]">{{ job.status }}</span>
+                </td>
                 <td class="td-prompt">{{ job.prompt }}</td>
                 <td>{{ job.model }}</td>
                 <td>{{ job.username || '-' }}</td>
+                <td class="td-duration">{{ formatDuration(job.started_at, job.finished_at) }}</td>
                 <td>{{ new Date(job.created_at).toLocaleString() }}</td>
-                <td>
+                <td class="td-actions">
+                  <button class="admin-edit-btn" @click="selectedJob = job"><Eye :size="14" /></button>
                   <button class="admin-delete-btn" @click="handleDeleteJob(job.job_id)">删除</button>
                 </td>
               </tr>
@@ -541,6 +600,123 @@ onMounted(() => {
           </table>
         </div>
       </section>
+        </main>
+      </div>
+
+      <!-- Job Detail Modal -->
+      <div v-if="selectedJob" class="modal-backdrop" @click.self="selectedJob = null">
+        <div class="modal-panel admin-modal-panel">
+          <div class="modal-toolbar">
+            <button class="icon-button" @click="selectedJob = null"><X :size="20" /></button>
+          </div>
+          <div class="admin-detail-grid">
+            <div class="admin-detail-section">
+              <h3 class="admin-detail-heading">基本信息</h3>
+              <dl class="admin-detail-list">
+                <dt>任务 ID</dt><dd class="dd-mono">{{ selectedJob.job_id }}</dd>
+                <dt>状态</dt><dd><span :class="['status-badge', `status-${selectedJob.status}`]">{{ selectedJob.status }}</span></dd>
+                <dt>模型</dt><dd>{{ selectedJob.model }}</dd>
+                <dt>尺寸</dt><dd>{{ selectedJob.size }}</dd>
+                <dt>宽高比</dt><dd>{{ selectedJob.aspect_ratio }}</dd>
+                <dt>用户</dt><dd>{{ selectedJob.username || '-' }}</dd>
+                <dt>参考图</dt><dd>{{ selectedJob.reference_image_filename || '-' }}</dd>
+              </dl>
+            </div>
+            <div class="admin-detail-section">
+              <h3 class="admin-detail-heading">时间信息</h3>
+              <dl class="admin-detail-list">
+                <dt>创建时间</dt><dd>{{ new Date(selectedJob.created_at).toLocaleString() }}</dd>
+                <dt>开始时间</dt><dd>{{ selectedJob.started_at ? new Date(selectedJob.started_at).toLocaleString() : '-' }}</dd>
+                <dt>完成时间</dt><dd>{{ selectedJob.finished_at ? new Date(selectedJob.finished_at).toLocaleString() : '-' }}</dd>
+                <dt>耗时</dt><dd class="dd-highlight">{{ formatDuration(selectedJob.started_at, selectedJob.finished_at) }}</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="admin-detail-section">
+            <h3 class="admin-detail-heading">提示词</h3>
+            <p class="admin-detail-text">{{ selectedJob.prompt }}</p>
+          </div>
+          <div v-if="selectedJob.revised_prompt" class="admin-detail-section">
+            <h3 class="admin-detail-heading">修订提示词</h3>
+            <p class="admin-detail-text">{{ selectedJob.revised_prompt }}</p>
+          </div>
+          <div v-if="selectedJob.error_message" class="admin-detail-section">
+            <h3 class="admin-detail-heading">错误信息</h3>
+            <p class="admin-detail-text admin-detail-error">{{ selectedJob.error_message }}</p>
+          </div>
+          <div v-if="selectedJob.provider_job_meta" class="admin-detail-section">
+            <h3 class="admin-detail-heading">上游渠道元数据</h3>
+            <pre class="admin-detail-meta">{{ formatMeta(selectedJob.provider_job_meta) }}</pre>
+          </div>
+          <div v-if="selectedJob.image_url" class="admin-detail-section">
+            <h3 class="admin-detail-heading">生成结果</h3>
+            <img :src="selectedJob.image_url" class="admin-detail-image" alt="生成图片" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Create Provider Modal -->
+      <div v-if="showCreateProviderModal" class="modal-backdrop" @click.self="showCreateProviderModal = false">
+        <div class="modal-panel admin-modal-panel admin-modal-form">
+          <div class="modal-toolbar">
+            <h3 class="admin-modal-title">新增上游</h3>
+            <button class="icon-button" @click="showCreateProviderModal = false"><X :size="20" /></button>
+          </div>
+          <form class="admin-modal-form-body" @submit.prevent="handleCreateProvider()">
+            <label class="admin-form-label">
+              名称
+              <input v-model="newProviderName" type="text" class="admin-input" maxlength="128" placeholder="如 OpenAI Proxy" />
+            </label>
+            <label class="admin-form-label">
+              API 地址
+              <input v-model="newProviderBaseUrl" type="text" class="admin-input" maxlength="512" placeholder="https://api.example.com/v1" />
+            </label>
+            <label class="admin-form-label">
+              API 密钥
+              <input v-model="newProviderApiKey" type="password" class="admin-input" maxlength="512" placeholder="sk-..." />
+            </label>
+            <p v-if="createProviderError" class="auth-error">{{ createProviderError }}</p>
+            <button type="submit" class="admin-btn admin-btn-block">创建</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Create Model Modal -->
+      <div v-if="showCreateModelModal" class="modal-backdrop" @click.self="showCreateModelModal = false">
+        <div class="modal-panel admin-modal-panel admin-modal-form">
+          <div class="modal-toolbar">
+            <h3 class="admin-modal-title">新增模型</h3>
+            <button class="icon-button" @click="showCreateModelModal = false"><X :size="20" /></button>
+          </div>
+          <form class="admin-modal-form-body" @submit.prevent="handleCreateModel()">
+            <label class="admin-form-label">
+              模型 ID
+              <input v-model="newModelId" type="text" class="admin-input" maxlength="128" placeholder="gpt-image-2-c" />
+            </label>
+            <label class="admin-form-label">
+              显示名称
+              <input v-model="newModelLabel" type="text" class="admin-input" maxlength="256" placeholder="GPT-Image-2 C" />
+            </label>
+            <label class="admin-form-label">
+              上游
+              <select v-model="newModelProviderId" class="admin-input">
+                <option value="" disabled>选择上游</option>
+                <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name }}</option>
+              </select>
+            </label>
+            <label class="admin-form-label admin-form-label-row">
+              <input v-model="newModelSupportsRef" type="checkbox" />
+              <span>支持参考图</span>
+            </label>
+            <label class="admin-form-label">
+              支持尺寸（逗号分隔，留空不限制）
+              <input v-model="newModelSizes" type="text" class="admin-input" placeholder="1024x1024, 1280x720" />
+            </label>
+            <p v-if="createModelError" class="auth-error">{{ createModelError }}</p>
+            <button type="submit" class="admin-btn admin-btn-block">创建</button>
+          </form>
+        </div>
+      </div>
     </template>
   </div>
 </template>

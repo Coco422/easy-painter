@@ -45,12 +45,19 @@ def test_generation_job_user_id_index_is_created_before_connection_closes(monkey
         "CREATE INDEX IF NOT EXISTS ix_generation_jobs_user_id" in item
         for item in fake_engine.connection.statements
     )
+    assert any("ADD COLUMN is_public BOOLEAN DEFAULT FALSE" in item for item in fake_engine.connection.statements)
+    assert any("ADD COLUMN is_favorite BOOLEAN DEFAULT FALSE" in item for item in fake_engine.connection.statements)
 
 
 def test_admin_delete_job_removes_reference_image_from_reference_bucket(monkeypatch):
     class FakeJob:
+        id = "job-1"
         object_key = "generated/job.png"
         reference_image_key = "references/job/source.png"
+
+    class FakeScalars:
+        def all(self):
+            return []
 
     class FakeDb:
         def __init__(self):
@@ -63,6 +70,9 @@ def test_admin_delete_job_removes_reference_image_from_reference_bucket(monkeypa
 
         def delete(self, job):
             self.deleted = job
+
+        def scalars(self, statement):
+            return FakeScalars()
 
         def commit(self):
             self.committed = True

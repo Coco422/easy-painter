@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { Check, Copy, Download, X } from 'lucide-vue-next'
+import { Check, Copy, Download, Globe, Lock, Star, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
 import type { GalleryItem } from '@/lib/types'
 
 const props = defineProps<{
   item: GalleryItem | null
+  isOwner?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
+  toggleFavorite: [item: GalleryItem]
+  togglePublic: [item: GalleryItem]
 }>()
 
 const open = computed(() => Boolean(props.item))
@@ -59,13 +62,38 @@ async function downloadImage() {
 <template>
   <div v-if="open && item" class="modal-backdrop" @click.self="closeModal">
     <div class="modal-panel">
-      <div class="modal-toolbar">
-        <button class="icon-button" type="button" title="下载图片" aria-label="下载图片" @click="downloadImage">
-          <Download :size="20" />
-        </button>
-        <button class="icon-button" type="button" title="关闭" aria-label="关闭" @click="closeModal">
-          <X :size="20" />
-        </button>
+      <div class="modal-toolbar" :class="{ 'modal-toolbar--owner': isOwner }">
+        <div v-if="isOwner" class="modal-toolbar-left">
+          <button
+            class="icon-button"
+            :class="{ active: item.is_favorite }"
+            type="button"
+            title="收藏"
+            aria-label="收藏"
+            @click="emit('toggleFavorite', item)"
+          >
+            <Star :size="20" :fill="item.is_favorite ? 'currentColor' : 'none'" />
+          </button>
+          <button
+            class="icon-button"
+            :class="{ active: item.is_public }"
+            type="button"
+            :title="item.is_public ? '公开' : '私密'"
+            :aria-label="item.is_public ? '公开' : '私密'"
+            @click="emit('togglePublic', item)"
+          >
+            <Globe v-if="item.is_public" :size="20" />
+            <Lock v-else :size="20" />
+          </button>
+        </div>
+        <div class="modal-toolbar-right">
+          <button class="icon-button" type="button" title="下载图片" aria-label="下载图片" @click="downloadImage">
+            <Download :size="20" />
+          </button>
+          <button class="icon-button" type="button" title="关闭" aria-label="关闭" @click="closeModal">
+            <X :size="20" />
+          </button>
+        </div>
       </div>
 
       <div class="modal-image-frame">

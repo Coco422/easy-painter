@@ -88,14 +88,28 @@ export function fetchGallery() {
   return apiRequest<GalleryItem[]>('/api/v1/gallery')
 }
 
-export async function fetchPublicDiscovery() {
-  const response = await fetch('/api/v1/gallery')
-  if (!response.ok) throw new ApiError('加载公开画廊失败。', response.status)
-  return (await response.json()) as GalleryItem[]
+export function fetchPublicDiscovery(sort: 'recent' | 'liked' = 'recent') {
+  return apiRequest<GalleryItem[]>(`/api/v1/gallery?sort=${sort}`)
 }
 
 export function deleteJob(jobId: string) {
   return apiRequest<void>(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
+}
+
+export function toggleJobPublic(jobId: string) {
+  return apiRequest<{ is_public: boolean }>(`/api/v1/jobs/${jobId}/public`, { method: 'PUT' })
+}
+
+export function toggleJobFavorite(jobId: string) {
+  return apiRequest<{ is_favorite: boolean }>(`/api/v1/jobs/${jobId}/favorite`, { method: 'PUT' })
+}
+
+export function likeGalleryItem(jobId: string) {
+  return apiRequest<{ like_count: number }>(`/api/v1/gallery/${jobId}/like`, { method: 'POST' })
+}
+
+export function unlikeGalleryItem(jobId: string) {
+  return apiRequest<void>(`/api/v1/gallery/${jobId}/like`, { method: 'DELETE' })
 }
 
 export function fetchPublicGallery(username: string) {

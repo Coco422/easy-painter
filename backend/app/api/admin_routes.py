@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password, require_admin
 from app.db.session import get_db
+from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.model_config import ModelConfig
 from app.models.upstream_provider import UpstreamProvider
@@ -24,9 +26,17 @@ class AdminJobItem(BaseModel):
     job_id: str
     status: str
     prompt: str
+    revised_prompt: str | None = None
     model: str
+    size: str = "auto"
+    aspect_ratio: str = "auto"
     username: str | None = None
+    error_message: str | None = None
+    provider_job_meta: dict[str, Any] | None = None
+    image_url: str | None = None
+    reference_image_filename: str | None = None
     created_at: str
+    started_at: str | None = None
     finished_at: str | None = None
 
 
@@ -47,10 +57,18 @@ def admin_list_jobs(
         result.append(AdminJobItem(
             job_id=job.id,
             status=job.status.value,
-            prompt=job.prompt[:80],
+            prompt=job.prompt,
+            revised_prompt=job.revised_prompt,
             model=job.model,
+            size=job.size or "auto",
+            aspect_ratio=job.aspect_ratio or "auto",
             username=username,
+            error_message=job.error_message,
+            provider_job_meta=job.provider_job_meta,
+            image_url=job.public_url,
+            reference_image_filename=job.reference_image_filename,
             created_at=job.created_at.isoformat() if job.created_at else "",
+            started_at=job.started_at.isoformat() if job.started_at else None,
             finished_at=job.finished_at.isoformat() if job.finished_at else None,
         ))
     return result
@@ -78,6 +96,8 @@ def admin_delete_job(
             storage.delete_reference_image(job.reference_image_key)
         except Exception:
             logger.warning("Failed to delete MinIO reference %s", job.reference_image_key)
+    for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
+        db.delete(like)
     db.delete(job)
     db.commit()
 
@@ -153,6 +173,8 @@ def admin_delete_user(
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在。")
+    for like in db.scalars(select(GalleryLike).where(GalleryLike.user_id == user.id)).all():
+        db.delete(like)
     db.delete(user)
     db.commit()
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
 from redis import Redis
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -14,6 +14,7 @@ from app.core.auth import get_current_user_optional, require_current_user
 from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
+from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.user import User
 from app.schemas.job import (
@@ -240,8 +241,75 @@ def delete_job(
             MinioStorageService().delete_reference_image(job.reference_image_key)
         except Exception:
             logger.warning("Failed to delete MinIO reference %s", job.reference_image_key)
+    for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
+        db.delete(like)
     db.delete(job)
     db.commit()
+
+
+@router.put("/jobs/{job_id}/public")
+def toggle_job_public(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> dict[str, bool]:
+    job = db.get(GenerationJob, job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
+    job.is_public = not job.is_public
+    db.commit()
+    return {"is_public": job.is_public}
+
+
+@router.put("/jobs/{job_id}/favorite")
+def toggle_job_favorite(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> dict[str, bool]:
+    job = db.get(GenerationJob, job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
+    job.is_favorite = not job.is_favorite
+    db.commit()
+    return {"is_favorite": job.is_favorite}
+
+
+@router.post("/gallery/{job_id}/like")
+def like_gallery_item(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> dict[str, int]:
+    job = db.get(GenerationJob, job_id)
+    if not job or not job.public_url or not job.is_public:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品不存在。")
+    existing = db.scalar(
+        select(GalleryLike).where(
+            GalleryLike.job_id == job_id, GalleryLike.user_id == current_user.id
+        )
+    )
+    if not existing:
+        db.add(GalleryLike(job_id=job_id, user_id=current_user.id))
+        db.commit()
+    count = _get_like_count(db, job_id)
+    return {"like_count": count}
+
+
+@router.delete("/gallery/{job_id}/like", status_code=status.HTTP_204_NO_CONTENT)
+def unlike_gallery_item(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> None:
+    existing = db.scalar(
+        select(GalleryLike).where(
+            GalleryLike.job_id == job_id, GalleryLike.user_id == current_user.id
+        )
+    )
+    if existing:
+        db.delete(existing)
+        db.commit()
 
 
 @router.get("/gallery", response_model=list[GalleryItem])
@@ -249,6 +317,7 @@ def get_gallery(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_current_user_optional),
+    sort: str = Query("recent", pattern="^(recent|liked)$"),
 ) -> list[GalleryItem]:
     if current_user:
         stmt = (
@@ -259,36 +328,25 @@ def get_gallery(
             .limit(settings.gallery_limit)
         )
     else:
-        public_user_ids = db.scalars(
-            select(User.id).where(User.is_public == True)
-        ).all()
-        if public_user_ids:
-            user_filter = (GenerationJob.user_id.in_(public_user_ids)) | (GenerationJob.user_id.is_(None))
-        else:
-            user_filter = GenerationJob.user_id.is_(None)
         stmt = (
             select(GenerationJob)
             .where(GenerationJob.status == JobStatus.SUCCEEDED)
-            .where(user_filter)
-            .order_by(desc(GenerationJob.finished_at))
-            .limit(settings.gallery_limit)
+            .where(GenerationJob.is_public.is_(True))
         )
-    jobs = db.scalars(stmt).all()
-    return [
-        GalleryItem(
-            job_id=job.id,
-            image_url=job.public_url or "",
-            prompt=job.prompt,
-            revised_prompt=job.revised_prompt,
-            model=job.model,
-            size=job.size,
-            aspect_ratio=job.aspect_ratio,
-            finished_at=job.finished_at,
-            username=_get_username(db, job.user_id),
-        )
-        for job in jobs
-        if job.public_url and job.finished_at
-    ]
+        if sort == "liked":
+            like_count_sub = (
+                select(GalleryLike.job_id, func.count().label("cnt"))
+                .group_by(GalleryLike.job_id)
+                .subquery()
+            )
+            stmt = stmt.outerjoin(like_count_sub, GenerationJob.id == like_count_sub.c.job_id)
+            stmt = stmt.order_by(desc(like_count_sub.c.cnt), desc(GenerationJob.finished_at))
+        else:
+            stmt = stmt.order_by(desc(GenerationJob.finished_at))
+        stmt = stmt.limit(settings.gallery_limit)
+
+    jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
+    return _build_gallery_items(db, jobs, current_user.id if current_user else None)
 
 
 @router.get("/gallery/{username}", response_model=list[GalleryItem])
@@ -298,38 +356,95 @@ def get_user_gallery(
     settings: Settings = Depends(get_settings),
 ) -> list[GalleryItem]:
     user = db.scalar(select(User).where(User.username == username))
-    if not user or not user.is_public:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该用户不存在或未公开画廊。")
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该用户不存在。")
     stmt = (
         select(GenerationJob)
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
         .where(GenerationJob.user_id == user.id)
+        .where(GenerationJob.is_public.is_(True))
         .order_by(desc(GenerationJob.finished_at))
         .limit(settings.gallery_limit)
     )
-    jobs = db.scalars(stmt).all()
+    jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
+    return _build_gallery_items(db, jobs, None)
+
+
+def _get_like_count(db: Session, job_id: str) -> int:
+    return db.scalar(
+        select(func.count()).select_from(GalleryLike).where(GalleryLike.job_id == job_id)
+    ) or 0
+
+
+def _batch_like_counts(db: Session, job_ids: list[str]) -> dict[str, int]:
+    if not job_ids:
+        return {}
+    rows = db.execute(
+        select(GalleryLike.job_id, func.count()).where(GalleryLike.job_id.in_(job_ids)).group_by(GalleryLike.job_id)
+    ).all()
+    return {job_id: count for job_id, count in rows}
+
+
+def _batch_user_likes(db: Session, job_ids: list[str], user_id: str | None) -> set[str]:
+    if not user_id or not job_ids:
+        return set()
+    rows = db.scalars(
+        select(GalleryLike.job_id).where(
+            GalleryLike.job_id.in_(job_ids), GalleryLike.user_id == user_id
+        )
+    ).all()
+    return set(rows)
+
+
+def _batch_usernames(db: Session, user_ids: list[str]) -> dict[str, str]:
+    if not user_ids:
+        return {}
+    users = db.scalars(select(User).where(User.id.in_(user_ids))).all()
+    return {u.id: u.username for u in users}
+
+
+def _build_gallery_item(
+    job: GenerationJob,
+    username: str | None,
+    like_counts: dict[str, int],
+    liked_job_ids: set[str],
+) -> GalleryItem:
+    return GalleryItem(
+        job_id=job.id,
+        image_url=job.public_url or "",
+        prompt=job.prompt,
+        revised_prompt=job.revised_prompt,
+        model=job.model,
+        size=job.size,
+        aspect_ratio=job.aspect_ratio,
+        finished_at=job.finished_at,
+        username=username,
+        is_public=job.is_public,
+        is_favorite=job.is_favorite,
+        like_count=like_counts.get(job.id, 0),
+        liked_by_me=job.id in liked_job_ids,
+    )
+
+
+def _build_gallery_items(
+    db: Session,
+    jobs: list[GenerationJob],
+    viewer_user_id: str | None,
+) -> list[GalleryItem]:
+    job_ids = [j.id for j in jobs]
+    user_ids = [j.user_id for j in jobs if j.user_id]
+    like_counts = _batch_like_counts(db, job_ids)
+    liked_job_ids = _batch_user_likes(db, job_ids, viewer_user_id)
+    usernames = _batch_usernames(db, user_ids)
     return [
-        GalleryItem(
-            job_id=job.id,
-            image_url=job.public_url or "",
-            prompt=job.prompt,
-            revised_prompt=job.revised_prompt,
-            model=job.model,
-            size=job.size,
-            aspect_ratio=job.aspect_ratio,
-            finished_at=job.finished_at,
-            username=username,
+        _build_gallery_item(
+            job=job,
+            username=usernames.get(job.user_id) if job.user_id else None,
+            like_counts=like_counts,
+            liked_job_ids=liked_job_ids,
         )
         for job in jobs
-        if job.public_url and job.finished_at
     ]
-
-
-def _get_username(db: Session, user_id: str | None) -> str | None:
-    if not user_id:
-        return None
-    user = db.get(User, user_id)
-    return user.username if user else None
 
 
 @router.get("/healthz", response_model=HealthResponse)

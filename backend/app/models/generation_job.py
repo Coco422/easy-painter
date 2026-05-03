@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Enum as SqlEnum, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -46,3 +46,5 @@ class GenerationJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, index=True)

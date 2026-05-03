@@ -4,6 +4,7 @@ from app.core.auth import hash_password
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
 from app.models.model_config import ModelConfig
 from app.models.upstream_provider import UpstreamProvider
@@ -11,6 +12,7 @@ from app.models.user import User
 
 
 def init_db() -> None:
+    _ = GalleryLike
     _ = GenerationJob
     _ = User
     _ = UpstreamProvider
@@ -31,6 +33,8 @@ def _ensure_generation_job_columns() -> None:
         "reference_image_content_type": "ALTER TABLE generation_jobs ADD COLUMN reference_image_content_type VARCHAR(128)",
         "reference_image_filename": "ALTER TABLE generation_jobs ADD COLUMN reference_image_filename VARCHAR(255)",
         "user_id": "ALTER TABLE generation_jobs ADD COLUMN user_id VARCHAR(36)",
+        "is_public": "ALTER TABLE generation_jobs ADD COLUMN is_public BOOLEAN DEFAULT FALSE",
+        "is_favorite": "ALTER TABLE generation_jobs ADD COLUMN is_favorite BOOLEAN DEFAULT FALSE",
     }
 
     with engine.begin() as connection:
@@ -54,6 +58,8 @@ def _ensure_generation_job_columns() -> None:
             )
         )
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_user_id ON generation_jobs (user_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_is_public ON generation_jobs (is_public)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_is_favorite ON generation_jobs (is_favorite)"))
 
 
 def _ensure_default_user() -> None:

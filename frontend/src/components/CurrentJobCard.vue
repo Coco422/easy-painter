@@ -11,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   retry: [job: JobDetailResponse]
   dismiss: [jobId: string]
+  addToGallery: [job: JobDetailResponse]
 }>()
 
 const CLOCK_INTERVAL_MS = 1000
@@ -238,6 +239,10 @@ onBeforeUnmount(() => {
       <div v-if="job.status === 'failed'" class="current-job-actions">
         <button type="button" class="secondary-button" @click="emit('retry', job)">重新生成</button>
         <button type="button" class="ghost-button" @click="emit('dismiss', job.job_id)">结束</button>
+      </div>
+      <div v-if="job.status === 'succeeded' && job.image_url" class="current-job-actions">
+        <button type="button" class="secondary-button" @click="emit('addToGallery', job)">加入画廊</button>
+        <button type="button" class="ghost-button" @click="emit('dismiss', job.job_id)">关闭</button>
       </div>
     </div>
 

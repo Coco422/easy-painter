@@ -7,7 +7,18 @@ import CurrentJobCard from '@/components/CurrentJobCard.vue'
 import GalleryGrid from '@/components/GalleryGrid.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import PromptModal from '@/components/PromptModal.vue'
-import { createJob, deleteJob, fetchGallery, fetchJob, fetchPublicDiscovery, fetchPublicMeta } from '@/lib/api'
+import {
+  createJob,
+  deleteJob,
+  fetchGallery,
+  fetchJob,
+  fetchPublicDiscovery,
+  fetchPublicMeta,
+  likeGalleryItem,
+  toggleJobFavorite,
+  toggleJobPublic,
+  unlikeGalleryItem,
+} from '@/lib/api'
 import { isLoggedIn } from '@/lib/auth'
 import type {
   BatchCount,
@@ -27,6 +38,7 @@ const meta = ref<PublicMetaResponse | null>(null)
 const gallery = ref<GalleryItem[]>([])
 const publicGallery = ref<GalleryItem[]>([])
 const galleryTab = ref<'mine' | 'public'>('public')
+const publicSort = ref<'recent' | 'liked'>('recent')
 const selectedItem = ref<GalleryItem | null>(null)
 const prompt = ref('')
 const selectedModel = ref('')
@@ -54,7 +66,12 @@ async function loadGallery() {
 }
 
 async function loadPublicGallery() {
-  publicGallery.value = await fetchPublicDiscovery()
+  publicGallery.value = await fetchPublicDiscovery(publicSort.value)
+}
+
+function switchPublicSort(sort: 'recent' | 'liked') {
+  publicSort.value = sort
+  void loadPublicGallery()
 }
 
 function switchGalleryTab(tab: 'mine' | 'public') {
@@ -176,13 +193,11 @@ function makeQueuedJob(result: CreateJobResponse, promptText: string, model: str
 async function handleSettledJob(job: JobDetailResponse) {
   clearJobTimer(job.job_id)
   uncacheJob(job.job_id)
+  upsertActiveJob(job)
   if (job.status === 'succeeded') {
-    activeJobs.value = activeJobs.value.filter((item) => item.job_id !== job.job_id)
-    feedback.value = '作品已经完成，已为你刷新画廊。'
-    await loadGallery()
+    feedback.value = '作品已生成，你可以将其加入画廊。'
     return
   }
-  upsertActiveJob(job)
   feedback.value = job.error_message ?? '生成失败，请稍后再试。'
 }
 
@@ -329,6 +344,46 @@ async function handleDeleteItem(item: GalleryItem) {
   }
 }
 
+function handleAddToGallery(job: JobDetailResponse) {
+  removeActiveJob(job.job_id)
+  void loadGallery()
+  feedback.value = '作品已加入画廊。'
+}
+
+async function handleToggleFavorite(item: GalleryItem) {
+  try {
+    const result = await toggleJobFavorite(item.job_id)
+    item.is_favorite = result.is_favorite
+  } catch (e) {
+    feedback.value = e instanceof Error ? e.message : '操作失败。'
+  }
+}
+
+async function handleTogglePublic(item: GalleryItem) {
+  try {
+    const result = await toggleJobPublic(item.job_id)
+    item.is_public = result.is_public
+  } catch (e) {
+    feedback.value = e instanceof Error ? e.message : '操作失败。'
+  }
+}
+
+async function handleToggleLike(item: GalleryItem) {
+  try {
+    if (item.liked_by_me) {
+      await unlikeGalleryItem(item.job_id)
+      item.liked_by_me = false
+      item.like_count = Math.max(0, (item.like_count ?? 1) - 1)
+    } else {
+      const result = await likeGalleryItem(item.job_id)
+      item.liked_by_me = true
+      item.like_count = result.like_count
+    }
+  } catch (e) {
+    feedback.value = e instanceof Error ? e.message : '操作失败。'
+  }
+}
+
 onBeforeUnmount(() => {
   pollingTimers.forEach((timer) => window.clearTimeout(timer))
   pollingTimers.clear()
@@ -372,32 +427,58 @@ onMounted(() => {
       :is-polling="isLiveJob(job)"
       @retry="retryJob"
       @dismiss="removeActiveJob"
+      @add-to-gallery="handleAddToGallery"
     />
   </div>
 
   <div v-if="loading" class="loading-state">正在加载首页内容…</div>
   <template v-else>
-    <div class="gallery-tabs" v-if="isLoggedIn()">
-      <button
-        class="gallery-tab"
-        :class="{ active: galleryTab === 'mine' }"
-        @click="switchGalleryTab('mine')"
-      >我的画廊</button>
-      <button
-        class="gallery-tab"
-        :class="{ active: galleryTab === 'public' }"
-        @click="switchGalleryTab('public')"
-      >公开画廊</button>
+    <div class="gallery-header-row">
+      <div class="gallery-tabs" v-if="isLoggedIn()">
+        <button
+          class="gallery-tab"
+          :class="{ active: galleryTab === 'mine' }"
+          @click="switchGalleryTab('mine')"
+        >我的画廊</button>
+        <button
+          class="gallery-tab"
+          :class="{ active: galleryTab === 'public' }"
+          @click="switchGalleryTab('public')"
+        >公开画廊</button>
+      </div>
+      <h2 class="gallery-heading">{{ galleryTab === 'mine' ? '我的画廊' : '公开画廊' }}</h2>
+      <div v-if="galleryTab === 'public'" class="gallery-sort-toggle">
+        <button
+          class="sort-btn"
+          :class="{ active: publicSort === 'recent' }"
+          @click="switchPublicSort('recent')"
+        >最近</button>
+        <button
+          class="sort-btn"
+          :class="{ active: publicSort === 'liked' }"
+          @click="switchPublicSort('liked')"
+        >最热</button>
+      </div>
     </div>
-    <h2 class="gallery-heading">{{ galleryTab === 'mine' ? '我的画廊' : '公开画廊' }}</h2>
     <GalleryGrid
       :items="displayedGallery"
       :show-username="galleryTab === 'public'"
       :deletable="galleryTab === 'mine'"
+      :show-owner-actions="galleryTab === 'mine'"
+      :show-likes="galleryTab === 'public'"
       @select="selectedItem = $event"
       @delete="handleDeleteItem"
+      @toggle-favorite="handleToggleFavorite"
+      @toggle-public="handleTogglePublic"
+      @toggle-like="handleToggleLike"
     />
   </template>
 
-  <PromptModal :item="selectedItem" @close="selectedItem = null" />
+  <PromptModal
+    :item="selectedItem"
+    :is-owner="galleryTab === 'mine'"
+    @close="selectedItem = null"
+    @toggle-favorite="handleToggleFavorite"
+    @toggle-public="handleTogglePublic"
+  />
 </template>

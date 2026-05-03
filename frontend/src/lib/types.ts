@@ -53,6 +53,11 @@ export interface GalleryItem {
   size: string
   aspect_ratio?: ImageAspectRatio | null
   finished_at: string
+  username?: string | null
+  is_public?: boolean
+  is_favorite?: boolean
+  like_count?: number
+  liked_by_me?: boolean
 }
 
 export type ImageAspectRatio = 'auto' | '1:1' | '3:4' | '9:16' | '4:3' | '16:9'
@@ -90,9 +95,17 @@ export interface AdminJobItem {
   job_id: string
   status: string
   prompt: string
+  revised_prompt: string | null
   model: string
+  size: string
+  aspect_ratio: string
   username: string | null
+  error_message: string | null
+  provider_job_meta: Record<string, unknown> | null
+  image_url: string | null
+  reference_image_filename: string | null
   created_at: string
+  started_at: string | null
   finished_at: string | null
 }
 

@@ -118,6 +118,10 @@ class GalleryItem(BaseModel):
     aspect_ratio: str | None = None
     finished_at: datetime
     username: str | None = None
+    is_public: bool = False
+    is_favorite: bool = False
+    like_count: int = 0
+    liked_by_me: bool = False
 
 
 class HealthResponse(BaseModel):
