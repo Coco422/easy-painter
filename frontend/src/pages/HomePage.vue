@@ -360,6 +360,7 @@ async function handleToggleFavorite(item: GalleryItem) {
 }
 
 async function handleTogglePublic(item: GalleryItem) {
+  if (!item.is_public && !confirm('确定将此作品公开到画廊吗？其他用户将可以看到它。')) return
   try {
     const result = await toggleJobPublic(item.job_id)
     item.is_public = result.is_public

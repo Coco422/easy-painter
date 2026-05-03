@@ -89,7 +89,7 @@ export function fetchGallery() {
 }
 
 export function fetchPublicDiscovery(sort: 'recent' | 'liked' = 'recent') {
-  return apiRequest<GalleryItem[]>(`/api/v1/gallery?sort=${sort}`)
+  return apiRequest<GalleryItem[]>(`/api/v1/gallery?scope=public&sort=${sort}`)
 }
 
 export function deleteJob(jobId: string) {

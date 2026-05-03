@@ -318,8 +318,9 @@ def get_gallery(
     settings: Settings = Depends(get_settings),
     current_user: User | None = Depends(get_current_user_optional),
     sort: str = Query("recent", pattern="^(recent|liked)$"),
+    scope: str = Query("mine", pattern="^(mine|public)$"),
 ) -> list[GalleryItem]:
-    if current_user:
+    if current_user and scope == "mine":
         stmt = (
             select(GenerationJob)
             .where(GenerationJob.status == JobStatus.SUCCEEDED)
