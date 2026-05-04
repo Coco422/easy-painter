@@ -18,6 +18,7 @@ import {
   adminUpdateUser,
 } from '@/lib/api'
 import { adminLogout, adminVerify, isAdmin } from '@/lib/auth'
+import { ApiError } from '@/lib/api'
 import type { AdminJobItem, ModelConfig, UpstreamProvider, UserInfo } from '@/lib/types'
 
 const secretKey = ref('')
@@ -117,8 +118,11 @@ async function loadData() {
     users.value = u
     providers.value = p
     models.value = m
-  } catch {
-    // ignore
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      adminLogout()
+      verifyError.value = '管理员密钥已过期，请重新验证。'
+    }
   } finally {
     loading.value = false
   }
