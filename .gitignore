@@ -11,3 +11,5 @@ frontend/.vite
 data/minio
 data/postgres
 data/redis
+
+.claude/
