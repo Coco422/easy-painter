@@ -577,11 +577,15 @@ a {
   }
 }
 
-.job-prompt, .job-error, .modal-prompt, .modal-revised {
+.job-prompt, .job-hint, .job-error, .modal-prompt, .modal-revised {
   margin: 12px 0 0;
   color: var(--text-secondary);
   line-height: 1.8;
   font-size: 15px;
+}
+
+.job-hint {
+  color: var(--accent-strong);
 }
 
 .job-error {

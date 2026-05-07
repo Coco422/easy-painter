@@ -84,6 +84,10 @@ export function fetchJob(jobId: string) {
   return apiRequest<JobDetailResponse>(`/api/v1/jobs/${jobId}`)
 }
 
+export function fetchActiveJobs() {
+  return apiRequest<JobDetailResponse[]>('/api/v1/jobs/active')
+}
+
 export function fetchGallery() {
   return apiRequest<GalleryItem[]>('/api/v1/gallery')
 }

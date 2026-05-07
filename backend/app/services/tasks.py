@@ -4,7 +4,6 @@ import logging
 from datetime import datetime, timezone
 
 from celery import Celery
-from celery.exceptions import MaxRetriesExceededError
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -88,19 +87,26 @@ def generate_image_task(self, job_id: str) -> None:
             _mark_succeeded(db=db, job=job, result=result, object_key=stored.object_key, public_url=stored.public_url)
         except UpstreamServiceError as exc:
             logger.warning("Upstream generation error for job %s retryable=%s: %s", job.id, exc.retryable, exc.user_message)
-            if exc.retryable:
-                try:
-                    raise self.retry(exc=exc, countdown=15 * (self.request.retries + 1))
-                except MaxRetriesExceededError:
-                    _mark_failed(db=db, job=job, message="生成服务暂时不可用，请稍后重试。")
-            else:
-                _mark_failed(db=db, job=job, message=exc.user_message)
+            if exc.retryable and _can_retry(self):
+                retry_number = self.request.retries + 1
+                retry_total = self.max_retries or retry_number
+                job.error_message = f"{exc.user_message}正在自动重试（{retry_number}/{retry_total}）。"
+                db.commit()
+                raise self.retry(exc=exc, countdown=15 * retry_number)
+            _mark_failed(
+                db=db,
+                job=job,
+                message="生成服务暂时不可用，请稍后重试。" if exc.retryable else exc.user_message,
+            )
         except StorageError:
             logger.exception("Storage error for generation job %s.", job.id)
-            try:
-                raise self.retry(countdown=15 * (self.request.retries + 1))
-            except MaxRetriesExceededError:
-                _mark_failed(db=db, job=job, message="图片保存失败，请稍后重试。")
+            if _can_retry(self):
+                retry_number = self.request.retries + 1
+                retry_total = self.max_retries or retry_number
+                job.error_message = f"图片保存失败，正在自动重试（{retry_number}/{retry_total}）。"
+                db.commit()
+                raise self.retry(countdown=15 * retry_number)
+            _mark_failed(db=db, job=job, message="图片保存失败，请稍后重试。")
         except Exception:
             logger.exception("Unexpected generation task failure for job %s.", job.id)
             _mark_failed(db=db, job=job, message="生成任务执行失败，请稍后重试。")
@@ -133,3 +139,10 @@ def _mark_failed(*, db, job: GenerationJob, message: str) -> None:
     job.finished_at = utcnow()
     db.commit()
     logger.info("Generation job %s failed message=%s.", job.id, message)
+
+
+def _can_retry(task) -> bool:
+    max_retries = task.max_retries
+    if max_retries is None:
+        return True
+    return task.request.retries < max_retries

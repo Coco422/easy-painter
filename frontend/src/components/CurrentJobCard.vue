@@ -235,6 +235,7 @@ onBeforeUnmount(() => {
         <span v-if="isPolling" class="status-dot" />
       </div>
       <p class="job-prompt">{{ job.prompt }}</p>
+      <p v-if="isLiveStatus(job.status) && job.error_message" class="job-hint">{{ job.error_message }}</p>
       <p v-if="job.status === 'failed'" class="job-error">{{ job.error_message || '任务已失败，请重试或结束。' }}</p>
       <div v-if="job.status === 'failed'" class="current-job-actions">
         <button type="button" class="secondary-button" @click="emit('retry', job)">重新生成</button>

@@ -10,6 +10,7 @@ import PromptModal from '@/components/PromptModal.vue'
 import {
   createJob,
   deleteJob,
+  fetchActiveJobs,
   fetchGallery,
   fetchJob,
   fetchPublicDiscovery,
@@ -220,21 +221,42 @@ function pollJob(jobId: string) {
   void run()
 }
 
+function restoreLiveJob(job: JobDetailResponse) {
+  upsertActiveJob(job)
+  cacheJob(job.job_id)
+  pollJob(job.job_id)
+}
+
 async function restoreCachedJobs() {
-  const cachedIds = readCachedJobIds()
-  if (cachedIds.length === 0) return
+  const serverJobIds = new Set<string>()
   let restoredCount = 0
+
+  if (isLoggedIn()) {
+    try {
+      const serverJobs = await fetchActiveJobs()
+      for (const job of serverJobs) {
+        serverJobIds.add(job.job_id)
+        if (isLiveJob(job)) {
+          restoreLiveJob(job)
+          restoredCount += 1
+        }
+      }
+    } catch {
+      feedback.value = '进行中任务暂时无法从后端同步，正在尝试本地缓存。'
+    }
+  }
+
+  const cachedIds = readCachedJobIds()
+  if (cachedIds.length === 0 && restoredCount === 0) return
   await Promise.all(
-    cachedIds.map(async (jobId) => {
+    cachedIds.filter((jobId) => !serverJobIds.has(jobId)).map(async (jobId) => {
       try {
         const job = await fetchJob(jobId)
         if (!isLiveJob(job)) {
           await handleSettledJob(job)
           return
         }
-        upsertActiveJob(job)
-        cacheJob(job.job_id)
-        pollJob(job.job_id)
+        restoreLiveJob(job)
         restoredCount += 1
       } catch {
         uncacheJob(jobId)

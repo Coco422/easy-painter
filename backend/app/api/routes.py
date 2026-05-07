@@ -35,6 +35,7 @@ from app.services.tasks import generate_image_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+ACTIVE_JOBS_LIMIT = 20
 
 
 def _load_models(db: Session, settings: Settings) -> list[dict[str, str | bool | list[str]]]:
@@ -202,11 +203,30 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
     return ParsedCreateJobPayload(request=payload)
 
 
+@router.get("/jobs/active", response_model=list[JobDetailResponse])
+def list_active_jobs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_current_user),
+) -> list[JobDetailResponse]:
+    stmt = (
+        select(GenerationJob)
+        .where(GenerationJob.user_id == current_user.id)
+        .where(GenerationJob.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING]))
+        .order_by(desc(GenerationJob.created_at))
+        .limit(ACTIVE_JOBS_LIMIT)
+    )
+    return [_build_job_detail_response(job) for job in db.scalars(stmt).all()]
+
+
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
 def get_job(job_id: str, db: Session = Depends(get_db)) -> JobDetailResponse:
     job = db.get(GenerationJob, job_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
+    return _build_job_detail_response(job)
+
+
+def _build_job_detail_response(job: GenerationJob) -> JobDetailResponse:
     return JobDetailResponse(
         job_id=job.id,
         status=job.status.value,
