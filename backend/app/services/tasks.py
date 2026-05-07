@@ -4,6 +4,8 @@ import logging
 from datetime import datetime, timezone
 
 from celery import Celery
+from celery.signals import worker_ready
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -17,6 +19,8 @@ from app.services.upstream import GeneratedImageResult, ReferenceImageForUpstrea
 configure_logging()
 settings = get_settings()
 logger = logging.getLogger(__name__)
+INTERRUPTED_JOB_MESSAGE = "服务重启后生成任务已中断，请重新生成。"
+LIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.PROCESSING)
 
 celery_app = Celery(
     "easy_painter",
@@ -45,7 +49,8 @@ def generate_image_task(self, job_id: str) -> None:
             logger.warning("Generation job missing.")
             return
 
-        if job.status == JobStatus.SUCCEEDED:
+        if job.status not in LIVE_JOB_STATUSES:
+            logger.info("Generation job %s already settled status=%s.", job.id, job.status.value)
             return
 
         job.status = JobStatus.PROCESSING
@@ -139,6 +144,37 @@ def _mark_failed(*, db, job: GenerationJob, message: str) -> None:
     job.finished_at = utcnow()
     db.commit()
     logger.info("Generation job %s failed message=%s.", job.id, message)
+
+
+def mark_interrupted_generation_jobs_failed(
+    *,
+    session_factory=SessionLocal,
+    now: datetime | None = None,
+) -> int:
+    db = session_factory()
+    failed_at = now or utcnow()
+    try:
+        jobs = db.scalars(select(GenerationJob).where(GenerationJob.status.in_(LIVE_JOB_STATUSES))).all()
+        for job in jobs:
+            job.status = JobStatus.FAILED
+            job.error_message = INTERRUPTED_JOB_MESSAGE
+            job.finished_at = failed_at
+        if jobs:
+            db.commit()
+        return len(jobs)
+    finally:
+        db.close()
+
+
+@worker_ready.connect
+def _mark_interrupted_jobs_on_worker_ready(**_: object) -> None:
+    try:
+        failed_count = mark_interrupted_generation_jobs_failed()
+    except Exception:
+        logger.exception("Failed to mark interrupted generation jobs.")
+        return
+    if failed_count:
+        logger.warning("Marked %s interrupted generation jobs as failed.", failed_count)
 
 
 def _can_retry(task) -> bool:

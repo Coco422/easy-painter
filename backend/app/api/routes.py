@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
@@ -36,6 +37,12 @@ from app.services.tasks import generate_image_task
 logger = logging.getLogger(__name__)
 router = APIRouter()
 ACTIVE_JOBS_LIMIT = 20
+LIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.PROCESSING)
+STALE_JOB_MESSAGE = "生成任务长时间没有响应，可能已在服务重启或 worker 中断后丢失，请重新生成。"
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _load_models(db: Session, settings: Settings) -> list[dict[str, str | bool | list[str]]]:
@@ -206,24 +213,66 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
 @router.get("/jobs/active", response_model=list[JobDetailResponse])
 def list_active_jobs(
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: User = Depends(require_current_user),
+    now: datetime = Depends(utcnow),
 ) -> list[JobDetailResponse]:
     stmt = (
         select(GenerationJob)
         .where(GenerationJob.user_id == current_user.id)
-        .where(GenerationJob.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING]))
+        .where(GenerationJob.status.in_(LIVE_JOB_STATUSES))
         .order_by(desc(GenerationJob.created_at))
         .limit(ACTIVE_JOBS_LIMIT)
     )
-    return [_build_job_detail_response(job) for job in db.scalars(stmt).all()]
+    jobs = db.scalars(stmt).all()
+    _settle_stale_live_jobs(db=db, jobs=jobs, settings=settings, now=now)
+    return [_build_job_detail_response(job) for job in jobs if _is_live_job(job)]
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
-def get_job(job_id: str, db: Session = Depends(get_db)) -> JobDetailResponse:
+def get_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    now: datetime = Depends(utcnow),
+) -> JobDetailResponse:
     job = db.get(GenerationJob, job_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
+    _settle_stale_live_jobs(db=db, jobs=[job], settings=settings, now=now)
     return _build_job_detail_response(job)
+
+
+def _settle_stale_live_jobs(
+    *,
+    db: Session,
+    jobs: list[GenerationJob],
+    settings: Settings,
+    now: datetime,
+) -> None:
+    if settings.generation_job_stale_seconds <= 0:
+        return
+    stale_cutoff = _as_utc(now) - timedelta(seconds=settings.generation_job_stale_seconds)
+    changed = False
+    for job in jobs:
+        anchor = job.started_at or job.created_at
+        if _is_live_job(job) and anchor and _as_utc(anchor) <= stale_cutoff:
+            job.status = JobStatus.FAILED
+            job.error_message = STALE_JOB_MESSAGE
+            job.finished_at = now
+            changed = True
+    if changed:
+        db.commit()
+
+
+def _is_live_job(job: GenerationJob) -> bool:
+    return job.status in LIVE_JOB_STATUSES
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _build_job_detail_response(job: GenerationJob) -> JobDetailResponse:

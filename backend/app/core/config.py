@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     generate_rate_limit_count: int = 12
     generate_rate_limit_window_seconds: int = 60
     polling_interval_ms: int = 2000
+    generation_job_stale_seconds: int = 2700
 
     public_models_json: str | None = None
     example_prompts_json: str | None = None
