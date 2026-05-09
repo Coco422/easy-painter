@@ -23,6 +23,7 @@ from app.schemas.job import (
     CreateJobRequest,
     CreateJobResponse,
     GalleryItem,
+    GalleryPageResponse,
     HealthResponse,
     JobDetailResponse,
     PublicMetaResponse,
@@ -405,40 +406,75 @@ def unlike_gallery_item(
         db.commit()
 
 
-@router.get("/gallery", response_model=list[GalleryItem])
+@router.get("/gallery", response_model=GalleryPageResponse)
 def get_gallery(
     db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    current_user: User | None = Depends(get_current_user_optional),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    q: str | None = Query(None, max_length=200),
+    from_date: str | None = Query(None),
+    to_date: str | None = Query(None),
+) -> GalleryPageResponse:
+    if not current_user:
+        return GalleryPageResponse(items=[], total=0, page=page, page_size=page_size)
+
+    base = (
+        select(GenerationJob)
+        .where(GenerationJob.status == JobStatus.SUCCEEDED)
+        .where(GenerationJob.user_id == current_user.id)
+    )
+    if q:
+        base = base.where(GenerationJob.prompt.ilike(f"%{q}%"))
+    if from_date:
+        try:
+            base = base.where(GenerationJob.finished_at >= datetime.fromisoformat(from_date))
+        except ValueError:
+            pass
+    if to_date:
+        try:
+            dt = datetime.fromisoformat(to_date)
+            if dt.hour == 0 and dt.minute == 0 and dt.second == 0:
+                dt = dt.replace(hour=23, minute=59, second=59)
+            base = base.where(GenerationJob.finished_at <= dt)
+        except ValueError:
+            pass
+
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    stmt = (
+        base.order_by(desc(GenerationJob.finished_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
+    items = _build_gallery_items(db, jobs, current_user.id)
+    return GalleryPageResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/gallery/public", response_model=list[GalleryItem])
+def get_public_gallery(
+    db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
     sort: str = Query("recent", pattern="^(recent|liked)$"),
-    scope: str = Query("mine", pattern="^(mine|public)$"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ) -> list[GalleryItem]:
-    if current_user and scope == "mine":
-        stmt = (
-            select(GenerationJob)
-            .where(GenerationJob.status == JobStatus.SUCCEEDED)
-            .where(GenerationJob.user_id == current_user.id)
-            .order_by(desc(GenerationJob.finished_at))
-            .limit(settings.gallery_limit)
+    stmt = (
+        select(GenerationJob)
+        .where(GenerationJob.status == JobStatus.SUCCEEDED)
+        .where(GenerationJob.is_public.is_(True))
+    )
+    if sort == "liked":
+        like_count_sub = (
+            select(GalleryLike.job_id, func.count().label("cnt"))
+            .group_by(GalleryLike.job_id)
+            .subquery()
         )
+        stmt = stmt.outerjoin(like_count_sub, GenerationJob.id == like_count_sub.c.job_id)
+        stmt = stmt.order_by(desc(like_count_sub.c.cnt), desc(GenerationJob.finished_at))
     else:
-        stmt = (
-            select(GenerationJob)
-            .where(GenerationJob.status == JobStatus.SUCCEEDED)
-            .where(GenerationJob.is_public.is_(True))
-        )
-        if sort == "liked":
-            like_count_sub = (
-                select(GalleryLike.job_id, func.count().label("cnt"))
-                .group_by(GalleryLike.job_id)
-                .subquery()
-            )
-            stmt = stmt.outerjoin(like_count_sub, GenerationJob.id == like_count_sub.c.job_id)
-            stmt = stmt.order_by(desc(like_count_sub.c.cnt), desc(GenerationJob.finished_at))
-        else:
-            stmt = stmt.order_by(desc(GenerationJob.finished_at))
-        stmt = stmt.limit(settings.gallery_limit)
-
+        stmt = stmt.order_by(desc(GenerationJob.finished_at))
+    stmt = stmt.offset(offset).limit(limit)
     jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
     return _build_gallery_items(db, jobs, current_user.id if current_user else None)
 
@@ -447,7 +483,8 @@ def get_gallery(
 def get_user_gallery(
     username: str,
     db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ) -> list[GalleryItem]:
     user = db.scalar(select(User).where(User.username == username))
     if not user:
@@ -458,7 +495,8 @@ def get_user_gallery(
         .where(GenerationJob.user_id == user.id)
         .where(GenerationJob.is_public.is_(True))
         .order_by(desc(GenerationJob.finished_at))
-        .limit(settings.gallery_limit)
+        .offset(offset)
+        .limit(limit)
     )
     jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
     return _build_gallery_items(db, jobs, None)

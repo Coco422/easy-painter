@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import GalleryGrid from '@/components/GalleryGrid.vue'
 import PromptModal from '@/components/PromptModal.vue'
-import { fetchPublicGallery } from '@/lib/api'
+import { fetchUserGallery } from '@/lib/api'
 import type { GalleryItem } from '@/lib/types'
 
 const route = useRoute()
@@ -18,7 +18,7 @@ async function loadGallery() {
   loading.value = true
   error.value = ''
   try {
-    gallery.value = await fetchPublicGallery(username)
+    gallery.value = await fetchUserGallery(username)
     if (gallery.value.length > 0 && gallery.value[0].username) {
       displayName.value = gallery.value[0].username
     } else {

@@ -125,5 +125,12 @@ class GalleryItem(BaseModel):
     liked_by_me: bool = False
 
 
+class GalleryPageResponse(BaseModel):
+    items: list[GalleryItem]
+    total: int
+    page: int
+    page_size: int
+
+
 class HealthResponse(BaseModel):
     status: str

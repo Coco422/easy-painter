@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { useRouter } from 'vue-router'
 
@@ -14,7 +14,7 @@ import {
   fetchActiveJobs,
   fetchGallery,
   fetchJob,
-  fetchPublicDiscovery,
+  fetchPublicGallery,
   fetchPublicMeta,
   likeGalleryItem,
   toggleJobFavorite,
@@ -37,10 +37,27 @@ const ACTIVE_JOB_STORAGE_KEY = 'easy-painter:active-job-ids'
 const router = useRouter()
 
 const meta = ref<PublicMetaResponse | null>(null)
-const gallery = ref<GalleryItem[]>([])
-const publicGallery = ref<GalleryItem[]>([])
 const galleryTab = ref<'mine' | 'public'>('public')
+
+// Private gallery — paginated
+const galleryItems = ref<GalleryItem[]>([])
+const galleryTotal = ref(0)
+const galleryPage = ref(1)
+const galleryPageSize = ref(20)
+const gallerySearch = ref('')
+const galleryFromDate = ref('')
+const galleryToDate = ref('')
+
+// Public gallery — infinite scroll
+const publicGallery = ref<GalleryItem[]>([])
+const publicOffset = ref(0)
+const publicLimit = ref(20)
+const publicLoadingMore = ref(false)
+const publicHasMore = ref(true)
 const publicSort = ref<'recent' | 'liked'>('recent')
+const scrollSentinel = ref<HTMLElement | null>(null)
+let scrollObserver: IntersectionObserver | null = null
+
 const selectedItem = ref<GalleryItem | null>(null)
 const prompt = ref('')
 const selectedModel = ref('')
@@ -63,23 +80,77 @@ async function loadMeta() {
   }
 }
 
-async function loadGallery() {
-  gallery.value = await fetchGallery()
+async function loadGallery(page = 1) {
+  galleryPage.value = page
+  const data = await fetchGallery({
+    page,
+    page_size: galleryPageSize.value,
+    q: gallerySearch.value || undefined,
+    from_date: galleryFromDate.value || undefined,
+    to_date: galleryToDate.value || undefined,
+  })
+  galleryItems.value = data.items
+  galleryTotal.value = data.total
 }
 
-async function loadPublicGallery() {
-  publicGallery.value = await fetchPublicDiscovery(publicSort.value)
+function resetGalleryFilters() {
+  gallerySearch.value = ''
+  galleryFromDate.value = ''
+  galleryToDate.value = ''
+  void loadGallery(1)
+}
+
+async function loadMorePublic() {
+  if (publicLoadingMore.value || !publicHasMore.value) return
+  publicLoadingMore.value = true
+  try {
+    const items = await fetchPublicGallery({
+      sort: publicSort.value,
+      offset: publicOffset.value,
+      limit: publicLimit.value,
+    })
+    publicGallery.value.push(...items)
+    publicOffset.value += items.length
+    publicHasMore.value = items.length >= publicLimit.value
+  } finally {
+    publicLoadingMore.value = false
+  }
+}
+
+function resetPublicGallery() {
+  publicGallery.value = []
+  publicOffset.value = 0
+  publicHasMore.value = true
+  void loadMorePublic()
 }
 
 function switchPublicSort(sort: 'recent' | 'liked') {
   publicSort.value = sort
-  void loadPublicGallery()
+  resetPublicGallery()
+}
+
+function observeSentinel() {
+  nextTick(() => {
+    if (scrollSentinel.value && scrollObserver) {
+      scrollObserver.observe(scrollSentinel.value)
+    }
+  })
+}
+
+function unobserveSentinel() {
+  if (scrollSentinel.value && scrollObserver) {
+    scrollObserver.unobserve(scrollSentinel.value)
+  }
 }
 
 function switchGalleryTab(tab: 'mine' | 'public') {
+  if (galleryTab.value === 'public') unobserveSentinel()
   galleryTab.value = tab
-  if (tab === 'public' && publicGallery.value.length === 0) {
-    void loadPublicGallery()
+  if (tab === 'public') {
+    if (publicGallery.value.length === 0) {
+      void loadMorePublic()
+    }
+    observeSentinel()
   }
 }
 
@@ -91,7 +162,7 @@ async function bootstrap() {
       await loadGallery()
     } else {
       galleryTab.value = 'public'
-      await loadPublicGallery()
+      await loadMorePublic()
     }
     await restoreCachedJobs()
   } catch (error) {
@@ -358,15 +429,12 @@ async function retryJob(job: JobDetailResponse) {
   }
 }
 
-const displayedGallery = computed(() =>
-  galleryTab.value === 'mine' ? gallery.value : publicGallery.value,
-)
-
 async function handleDeleteItem(item: GalleryItem) {
   if (!confirm('确定要删除这幅作品吗？')) return
   try {
     await deleteJob(item.job_id)
-    gallery.value = gallery.value.filter((g) => g.job_id !== item.job_id)
+    galleryItems.value = galleryItems.value.filter((g) => g.job_id !== item.job_id)
+    galleryTotal.value = Math.max(0, galleryTotal.value - 1)
   } catch (e) {
     feedback.value = e instanceof Error ? e.message : '删除失败。'
   }
@@ -374,7 +442,7 @@ async function handleDeleteItem(item: GalleryItem) {
 
 function handleAddToGallery(job: JobDetailResponse) {
   removeActiveJob(job.job_id)
-  void loadGallery()
+  void loadGallery(galleryPage.value)
   feedback.value = '作品已加入画廊。'
 }
 
@@ -416,12 +484,24 @@ async function handleToggleLike(item: GalleryItem) {
 onBeforeUnmount(() => {
   pollingTimers.forEach((timer) => window.clearTimeout(timer))
   pollingTimers.clear()
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+    scrollObserver = null
+  }
 })
 
 watch([availableModels, selectedReferenceImage], ensureSelectableModel)
 watch([availableModels, selectedModel, selectedSize], ensureSelectableSize)
 
 onMounted(() => {
+  scrollObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting && !publicLoadingMore.value && publicHasMore.value) {
+        void loadMorePublic()
+      }
+    },
+    { rootMargin: '200px' },
+  )
   void bootstrap()
 })
 </script>
@@ -489,18 +569,54 @@ onMounted(() => {
         >最热</button>
       </div>
     </div>
-    <GalleryGrid
-      :items="displayedGallery"
-      :show-username="galleryTab === 'public'"
-      :deletable="galleryTab === 'mine'"
-      :show-owner-actions="galleryTab === 'mine'"
-      :show-likes="galleryTab === 'public'"
-      @select="selectedItem = $event"
-      @delete="handleDeleteItem"
-      @toggle-favorite="handleToggleFavorite"
-      @toggle-public="handleTogglePublic"
-      @toggle-like="handleToggleLike"
-    />
+
+    <!-- Private gallery: search + filter toolbar -->
+    <div v-if="galleryTab === 'mine'" class="gallery-toolbar">
+      <input
+        v-model="gallerySearch"
+        type="text"
+        placeholder="搜索提示词..."
+        class="gallery-search-input"
+        @keyup.enter="loadGallery(1)"
+      />
+      <input v-model="galleryFromDate" type="date" class="gallery-date-input" @change="loadGallery(1)" />
+      <span class="gallery-date-sep">至</span>
+      <input v-model="galleryToDate" type="date" class="gallery-date-input" @change="loadGallery(1)" />
+      <button class="ghost-button" @click="resetGalleryFilters">重置</button>
+    </div>
+
+    <!-- Private gallery: paginated grid -->
+    <template v-if="galleryTab === 'mine'">
+      <GalleryGrid
+        :items="galleryItems"
+        :deletable="true"
+        :show-owner-actions="true"
+        @select="selectedItem = $event"
+        @delete="handleDeleteItem"
+        @toggle-favorite="handleToggleFavorite"
+        @toggle-public="handleTogglePublic"
+      />
+      <div v-if="galleryTotal > galleryPageSize" class="gallery-pagination">
+        <button class="ghost-button" :disabled="galleryPage <= 1" @click="loadGallery(galleryPage - 1)">上一页</button>
+        <span class="gallery-page-info">{{ galleryPage }} / {{ Math.ceil(galleryTotal / galleryPageSize) }}</span>
+        <button class="ghost-button" :disabled="galleryPage >= Math.ceil(galleryTotal / galleryPageSize)" @click="loadGallery(galleryPage + 1)">下一页</button>
+      </div>
+    </template>
+
+    <!-- Public gallery: infinite scroll -->
+    <template v-if="galleryTab === 'public'">
+      <GalleryGrid
+        :items="publicGallery"
+        :show-username="true"
+        :show-likes="true"
+        @select="selectedItem = $event"
+        @toggle-like="handleToggleLike"
+      />
+      <div ref="scrollSentinel" class="scroll-sentinel">
+        <span v-if="publicLoadingMore">加载中...</span>
+        <span v-else-if="!publicHasMore && publicGallery.length > 0">没有更多了</span>
+      </div>
+    </template>
   </template>
 
   <PromptModal

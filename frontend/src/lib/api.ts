@@ -5,6 +5,7 @@ import type {
   CreateJobResponse,
   CreditTransactionItem,
   GalleryItem,
+  GalleryPageResponse,
   JobDetailResponse,
   ModelConfig,
   PublicMetaResponse,
@@ -105,12 +106,32 @@ export function fetchActiveJobs() {
   return apiRequest<JobDetailResponse[]>('/api/v1/jobs/active')
 }
 
-export function fetchGallery() {
-  return apiRequest<GalleryItem[]>('/api/v1/gallery')
+export function fetchGallery(params: {
+  page?: number
+  page_size?: number
+  q?: string
+  from_date?: string
+  to_date?: string
+} = {}) {
+  const qs = new URLSearchParams()
+  if (params.page) qs.set('page', String(params.page))
+  if (params.page_size) qs.set('page_size', String(params.page_size))
+  if (params.q) qs.set('q', params.q)
+  if (params.from_date) qs.set('from_date', params.from_date)
+  if (params.to_date) qs.set('to_date', params.to_date)
+  return apiRequest<GalleryPageResponse>(`/api/v1/gallery?${qs}`)
 }
 
-export function fetchPublicDiscovery(sort: 'recent' | 'liked' = 'recent') {
-  return apiRequest<GalleryItem[]>(`/api/v1/gallery?scope=public&sort=${sort}`)
+export function fetchPublicGallery(params: {
+  sort?: 'recent' | 'liked'
+  offset?: number
+  limit?: number
+} = {}) {
+  const qs = new URLSearchParams()
+  if (params.sort) qs.set('sort', params.sort)
+  if (params.offset) qs.set('offset', String(params.offset))
+  if (params.limit) qs.set('limit', String(params.limit))
+  return apiRequest<GalleryItem[]>(`/api/v1/gallery/public?${qs}`)
 }
 
 export function deleteJob(jobId: string) {
@@ -133,7 +154,7 @@ export function unlikeGalleryItem(jobId: string) {
   return apiRequest<void>(`/api/v1/gallery/${jobId}/like`, { method: 'DELETE' })
 }
 
-export function fetchPublicGallery(username: string) {
+export function fetchUserGallery(username: string) {
   return apiRequest<GalleryItem[]>(`/api/v1/gallery/${username}`)
 }
 

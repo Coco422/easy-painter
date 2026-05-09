@@ -1279,6 +1279,82 @@ a {
   color: var(--text-secondary);
 }
 
+/* ---- Gallery Toolbar (search + filter) ---- */
+.gallery-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.gallery-search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 200ms, box-shadow 200ms;
+}
+
+.gallery-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.gallery-search-input:focus {
+  border-color: rgba(212, 168, 83, 0.4);
+  box-shadow: 0 0 0 3px rgba(212, 168, 83, 0.08);
+}
+
+.gallery-date-input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 200ms;
+}
+
+.gallery-date-input:focus {
+  border-color: rgba(212, 168, 83, 0.4);
+}
+
+.gallery-date-sep {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ---- Gallery Pagination ---- */
+.gallery-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 24px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.gallery-page-info {
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+  text-align: center;
+}
+
+/* ---- Scroll Sentinel (infinite scroll) ---- */
+.scroll-sentinel {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 /* ---- Gallery Card Owner Actions ---- */
 .gallery-card-owner-actions {
   position: absolute;

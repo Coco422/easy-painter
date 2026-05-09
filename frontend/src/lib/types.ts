@@ -79,6 +79,13 @@ export type ImageSize =
 
 export type BatchCount = 1 | 2 | 4
 
+export interface GalleryPageResponse {
+  items: GalleryItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface UserInfo {
   id: string
   username: string
