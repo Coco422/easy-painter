@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Server, Cpu, Users, ListTodo, LogOut, Menu, X, Eye } from 'lucide-vue-next'
+import { Server, Cpu, Users, ListTodo, LogOut, Menu, X, Eye, Wallet, Ticket, ArrowRightLeft, Trash2 } from 'lucide-vue-next'
 import {
+  adminAdjustCredits,
+  adminBatchDeleteJobs,
   adminCreateModel,
   adminCreateProvider,
   adminCreateUser,
@@ -9,23 +11,26 @@ import {
   adminDeleteModel,
   adminDeleteProvider,
   adminDeleteUser,
+  adminFetchCodes,
   adminFetchJobs,
   adminFetchModels,
   adminFetchProviders,
+  adminFetchTransactions,
   adminFetchUsers,
+  adminGenerateCodes,
   adminUpdateModel,
   adminUpdateProvider,
   adminUpdateUser,
 } from '@/lib/api'
 import { adminLogout, adminVerify, isAdmin } from '@/lib/auth'
 import { ApiError } from '@/lib/api'
-import type { AdminJobItem, ModelConfig, UpstreamProvider, UserInfo } from '@/lib/types'
+import type { AdminJobItem, CreditTransactionItem, ModelConfig, RedemptionCodeItem, UpstreamProvider, UserInfo } from '@/lib/types'
 
 const secretKey = ref('')
 const verifyError = ref('')
 const verifying = ref(false)
 
-type SectionKey = 'providers' | 'models' | 'users' | 'jobs'
+type SectionKey = 'providers' | 'models' | 'users' | 'jobs' | 'billing'
 const activeSection = ref<SectionKey>('providers')
 const sidebarOpen = ref(false)
 
@@ -34,6 +39,7 @@ const navItems: { key: SectionKey; label: string; icon: typeof Server }[] = [
   { key: 'models', label: '模型管理', icon: Cpu },
   { key: 'users', label: '用户管理', icon: Users },
   { key: 'jobs', label: '任务管理', icon: ListTodo },
+  { key: 'billing', label: '计费管理', icon: Wallet },
 ]
 
 const jobs = ref<AdminJobItem[]>([])
@@ -41,6 +47,10 @@ const users = ref<UserInfo[]>([])
 const providers = ref<UpstreamProvider[]>([])
 const models = ref<ModelConfig[]>([])
 const loading = ref(false)
+
+const jobStatusFilter = ref('')
+const selectedJobIds = ref(new Set<string>())
+const batchDeleting = ref(false)
 
 const newUsername = ref('')
 const newPassword = ref('')
@@ -69,12 +79,31 @@ const newModelId = ref('')
 const newModelLabel = ref('')
 const newModelProviderId = ref('')
 const newModelSupportsRef = ref(true)
+const newModelCreditCost = ref(1)
 const newModelSizes = ref('')
 const createModelError = ref('')
 const editingModelId = ref<string | null>(null)
 const editModel = ref<Partial<ModelConfig>>({})
 const editModelSizes = ref('')
 const editModelError = ref('')
+
+// Billing state
+const codes = ref<RedemptionCodeItem[]>([])
+const codesFilter = ref<'all' | 'unused' | 'used'>('all')
+const genCodeCount = ref(10)
+const genCodeCredits = ref(100)
+const genCodePrefix = ref('EP')
+const genCodeResult = ref<string[]>([])
+const genCodeError = ref('')
+
+const adjustUserId = ref('')
+const adjustAmount = ref(0)
+const adjustReason = ref('')
+const adjustResult = ref('')
+const adjustError = ref('')
+
+const transactions = ref<(CreditTransactionItem & { id: string; user_id: string; username: string | null })[]>([])
+const txnFilterUserId = ref('')
 
 // Modal state
 const selectedJob = ref<AdminJobItem | null>(null)
@@ -113,11 +142,12 @@ async function handleVerify() {
 async function loadData() {
   loading.value = true
   try {
-    const [j, u, p, m] = await Promise.all([adminFetchJobs(), adminFetchUsers(), adminFetchProviders(), adminFetchModels()])
+    const [j, u, p, m] = await Promise.all([adminFetchJobs(jobStatusFilter.value || undefined), adminFetchUsers(), adminFetchProviders(), adminFetchModels()])
     jobs.value = j
     users.value = u
     providers.value = p
     models.value = m
+    selectedJobIds.value = new Set()
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {
       adminLogout()
@@ -128,13 +158,57 @@ async function loadData() {
   }
 }
 
+async function reloadJobs() {
+  try {
+    jobs.value = await adminFetchJobs(jobStatusFilter.value || undefined)
+    selectedJobIds.value = new Set()
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      adminLogout()
+      verifyError.value = '管理员密钥已过期，请重新验证。'
+    }
+  }
+}
+
 async function handleDeleteJob(jobId: string) {
-  if (!confirm('确定要删除这个任务吗？')) return
+  if (!confirm('确定要删除这个任务吗？将同时删除关联的图片产物。')) return
   try {
     await adminDeleteJob(jobId)
     jobs.value = jobs.value.filter((j) => j.job_id !== jobId)
+    selectedJobIds.value.delete(jobId)
   } catch (e) {
     alert(e instanceof Error ? e.message : '删除失败。')
+  }
+}
+
+function toggleJobSelect(jobId: string) {
+  const s = new Set(selectedJobIds.value)
+  if (s.has(jobId)) s.delete(jobId)
+  else s.add(jobId)
+  selectedJobIds.value = s
+}
+
+function toggleSelectAll() {
+  if (selectedJobIds.value.size === jobs.value.length) {
+    selectedJobIds.value = new Set()
+  } else {
+    selectedJobIds.value = new Set(jobs.value.map((j) => j.job_id))
+  }
+}
+
+async function handleBatchDelete() {
+  if (selectedJobIds.value.size === 0) return
+  const count = selectedJobIds.value.size
+  if (!confirm(`确定要删除选中的 ${count} 个任务吗？将同时删除关联的图片产物。`)) return
+  batchDeleting.value = true
+  try {
+    const result = await adminBatchDeleteJobs([...selectedJobIds.value])
+    await reloadJobs()
+    alert(`已删除 ${result.deleted} 个任务${result.failed.length > 0 ? `，${result.failed.length} 个失败` : ''}。`)
+  } catch (e) {
+    alert(e instanceof Error ? e.message : '批量删除失败。')
+  } finally {
+    batchDeleting.value = false
   }
 }
 
@@ -285,11 +359,13 @@ async function handleCreateModel() {
       label: newModelLabel.value,
       supports_reference_image: newModelSupportsRef.value,
       supported_sizes: sizes,
+      credit_cost: newModelCreditCost.value,
     })
     models.value.push(m)
     newModelId.value = ''
     newModelLabel.value = ''
     newModelSupportsRef.value = true
+    newModelCreditCost.value = 1
     newModelSizes.value = ''
     showCreateModelModal.value = false
   } catch (e) {
@@ -357,6 +433,70 @@ function toggleKeyReveal(providerId: string) {
     set.add(providerId)
   }
   revealedKeys.value = set
+}
+
+// Billing functions
+async function loadCodes() {
+  try {
+    codes.value = await adminFetchCodes(codesFilter.value)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      adminLogout()
+      verifyError.value = '管理员密钥已过期，请重新验证。'
+    }
+  }
+}
+
+async function handleGenerateCodes() {
+  genCodeError.value = ''
+  genCodeResult.value = []
+  try {
+    const result = await adminGenerateCodes({
+      count: genCodeCount.value,
+      credits: genCodeCredits.value,
+      prefix: genCodePrefix.value || undefined,
+    })
+    genCodeResult.value = result.codes
+    await loadCodes()
+  } catch (e) {
+    genCodeError.value = e instanceof Error ? e.message : '生成失败。'
+  }
+}
+
+async function loadTransactions() {
+  try {
+    transactions.value = await adminFetchTransactions(txnFilterUserId.value || undefined)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      adminLogout()
+      verifyError.value = '管理员密钥已过期，请重新验证。'
+    }
+  }
+}
+
+async function handleAdjustCredits() {
+  if (!adjustUserId.value) {
+    adjustError.value = '请选择用户。'
+    return
+  }
+  adjustError.value = ''
+  adjustResult.value = ''
+  try {
+    const result = await adminAdjustCredits(adjustUserId.value, {
+      amount: adjustAmount.value,
+      reason: adjustReason.value || undefined,
+    })
+    adjustResult.value = `调整成功，当前余额 ${result.credits} 积分。`
+    await loadData()
+    await loadTransactions()
+  } catch (e) {
+    adjustError.value = e instanceof Error ? e.message : '调整失败。'
+  }
+}
+
+function switchCodesFilter(filter: 'all' | 'unused' | 'used') {
+  codesFilter.value = filter
+  void loadCodes()
 }
 
 onMounted(() => {
@@ -488,7 +628,7 @@ onMounted(() => {
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>ID</th><th>名称</th><th>上游</th><th>参考图</th><th>启用</th><th>操作</th></tr>
+              <tr><th>ID</th><th>名称</th><th>上游</th><th>参考图</th><th>积分/张</th><th>启用</th><th>操作</th></tr>
             </thead>
             <tbody>
               <template v-for="m in models" :key="m.id">
@@ -497,6 +637,7 @@ onMounted(() => {
                   <td>{{ m.label }}</td>
                   <td>{{ getProviderName(m.provider_id) }}</td>
                   <td>{{ m.supports_reference_image ? '是' : '否' }}</td>
+                  <td>{{ m.credit_cost }}</td>
                   <td>{{ m.enabled ? '是' : '否' }}</td>
                   <td class="td-actions">
                     <button class="admin-edit-btn" @click="startEditModel(m)">编辑</button>
@@ -512,6 +653,7 @@ onMounted(() => {
                     </select>
                   </td>
                   <td><input v-model="editModel.supports_reference_image" type="checkbox" /></td>
+                  <td><input v-model.number="editModel.credit_cost" type="number" min="1" class="admin-input-inline" style="width:60px" /></td>
                   <td><input v-model="editModel.enabled" type="checkbox" /></td>
                   <td class="td-actions">
                     <input v-model="editModelSizes" class="admin-input-inline admin-input-password" placeholder="尺寸(逗号分隔)" />
@@ -544,13 +686,14 @@ onMounted(() => {
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>用户名</th><th>显示名称</th><th>公开画廊</th><th>注册时间</th><th>操作</th></tr>
+              <tr><th>用户名</th><th>显示名称</th><th>积分</th><th>公开画廊</th><th>注册时间</th><th>操作</th></tr>
             </thead>
             <tbody>
               <template v-for="user in users" :key="user.id">
                 <tr v-if="editingUserId !== user.id">
                   <td>{{ user.username }}</td>
                   <td>{{ user.display_name }}</td>
+                  <td>{{ user.credits ?? 0 }}</td>
                   <td>{{ user.is_public ? '是' : '否' }}</td>
                   <td>{{ new Date(user.created_at).toLocaleString() }}</td>
                   <td class="td-actions">
@@ -561,6 +704,7 @@ onMounted(() => {
                 <tr v-else class="edit-row">
                   <td>{{ user.username }}</td>
                   <td><input v-model="editDisplayName" class="admin-input-inline" maxlength="128" /></td>
+                  <td>{{ user.credits ?? 0 }}</td>
                   <td><input v-model="editIsPublic" type="checkbox" /></td>
                   <td>{{ new Date(user.created_at).toLocaleString() }}</td>
                   <td class="td-actions">
@@ -578,14 +722,38 @@ onMounted(() => {
 
       <!-- Jobs -->
       <section v-show="activeSection === 'jobs'" class="admin-section">
-        <h2 class="admin-section-title">任务列表</h2>
+        <div class="admin-section-header">
+          <h2 class="admin-section-title">任务列表</h2>
+          <div class="admin-job-toolbar">
+            <select v-model="jobStatusFilter" class="admin-input" @change="reloadJobs">
+              <option value="">全部状态</option>
+              <option value="queued">排队中</option>
+              <option value="processing">生成中</option>
+              <option value="succeeded">成功</option>
+              <option value="failed">失败</option>
+            </select>
+            <button
+              v-if="selectedJobIds.size > 0"
+              class="admin-delete-btn"
+              :disabled="batchDeleting"
+              @click="handleBatchDelete"
+            >
+              <Trash2 :size="14" style="margin-right:4px" />
+              删除选中 ({{ selectedJobIds.size }})
+            </button>
+          </div>
+        </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>ID</th><th>状态</th><th>提示词</th><th>模型</th><th>用户</th><th>耗时</th><th>创建时间</th><th>操作</th></tr>
+              <tr>
+                <th style="width:36px"><input type="checkbox" :checked="selectedJobIds.size === jobs.length && jobs.length > 0" @change="toggleSelectAll" /></th>
+                <th>ID</th><th>状态</th><th>提示词</th><th>模型</th><th>用户</th><th>耗时</th><th>创建时间</th><th>操作</th>
+              </tr>
             </thead>
             <tbody>
               <tr v-for="job in jobs" :key="job.job_id">
+                <td><input type="checkbox" :checked="selectedJobIds.has(job.job_id)" @change="toggleJobSelect(job.job_id)" /></td>
                 <td class="td-id">{{ job.job_id.slice(0, 8) }}</td>
                 <td>
                   <span :class="['status-badge', `status-${job.status}`]">{{ job.status }}</span>
@@ -599,6 +767,92 @@ onMounted(() => {
                   <button class="admin-edit-btn" @click="selectedJob = job"><Eye :size="14" /></button>
                   <button class="admin-delete-btn" @click="handleDeleteJob(job.job_id)">删除</button>
                 </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Billing -->
+      <section v-show="activeSection === 'billing'" class="admin-section">
+        <div class="admin-section-header">
+          <h2 class="admin-section-title"><Ticket :size="18" style="vertical-align:middle;margin-right:6px" />兑换码管理</h2>
+          <div class="admin-billing-filters">
+            <button :class="['admin-btn-sm', { active: codesFilter === 'all' }]" @click="switchCodesFilter('all')">全部</button>
+            <button :class="['admin-btn-sm', { active: codesFilter === 'unused' }]" @click="switchCodesFilter('unused')">未使用</button>
+            <button :class="['admin-btn-sm', { active: codesFilter === 'used' }]" @click="switchCodesFilter('used')">已使用</button>
+          </div>
+        </div>
+
+        <form class="admin-create-form" @submit.prevent="handleGenerateCodes">
+          <input v-model.number="genCodeCount" type="number" min="1" max="1000" class="admin-input" style="width:80px" placeholder="数量" />
+          <input v-model.number="genCodeCredits" type="number" min="1" class="admin-input" style="width:100px" placeholder="面额" />
+          <input v-model="genCodePrefix" type="text" class="admin-input" style="width:80px" maxlength="8" placeholder="前缀" />
+          <button type="submit" class="admin-btn">批量生成</button>
+        </form>
+        <p v-if="genCodeError" class="auth-error">{{ genCodeError }}</p>
+        <div v-if="genCodeResult.length > 0" class="admin-code-result">
+          <p class="admin-success">已生成 {{ genCodeResult.length }} 个兑换码：</p>
+          <textarea class="admin-code-textarea" :value="genCodeResult.join('\n')" readonly rows="6" />
+        </div>
+
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr><th>兑换码</th><th>面额</th><th>状态</th><th>使用者</th><th>使用时间</th><th>创建时间</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in codes" :key="c.id">
+                <td class="td-mono">{{ c.code }}</td>
+                <td>{{ c.credits }}</td>
+                <td><span :class="['status-badge', c.used_by ? 'status-used' : 'status-unused']">{{ c.used_by ? '已使用' : '未使用' }}</span></td>
+                <td>{{ c.used_by ? c.used_by.slice(0, 8) : '-' }}</td>
+                <td>{{ c.used_at ? new Date(c.used_at).toLocaleString() : '-' }}</td>
+                <td>{{ new Date(c.created_at).toLocaleString() }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section v-show="activeSection === 'billing'" class="admin-section">
+        <h2 class="admin-section-title"><Wallet :size="18" style="vertical-align:middle;margin-right:6px" />用户积分调整</h2>
+        <form class="admin-create-form" @submit.prevent="handleAdjustCredits">
+          <select v-model="adjustUserId" class="admin-input">
+            <option value="" disabled>选择用户</option>
+            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.username }} ({{ u.credits ?? 0 }} 积分)</option>
+          </select>
+          <input v-model.number="adjustAmount" type="number" class="admin-input" style="width:100px" placeholder="数量" />
+          <input v-model="adjustReason" type="text" class="admin-input" maxlength="256" placeholder="原因（可选）" />
+          <button type="submit" class="admin-btn">调整</button>
+        </form>
+        <p v-if="adjustError" class="auth-error">{{ adjustError }}</p>
+        <p v-if="adjustResult" class="admin-success">{{ adjustResult }}</p>
+      </section>
+
+      <section v-show="activeSection === 'billing'" class="admin-section">
+        <div class="admin-section-header">
+          <h2 class="admin-section-title"><ArrowRightLeft :size="18" style="vertical-align:middle;margin-right:6px" />消费记录</h2>
+          <div>
+            <select v-model="txnFilterUserId" class="admin-input" style="margin-right:8px" @change="loadTransactions">
+              <option value="">全部用户</option>
+              <option v-for="u in users" :key="u.id" :value="u.id">{{ u.username }}</option>
+            </select>
+            <button class="admin-btn-sm" @click="loadTransactions">刷新</button>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr><th>时间</th><th>用户</th><th>变动</th><th>余额</th><th>原因</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="txn in transactions" :key="txn.id">
+                <td>{{ new Date(txn.created_at).toLocaleString() }}</td>
+                <td>{{ txn.username || txn.user_id.slice(0, 8) }}</td>
+                <td :class="txn.amount > 0 ? 'txn-positive' : 'txn-negative'">{{ txn.amount > 0 ? '+' : '' }}{{ txn.amount }}</td>
+                <td>{{ txn.balance_after }}</td>
+                <td>{{ txn.reason }}</td>
               </tr>
             </tbody>
           </table>
@@ -711,6 +965,10 @@ onMounted(() => {
             <label class="admin-form-label admin-form-label-row">
               <input v-model="newModelSupportsRef" type="checkbox" />
               <span>支持参考图</span>
+            </label>
+            <label class="admin-form-label">
+              积分/张
+              <input v-model.number="newModelCreditCost" type="number" min="1" class="admin-input" placeholder="1" />
             </label>
             <label class="admin-form-label">
               支持尺寸（逗号分隔，留空不限制）

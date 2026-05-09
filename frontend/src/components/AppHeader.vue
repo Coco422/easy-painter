@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Moon, Sun } from 'lucide-vue-next'
+import { Moon, Sun, Wallet } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import logoUrl from '@/assets/brand/logo.png'
 import { authState, isAdmin, isLoggedIn, logout } from '@/lib/auth'
@@ -25,6 +25,10 @@ async function handleLogout() {
     </div>
     <nav class="header-nav">
       <template v-if="isLoggedIn()">
+        <router-link to="/profile" class="nav-link nav-credits" title="个人中心">
+          <Wallet :size="16" />
+          <span>{{ authState.user?.credits ?? 0 }}</span>
+        </router-link>
         <span class="nav-user">{{ authState.user?.username }}</span>
         <router-link v-if="authState.user?.is_public" :to="`/gallery/${authState.user.username}`" class="nav-link">
           公开画廊
@@ -78,5 +82,25 @@ async function handleLogout() {
   color: var(--accent);
   border-color: var(--border-accent);
   background: var(--accent-glow);
+}
+
+.nav-credits {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: background 200ms;
+}
+
+.nav-credits:hover {
+  background: var(--accent);
+  color: var(--bg);
 }
 </style>

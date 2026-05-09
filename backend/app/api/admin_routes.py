@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password, require_admin
 from app.db.session import get_db
+from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.model_config import ModelConfig
+from app.models.redemption_code import RedemptionCode
 from app.models.upstream_provider import UpstreamProvider
 from app.models.user import User
 from app.schemas.auth import AdminCreateUserRequest, AdminUpdateUserRequest, UserResponse
@@ -44,8 +47,12 @@ class AdminJobItem(BaseModel):
 def admin_list_jobs(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
+    status_filter: str | None = Query(None, alias="status"),
 ) -> list[AdminJobItem]:
-    stmt = select(GenerationJob).order_by(desc(GenerationJob.created_at)).limit(100)
+    stmt = select(GenerationJob).order_by(desc(GenerationJob.created_at))
+    if status_filter:
+        stmt = stmt.where(GenerationJob.status == status_filter)
+    stmt = stmt.limit(500)
     jobs = db.scalars(stmt).all()
     result = []
     for job in jobs:
@@ -74,16 +81,7 @@ def admin_list_jobs(
     return result
 
 
-@admin_router.delete("/admin/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-def admin_delete_job(
-    job_id: str,
-    db: Session = Depends(get_db),
-    _: dict = Depends(require_admin),
-) -> None:
-    job = db.get(GenerationJob, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="任务不存在。")
-    storage: MinioStorageService | None = None
+def _delete_job_artifacts(job: GenerationJob, storage: MinioStorageService | None) -> MinioStorageService:
     if job.object_key:
         try:
             storage = storage or MinioStorageService()
@@ -96,10 +94,56 @@ def admin_delete_job(
             storage.delete_reference_image(job.reference_image_key)
         except Exception:
             logger.warning("Failed to delete MinIO reference %s", job.reference_image_key)
+    return storage
+
+
+@admin_router.delete("/admin/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> None:
+    job = db.get(GenerationJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在。")
+    storage = _delete_job_artifacts(job, None)
     for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
         db.delete(like)
     db.delete(job)
     db.commit()
+
+
+class BatchDeleteRequest(BaseModel):
+    job_ids: list[str] = Field(max_length=200)
+
+
+class BatchDeleteResponse(BaseModel):
+    deleted: int
+    failed: list[str]
+
+
+@admin_router.post("/admin/jobs/batch-delete", response_model=BatchDeleteResponse)
+def admin_batch_delete_jobs(
+    body: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> BatchDeleteResponse:
+    deleted = 0
+    failed: list[str] = []
+    storage: MinioStorageService | None = None
+    for job_id in body.job_ids:
+        job = db.get(GenerationJob, job_id)
+        if not job:
+            failed.append(job_id)
+            continue
+        storage = _delete_job_artifacts(job, storage)
+        for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
+            db.delete(like)
+        db.delete(job)
+        deleted += 1
+    if deleted > 0:
+        db.commit()
+    return BatchDeleteResponse(deleted=deleted, failed=failed)
 
 
 @admin_router.get("/admin/users", response_model=list[UserResponse])
@@ -111,7 +155,7 @@ def admin_list_users(
     return [
         UserResponse(
             id=u.id, username=u.username, display_name=u.display_name,
-            is_public=u.is_public, created_at=u.created_at,
+            is_public=u.is_public, credits=u.credits, created_at=u.created_at,
         )
         for u in users
     ]
@@ -136,7 +180,7 @@ def admin_create_user(
     db.refresh(user)
     return UserResponse(
         id=user.id, username=user.username, display_name=user.display_name,
-        is_public=user.is_public, created_at=user.created_at,
+        is_public=user.is_public, credits=user.credits, created_at=user.created_at,
     )
 
 
@@ -160,7 +204,7 @@ def admin_update_user(
     db.refresh(user)
     return UserResponse(
         id=user.id, username=user.username, display_name=user.display_name,
-        is_public=user.is_public, created_at=user.created_at,
+        is_public=user.is_public, credits=user.credits, created_at=user.created_at,
     )
 
 
@@ -241,6 +285,7 @@ class ModelResponse(BaseModel):
     supports_reference_image: bool
     supported_sizes: list[str]
     sort_order: int
+    credit_cost: int = 1
 
 
 class CreateModelRequest(BaseModel):
@@ -251,6 +296,7 @@ class CreateModelRequest(BaseModel):
     supports_reference_image: bool = True
     supported_sizes: list[str] = []
     sort_order: int = 0
+    credit_cost: int = 1
 
 
 class UpdateModelRequest(BaseModel):
@@ -260,6 +306,7 @@ class UpdateModelRequest(BaseModel):
     supports_reference_image: bool | None = None
     supported_sizes: list[str] | None = None
     sort_order: int | None = None
+    credit_cost: int | None = None
 
 
 def _model_response(m: ModelConfig) -> ModelResponse:
@@ -267,7 +314,7 @@ def _model_response(m: ModelConfig) -> ModelResponse:
         id=m.id, provider_id=m.provider_id, label=m.label,
         enabled=m.enabled, supports_reference_image=m.supports_reference_image,
         supported_sizes=list(m.supported_sizes) if m.supported_sizes else [],
-        sort_order=m.sort_order,
+        sort_order=m.sort_order, credit_cost=m.credit_cost or 1,
     )
 
 
@@ -363,6 +410,7 @@ def admin_create_model(
         id=body.id, provider_id=body.provider_id, label=body.label,
         enabled=body.enabled, supports_reference_image=body.supports_reference_image,
         supported_sizes=body.supported_sizes, sort_order=body.sort_order,
+        credit_cost=body.credit_cost,
     )
     db.add(model)
     db.commit()
@@ -404,3 +452,146 @@ def admin_delete_model(
         raise HTTPException(status_code=404, detail="模型不存在。")
     db.delete(model)
     db.commit()
+
+
+# ---- Billing admin endpoints ----
+
+
+class GenerateCodesRequest(BaseModel):
+    count: int = Field(ge=1, le=1000, default=10)
+    credits: int = Field(ge=1, default=100)
+    prefix: str = Field(default="EP", max_length=8)
+
+
+class CodeItem(BaseModel):
+    id: str
+    code: str
+    credits: int
+    used_by: str | None = None
+    used_at: str | None = None
+    created_at: str
+
+
+class GenerateCodesResponse(BaseModel):
+    codes: list[str]
+
+
+class AdjustCreditsRequest(BaseModel):
+    amount: int
+    reason: str = Field(default="", max_length=256)
+
+
+class AdminCreditTransactionItem(BaseModel):
+    id: str
+    user_id: str
+    username: str | None = None
+    amount: int
+    balance_after: int
+    reason: str
+    created_at: str
+
+
+@admin_router.post("/admin/codes/generate", response_model=GenerateCodesResponse)
+def admin_generate_codes(
+    body: GenerateCodesRequest,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(require_admin),
+) -> GenerateCodesResponse:
+    admin_user = db.scalar(select(User).limit(1))
+    if not admin_user:
+        raise HTTPException(status_code=500, detail="无可用管理员用户。")
+    codes = []
+    for _ in range(body.count):
+        code_str = f"{body.prefix}-{secrets.token_urlsafe(8).upper()[:8]}"
+        code = RedemptionCode(
+            code=code_str,
+            credits=body.credits,
+            created_by=admin_user.id,
+        )
+        db.add(code)
+        codes.append(code_str)
+    db.commit()
+    return GenerateCodesResponse(codes=codes)
+
+
+@admin_router.get("/admin/codes", response_model=list[CodeItem])
+def admin_list_codes(
+    status_filter: str = Query("all", pattern="^(all|unused|used)$"),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> list[CodeItem]:
+    stmt = select(RedemptionCode).order_by(desc(RedemptionCode.created_at)).limit(500)
+    if status_filter == "unused":
+        stmt = stmt.where(RedemptionCode.used_by.is_(None))
+    elif status_filter == "used":
+        stmt = stmt.where(RedemptionCode.used_by.is_not(None))
+    codes = db.scalars(stmt).all()
+    return [
+        CodeItem(
+            id=c.id,
+            code=c.code,
+            credits=c.credits,
+            used_by=c.used_by,
+            used_at=c.used_at.isoformat() if c.used_at else None,
+            created_at=c.created_at.isoformat() if c.created_at else "",
+        )
+        for c in codes
+    ]
+
+
+@admin_router.post("/admin/users/{user_id}/credits")
+def admin_adjust_credits(
+    user_id: str,
+    body: AdjustCreditsRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> dict:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在。")
+    user.credits = (user.credits or 0) + body.amount
+    if user.credits < 0:
+        user.credits = 0
+    txn = CreditTransaction(
+        user_id=user.id,
+        amount=body.amount,
+        balance_after=user.credits,
+        reason=body.reason or "admin:adjust",
+    )
+    db.add(txn)
+    db.commit()
+    db.refresh(user)
+    return {"credits": user.credits}
+
+
+@admin_router.get("/admin/transactions", response_model=list[AdminCreditTransactionItem])
+def admin_list_transactions(
+    user_id: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> list[AdminCreditTransactionItem]:
+    stmt = select(CreditTransaction).order_by(desc(CreditTransaction.created_at))
+    if user_id:
+        stmt = stmt.where(CreditTransaction.user_id == user_id)
+    offset = (page - 1) * page_size
+    stmt = stmt.offset(offset).limit(page_size)
+    txns = db.scalars(stmt).all()
+
+    user_ids = list({t.user_id for t in txns})
+    users = db.scalars(select(User).where(User.id.in_(user_ids))).all() if user_ids else []
+    username_map = {u.id: u.username for u in users}
+
+    return [
+        AdminCreditTransactionItem(
+            id=t.id,
+            user_id=t.user_id,
+            username=username_map.get(t.user_id),
+            amount=t.amount,
+            balance_after=t.balance_after,
+            reason=t.reason,
+            created_at=t.created_at.isoformat() if t.created_at else "",
+        )
+        for t in txns
+    ]

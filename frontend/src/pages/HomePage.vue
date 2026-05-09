@@ -8,6 +8,7 @@ import GalleryGrid from '@/components/GalleryGrid.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import PromptModal from '@/components/PromptModal.vue'
 import {
+  ApiError,
   createJob,
   deleteJob,
   fetchActiveJobs,
@@ -324,6 +325,11 @@ async function submitPrompt() {
       referenceImage: selectedReferenceImage.value,
     })
   } catch (error) {
+    if (error instanceof ApiError && error.status === 402) {
+      feedback.value = `积分不足（需要 ${error.required ?? '?'} 积分，当前 ${error.balance ?? 0} 积分）。前往个人中心兑换积分 →`
+      router.push('/profile')
+      return
+    }
     feedback.value = error instanceof Error ? error.message : '提交失败，请稍后重试。'
   } finally {
     submitting.value = false

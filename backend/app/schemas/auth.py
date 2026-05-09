@@ -20,6 +20,7 @@ class UserResponse(BaseModel):
     username: str
     display_name: str
     is_public: bool
+    credits: int = 0
     created_at: datetime
 
 

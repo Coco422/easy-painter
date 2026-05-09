@@ -15,6 +15,7 @@ from app.core.auth import get_current_user_optional, require_current_user
 from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
+from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.user import User
@@ -121,6 +122,21 @@ async def create_job(
             detail="当前 IP 请求过于频繁，请 1 分钟后再试。",
         )
 
+    credit_cost = model_config.get("credit_cost", 1)
+    if isinstance(credit_cost, int) and credit_cost > 0:
+        db.refresh(current_user)
+        if (current_user.credits or 0) < credit_cost:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "message": "积分不足，请前往个人中心兑换。",
+                    "required": credit_cost,
+                    "balance": current_user.credits or 0,
+                },
+            )
+        current_user.credits -= credit_cost
+        db.flush()
+
     job = GenerationJob(
         prompt=prompt,
         model=payload.model,
@@ -132,6 +148,14 @@ async def create_job(
     db.add(job)
     try:
         db.flush()
+        if isinstance(credit_cost, int) and credit_cost > 0:
+            txn = CreditTransaction(
+                user_id=current_user.id,
+                amount=-credit_cost,
+                balance_after=current_user.credits,
+                reason=f"job:{job.id}",
+            )
+            db.add(txn)
         if parsed_payload.reference_image:
             try:
                 object_key = MinioStorageService().upload_reference_image(

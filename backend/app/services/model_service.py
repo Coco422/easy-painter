@@ -36,7 +36,7 @@ class ProviderConfig:
         }
 
 
-def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str]]]:
+def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str] | int]]:
     stmt = select(ModelConfig).order_by(ModelConfig.sort_order, ModelConfig.id)
     models = db.scalars(stmt).all()
     return [
@@ -46,6 +46,7 @@ def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str]]]:
             "enabled": m.enabled,
             "supports_reference_image": m.supports_reference_image,
             "supported_sizes": list(m.supported_sizes) if m.supported_sizes else [],
+            "credit_cost": m.credit_cost or 1,
         }
         for m in models
     ]

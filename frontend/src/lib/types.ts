@@ -6,6 +6,7 @@ export interface PublicModel {
   enabled: boolean
   supports_reference_image: boolean
   supported_sizes: string[]
+  credit_cost: number
 }
 
 export interface PublicMetaResponse {
@@ -83,6 +84,23 @@ export interface UserInfo {
   username: string
   display_name: string
   is_public: boolean
+  credits: number
+  created_at: string
+}
+
+export interface CreditTransactionItem {
+  amount: number
+  balance_after: number
+  reason: string
+  created_at: string
+}
+
+export interface RedemptionCodeItem {
+  id: string
+  code: string
+  credits: number
+  used_by: string | null
+  used_at: string | null
   created_at: string
 }
 
@@ -131,4 +149,5 @@ export interface ModelConfig {
   supports_reference_image: boolean
   supported_sizes: string[]
   sort_order: number
+  credit_cost: number
 }

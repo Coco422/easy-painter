@@ -4,21 +4,27 @@ from app.core.auth import hash_password
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
 from app.models.model_config import ModelConfig
+from app.models.redemption_code import RedemptionCode
 from app.models.upstream_provider import UpstreamProvider
 from app.models.user import User
 
 
 def init_db() -> None:
+    _ = CreditTransaction
     _ = GalleryLike
     _ = GenerationJob
+    _ = RedemptionCode
     _ = User
     _ = UpstreamProvider
     _ = ModelConfig
     Base.metadata.create_all(bind=engine)
     _ensure_generation_job_columns()
+    _ensure_user_columns()
+    _ensure_model_config_columns()
     _ensure_default_user()
     _seed_providers_and_models()
 
@@ -60,6 +66,28 @@ def _ensure_generation_job_columns() -> None:
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_user_id ON generation_jobs (user_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_is_public ON generation_jobs (is_public)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_is_favorite ON generation_jobs (is_favorite)"))
+        # Migrate legacy anonymous jobs (no owner) into the public gallery
+        connection.execute(
+            text("UPDATE generation_jobs SET is_public = TRUE WHERE user_id IS NULL AND (is_public IS NULL OR is_public = FALSE)")
+        )
+
+
+def _ensure_user_columns() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    with engine.begin() as connection:
+        if "credits" not in columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 0"))
+            connection.execute(text("UPDATE users SET credits = 0 WHERE credits IS NULL"))
+
+
+def _ensure_model_config_columns() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("model_configs")}
+    with engine.begin() as connection:
+        if "credit_cost" not in columns:
+            connection.execute(text("ALTER TABLE model_configs ADD COLUMN credit_cost INTEGER DEFAULT 1"))
+            connection.execute(text("UPDATE model_configs SET credit_cost = 1 WHERE credit_cost IS NULL"))
 
 
 def _ensure_default_user() -> None:

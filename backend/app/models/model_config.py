@@ -22,4 +22,5 @@ class ModelConfig(Base):
     supports_reference_image: Mapped[bool] = mapped_column(Boolean, default=True)
     supported_sizes: Mapped[list] = mapped_column(JSON, default=list)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    credit_cost: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

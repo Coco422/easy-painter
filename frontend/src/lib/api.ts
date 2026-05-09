@@ -3,10 +3,12 @@ import type {
   AdminJobItem,
   CreateJobRequest,
   CreateJobResponse,
+  CreditTransactionItem,
   GalleryItem,
   JobDetailResponse,
   ModelConfig,
   PublicMetaResponse,
+  RedemptionCodeItem,
   UpstreamProvider,
   UserInfo,
 } from './types'
@@ -15,9 +17,18 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly detail?: Record<string, unknown>,
   ) {
     super(message)
     this.name = 'ApiError'
+  }
+
+  get required(): number | undefined {
+    return this.detail?.required as number | undefined
+  }
+
+  get balance(): number | undefined {
+    return this.detail?.balance as number | undefined
   }
 }
 
@@ -38,15 +49,21 @@ async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     let message = '请求未能完成，请稍后重试。'
+    let detail: Record<string, unknown> | undefined
     try {
-      const payload = (await response.json()) as { detail?: string }
+      const payload = (await response.json()) as { detail?: string | Record<string, unknown> }
       if (payload.detail) {
-        message = payload.detail
+        if (typeof payload.detail === 'string') {
+          message = payload.detail
+        } else {
+          detail = payload.detail as Record<string, unknown>
+          message = (detail.message as string) ?? message
+        }
       }
     } catch {
       // Keep the generic message.
     }
-    throw new ApiError(message, response.status)
+    throw new ApiError(message, response.status, detail)
   }
 
   if (response.status === 204) return undefined as T
@@ -153,12 +170,21 @@ async function adminApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-export function adminFetchJobs() {
-  return adminApiRequest<AdminJobItem[]>('/api/v1/admin/jobs')
-}
 
 export function adminDeleteJob(jobId: string) {
   return adminApiRequest<void>(`/api/v1/admin/jobs/${jobId}`, { method: 'DELETE' })
+}
+
+export function adminFetchJobs(statusFilter?: string) {
+  const params = statusFilter ? `?status=${statusFilter}` : ''
+  return adminApiRequest<AdminJobItem[]>(`/api/v1/admin/jobs${params}`)
+}
+
+export function adminBatchDeleteJobs(jobIds: string[]) {
+  return adminApiRequest<{ deleted: number; failed: string[] }>('/api/v1/admin/jobs/batch-delete', {
+    method: 'POST',
+    body: JSON.stringify({ job_ids: jobIds }),
+  })
 }
 
 export function adminFetchUsers() {
@@ -232,6 +258,7 @@ export function adminCreateModel(data: {
   supports_reference_image?: boolean
   supported_sizes?: string[]
   sort_order?: number
+  credit_cost?: number
 }) {
   return adminApiRequest<ModelConfig>('/api/v1/admin/models', {
     method: 'POST',
@@ -248,4 +275,45 @@ export function adminUpdateModel(modelId: string, data: Partial<ModelConfig>) {
 
 export function adminDeleteModel(modelId: string) {
   return adminApiRequest<void>(`/api/v1/admin/models/${modelId}`, { method: 'DELETE' })
+}
+
+// ---- Billing APIs ----
+
+export function redeemCode(code: string) {
+  return apiRequest<{ credits: number; added: number }>('/api/v1/users/me/redeem', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
+
+export function fetchCreditHistory(page = 1) {
+  return apiRequest<{ items: CreditTransactionItem[]; total: number }>(`/api/v1/users/me/credits?page=${page}`)
+}
+
+// ---- Admin Billing APIs ----
+
+export function adminGenerateCodes(data: { count: number; credits: number; prefix?: string }) {
+  return adminApiRequest<{ codes: string[] }>('/api/v1/admin/codes/generate', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminFetchCodes(statusFilter: 'all' | 'unused' | 'used' = 'all') {
+  return adminApiRequest<RedemptionCodeItem[]>(`/api/v1/admin/codes?status=${statusFilter}`)
+}
+
+export function adminAdjustCredits(userId: string, data: { amount: number; reason?: string }) {
+  return adminApiRequest<{ credits: number }>(`/api/v1/admin/users/${userId}/credits`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminFetchTransactions(userId?: string, page = 1) {
+  const params = new URLSearchParams({ page: String(page) })
+  if (userId) params.set('user_id', userId)
+  return adminApiRequest<(CreditTransactionItem & { id: string; user_id: string; username: string | null })[]>(
+    `/api/v1/admin/transactions?${params}`,
+  )
 }

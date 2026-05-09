@@ -25,6 +25,7 @@ class PublicModel(BaseModel):
     enabled: bool = True
     supports_reference_image: bool = True
     supported_sizes: list[str] = Field(default_factory=list)
+    credit_cost: int = 1
 
 
 class PublicMetaResponse(BaseModel):
