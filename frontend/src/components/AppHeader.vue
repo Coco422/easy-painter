@@ -56,8 +56,8 @@ async function handleLogout() {
 }
 
 .brand-logo {
-  width: 38px;
-  height: 38px;
+  width: 48px;
+  height: 48px;
   flex: 0 0 auto;
   object-fit: contain;
   filter: drop-shadow(0 4px 10px rgba(196, 149, 54, 0.16));
