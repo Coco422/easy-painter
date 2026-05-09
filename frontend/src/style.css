@@ -844,8 +844,16 @@ a {
 }
 
 .gallery-grid {
-  columns: 4 260px;
-  column-gap: 16px;
+  display: flex;
+  gap: 16px;
+}
+
+.gallery-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .gallery-card {
@@ -1179,8 +1187,6 @@ a {
 /* ---- Gallery Card Enhancements ---- */
 .gallery-card-wrap {
   position: relative;
-  break-inside: avoid;
-  margin-bottom: 16px;
 }
 
 .gallery-card-username {
@@ -2035,9 +2041,6 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .gallery-grid {
-    columns: 3 220px;
-  }
 }
 
 @media (max-width: 768px) {
@@ -2150,10 +2153,6 @@ a {
 
   .gallery-card-like-bar {
     opacity: 1;
-  }
-
-  .gallery-grid {
-    columns: 2;
   }
 
   .ritual-main {

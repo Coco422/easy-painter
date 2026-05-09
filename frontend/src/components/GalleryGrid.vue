@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Heart, Star, Globe, Lock } from 'lucide-vue-next'
 
 import type { GalleryItem } from '@/lib/types'
 
-defineProps<{
+const props = defineProps<{
   items: GalleryItem[]
   showUsername?: boolean
   deletable?: boolean
@@ -18,16 +19,39 @@ const emit = defineEmits<{
   togglePublic: [item: GalleryItem]
   toggleLike: [item: GalleryItem]
 }>()
+
+const columnCount = ref(4)
+
+function updateColumnCount() {
+  const w = window.innerWidth
+  columnCount.value = w >= 1200 ? 4 : w >= 768 ? 3 : 2
+}
+
+onMounted(() => {
+  updateColumnCount()
+  window.addEventListener('resize', updateColumnCount)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateColumnCount)
+})
+
+// Stable column distribution — items assigned by index never move on append
+const columns = computed(() => {
+  const cols: GalleryItem[][] = Array.from({ length: columnCount.value }, () => [])
+  props.items.forEach((item, i) => cols[i % columnCount.value].push(item))
+  return cols
+})
 </script>
 
 <template>
   <section class="gallery-section" id="gallery">
     <div class="gallery-grid">
-      <div
-        v-for="item in items"
-        :key="item.job_id"
-        class="gallery-card-wrap"
-      >
+      <div v-for="(col, colIdx) in columns" :key="colIdx" class="gallery-column">
+        <div
+          v-for="item in col"
+          :key="item.job_id"
+          class="gallery-card-wrap"
+        >
         <button
           class="gallery-card"
           type="button"
@@ -75,6 +99,7 @@ const emit = defineEmits<{
           title="删除"
           @click.stop="emit('delete', item)"
         >×</button>
+      </div>
       </div>
     </div>
   </section>
