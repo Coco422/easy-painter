@@ -486,7 +486,7 @@ async function handleAdjustCredits() {
       amount: adjustAmount.value,
       reason: adjustReason.value || undefined,
     })
-    adjustResult.value = `调整成功，当前余额 ${result.credits} 积分。`
+    adjustResult.value = `调整成功，当前余额 ${result.credits} 丝。`
     await loadData()
     await loadTransactions()
   } catch (e) {
@@ -628,7 +628,7 @@ onMounted(() => {
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>ID</th><th>名称</th><th>上游</th><th>参考图</th><th>积分/张</th><th>启用</th><th>操作</th></tr>
+              <tr><th>ID</th><th>名称</th><th>上游</th><th>参考图</th><th>丝/张</th><th>启用</th><th>操作</th></tr>
             </thead>
             <tbody>
               <template v-for="m in models" :key="m.id">
@@ -686,7 +686,7 @@ onMounted(() => {
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
-              <tr><th>用户名</th><th>显示名称</th><th>积分</th><th>公开画廊</th><th>注册时间</th><th>操作</th></tr>
+              <tr><th>用户名</th><th>显示名称</th><th>灵感丝线</th><th>公开画廊</th><th>注册时间</th><th>操作</th></tr>
             </thead>
             <tbody>
               <template v-for="user in users" :key="user.id">
@@ -816,11 +816,11 @@ onMounted(() => {
       </section>
 
       <section v-show="activeSection === 'billing'" class="admin-section">
-        <h2 class="admin-section-title"><Wallet :size="18" style="vertical-align:middle;margin-right:6px" />用户积分调整</h2>
+        <h2 class="admin-section-title"><Wallet :size="18" style="vertical-align:middle;margin-right:6px" />用户灵感丝线调整</h2>
         <form class="admin-create-form" @submit.prevent="handleAdjustCredits">
           <select v-model="adjustUserId" class="admin-input">
             <option value="" disabled>选择用户</option>
-            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.username }} ({{ u.credits ?? 0 }} 积分)</option>
+            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.username }} ({{ u.credits ?? 0 }} 丝)</option>
           </select>
           <input v-model.number="adjustAmount" type="number" class="admin-input" style="width:100px" placeholder="数量" />
           <input v-model="adjustReason" type="text" class="admin-input" maxlength="256" placeholder="原因（可选）" />
@@ -967,7 +967,7 @@ onMounted(() => {
               <span>支持参考图</span>
             </label>
             <label class="admin-form-label">
-              积分/张
+              丝/张
               <input v-model.number="newModelCreditCost" type="number" min="1" class="admin-input" placeholder="1" />
             </label>
             <label class="admin-form-label">

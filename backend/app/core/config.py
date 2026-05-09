@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "easy-painter-api"
-    site_name: str = "安落滢绘画站"
+    site_name: str = "一丝绘画站"
     app_env: str = "production"
     api_v1_prefix: str = "/api/v1"
 

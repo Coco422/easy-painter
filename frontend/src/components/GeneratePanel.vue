@@ -148,7 +148,7 @@ function sizeSupportedBySelectedModel(size: ImageSize) {
           @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="model in models" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
-            {{ model.label }}{{ referenceImage && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 积分/张）
+            {{ model.label }}{{ referenceImage && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张）
           </option>
         </select>
       </label>

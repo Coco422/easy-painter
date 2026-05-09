@@ -46,7 +46,7 @@ async function handleRedeem() {
   redeemFeedback.value = ''
   try {
     const result = await redeemCode(code)
-    redeemFeedback.value = `兑换成功！获得 ${result.added} 积分，当前余额 ${result.credits} 积分。`
+    redeemFeedback.value = `兑换成功！获得 ${result.added} 丝，当前余额 ${result.credits} 丝。`
     redeemSuccess.value = true
     redeemInput.value = ''
     await fetchCurrentUser()
@@ -108,14 +108,14 @@ onMounted(async () => {
     <div class="profile-grid">
       <!-- Credits card -->
       <section class="profile-card credits-card">
-        <p class="card-label">积分余额</p>
+        <p class="card-label">灵感丝线余额</p>
         <p class="credits-value">{{ authState.user?.credits ?? 0 }}</p>
-        <p class="credits-hint">每张图片消耗模型对应积分</p>
+        <p class="credits-hint">每张图片消耗模型对应灵感丝线</p>
       </section>
 
       <!-- Redeem card -->
       <section class="profile-card redeem-card">
-        <p class="card-label">兑换积分</p>
+        <p class="card-label">兑换灵感丝线</p>
         <div class="redeem-row">
           <input
             v-model="redeemInput"

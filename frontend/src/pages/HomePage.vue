@@ -397,7 +397,7 @@ async function submitPrompt() {
     })
   } catch (error) {
     if (error instanceof ApiError && error.status === 402) {
-      feedback.value = `积分不足（需要 ${error.required ?? '?'} 积分，当前 ${error.balance ?? 0} 积分）。前往个人中心兑换积分 →`
+      feedback.value = `灵感丝线不足（需要 ${error.required ?? '?'} 丝，当前 ${error.balance ?? 0} 丝）。前往个人中心兑换 →`
       router.push('/profile')
       return
     }

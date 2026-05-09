@@ -130,7 +130,7 @@ async def create_job(
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail={
-                    "message": "积分不足，请前往个人中心兑换。",
+                    "message": "灵感丝线不足，请前往个人中心兑换。",
                     "required": credit_cost,
                     "balance": current_user.credits or 0,
                 },

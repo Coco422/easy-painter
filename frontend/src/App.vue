@@ -7,7 +7,7 @@ import { fetchCurrentUser, isLoggedIn } from '@/lib/auth'
 import { initTheme } from '@/lib/theme'
 
 const route = useRoute()
-const siteName = ref('安落滢绘画站')
+const siteName = ref('一丝绘画站')
 const isAdminRoute = computed(() => route.path === '/admin')
 
 onMounted(async () => {
