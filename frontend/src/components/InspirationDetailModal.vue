@@ -106,21 +106,30 @@ function formatSource(source: string) {
       <div class="modal-copy">
         <h3 class="inspiration-title">{{ item.title }}</h3>
 
-        <div class="prompt-heading">
-          <p class="section-label">提示词</p>
-          <div class="prompt-actions">
-            <button class="copy-button" type="button" @click="copyPrompt">
-              <Check v-if="copied" :size="16" />
-              <Copy v-else :size="16" />
-              <span>{{ copied ? '已复制' : '一键复制' }}</span>
-            </button>
-            <button class="create-button" type="button" @click="goToCreate">
-              <Sparkles :size="16" />
-              <span>去创作</span>
-            </button>
-          </div>
+        <div v-if="item.categories && item.categories.length > 0" class="inspiration-categories">
+          <span v-for="cat in item.categories" :key="cat" class="inspiration-category-tag">{{ cat }}</span>
         </div>
-        <p class="modal-prompt">{{ item.prompt }}</p>
+
+        <template v-if="item.prompt">
+          <div class="prompt-heading">
+            <p class="section-label">提示词</p>
+            <div class="prompt-actions">
+              <button class="copy-button" type="button" @click="copyPrompt">
+                <Check v-if="copied" :size="16" />
+                <Copy v-else :size="16" />
+                <span>{{ copied ? '已复制' : '一键复制' }}</span>
+              </button>
+              <button class="create-button" type="button" @click="goToCreate">
+                <Sparkles :size="16" />
+                <span>去创作</span>
+              </button>
+            </div>
+          </div>
+          <p class="modal-prompt">{{ item.prompt }}</p>
+        </template>
+        <template v-else-if="item.source === 'gallery'">
+          <p class="modal-prompt-hidden">提示词已隐藏</p>
+        </template>
 
         <p v-if="item.description" class="section-label">描述</p>
         <p v-if="item.description" class="modal-description">{{ item.description }}</p>
@@ -188,5 +197,30 @@ function formatSource(source: string) {
   font-size: 14px;
   line-height: 1.6;
   color: var(--text-secondary);
+}
+
+.inspiration-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.inspiration-category-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.modal-prompt-hidden {
+  padding: 16px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-style: italic;
 }
 </style>

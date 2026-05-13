@@ -49,6 +49,9 @@ const columns = computed(() => {
               <span v-if="item.source === 'gallery'" class="inspiration-source-tag source-gallery">社区</span>
               <span v-else class="inspiration-source-tag source-external">灵感库</span>
               <div class="inspiration-card-info">
+                <div v-if="item.categories && item.categories.length > 0" class="inspiration-card-tags">
+                  <span v-for="cat in item.categories.slice(0, 3)" :key="cat" class="inspiration-card-tag">{{ cat }}</span>
+                </div>
                 <p class="inspiration-card-title">{{ item.title }}</p>
                 <div class="inspiration-card-meta">
                   <span v-if="item.author_name" class="inspiration-card-author">{{ item.author_name }}</span>
@@ -161,6 +164,24 @@ const columns = computed(() => {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.inspiration-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.inspiration-card-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 10px;
+  font-weight: 500;
+  color: #fff;
+  backdrop-filter: blur(4px);
 }
 
 .inspiration-card-meta {

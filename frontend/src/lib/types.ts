@@ -56,7 +56,9 @@ export interface GalleryItem {
   finished_at: string
   username?: string | null
   is_public?: boolean
+  is_prompt_public?: boolean
   is_favorite?: boolean
+  tags?: string[] | null
   like_count?: number
   liked_by_me?: boolean
 }

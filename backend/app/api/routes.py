@@ -27,6 +27,7 @@ from app.schemas.job import (
     HealthResponse,
     JobDetailResponse,
     PublicMetaResponse,
+    TogglePublicRequest,
 )
 from app.services.model_service import load_models_from_db
 from app.services.rate_limit import GenerationRateLimiter
@@ -344,15 +345,47 @@ def delete_job(
 @router.put("/jobs/{job_id}/public")
 def toggle_job_public(
     job_id: str,
+    body: TogglePublicRequest = TogglePublicRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
 ) -> dict[str, bool]:
     job = db.get(GenerationJob, job_id)
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
-    job.is_public = not job.is_public
+    if not job.is_public:
+        if job.status != JobStatus.SUCCEEDED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只能公开已完成的作品。")
+        # Publishing: accept tags and prompt visibility setting
+        job.is_public = True
+        job.tags = body.tags
+        job.is_prompt_public = body.is_prompt_public
+    else:
+        # Unpublishing: just toggle off, clear tags
+        job.is_public = False
     db.commit()
     return {"is_public": job.is_public}
+
+
+@router.get("/tags/popular")
+def get_popular_tags(
+    db: Session = Depends(get_db),
+    limit: int = Query(20, ge=1, le=50),
+) -> list[str]:
+    jobs = db.scalars(
+        select(GenerationJob.tags)
+        .where(GenerationJob.is_public.is_(True))
+        .where(GenerationJob.tags.isnot(None))
+        .limit(1000)
+    ).all()
+    tag_counts: dict[str, int] = {}
+    for tags in jobs:
+        if not isinstance(tags, list):
+            continue
+        for tag in tags:
+            if isinstance(tag, str) and tag.strip():
+                tag_counts[tag.strip()] = tag_counts.get(tag.strip(), 0) + 1
+    sorted_tags = sorted(tag_counts, key=lambda t: tag_counts[t], reverse=True)
+    return sorted_tags[:limit]
 
 
 @router.put("/jobs/{job_id}/favorite")
@@ -552,7 +585,9 @@ def _build_gallery_item(
         finished_at=job.finished_at,
         username=username,
         is_public=job.is_public,
+        is_prompt_public=job.is_prompt_public if job.is_prompt_public is not None else True,
         is_favorite=job.is_favorite,
+        tags=job.tags,
         like_count=like_counts.get(job.id, 0),
         liked_by_me=job.id in liked_job_ids,
     )

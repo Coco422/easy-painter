@@ -43,6 +43,8 @@ def _ensure_generation_job_columns() -> None:
         "user_id": "ALTER TABLE generation_jobs ADD COLUMN user_id VARCHAR(36)",
         "is_public": "ALTER TABLE generation_jobs ADD COLUMN is_public BOOLEAN DEFAULT FALSE",
         "is_favorite": "ALTER TABLE generation_jobs ADD COLUMN is_favorite BOOLEAN DEFAULT FALSE",
+        "is_prompt_public": "ALTER TABLE generation_jobs ADD COLUMN is_prompt_public BOOLEAN DEFAULT TRUE",
+        "tags": "ALTER TABLE generation_jobs ADD COLUMN tags JSON",
     }
 
     with engine.begin() as connection:

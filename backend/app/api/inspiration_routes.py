@@ -8,6 +8,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
 from app.models.user import User
@@ -58,22 +59,25 @@ def _inspiration_to_response(item: Inspiration) -> InspirationItemResponse:
     )
 
 
-def _gallery_job_to_response(job: GenerationJob, username: str | None) -> InspirationItemResponse:
+def _gallery_job_to_response(
+    job: GenerationJob, username: str | None, like_count: int = 0
+) -> InspirationItemResponse:
     title = job.prompt[:80] + ("..." if len(job.prompt) > 80 else "")
+    prompt_text = "" if job.is_prompt_public is False else job.prompt
     return InspirationItemResponse(
         id=f"gallery:{job.id}",
         title=title,
         description=None,
-        prompt=job.prompt,
+        prompt=prompt_text,
         image_url=job.public_url or "",
         source="gallery",
         source_url=None,
         author_name=username,
         author_url=None,
         language="zh",
-        categories=None,
+        categories=job.tags if isinstance(job.tags, list) else None,
         is_featured=False,
-        like_count=0,
+        like_count=like_count,
         created_at=job.finished_at or job.created_at,
     )
 
@@ -85,15 +89,14 @@ def list_inspirations(
     limit: int = Query(20, ge=1, le=100),
     q: str | None = Query(None, max_length=200),
     source: str | None = Query(None, max_length=128),
+    category: str | None = Query(None, max_length=100),
     sort: str = Query("recent", pattern="^(recent|featured)$"),
 ) -> InspirationFeedResponse:
     items: list[InspirationItemResponse] = []
-    total = 0
 
-    # 1. Query external inspirations (unless source=gallery)
-    if source != "gallery":
+    # 1. Query external inspirations (unless source=gallery or category filter is set)
+    if source != "gallery" and not category:
         stmt = select(Inspiration)
-        count_stmt = select(func.count()).select_from(Inspiration)
 
         if q:
             like_pattern = f"%{q}%"
@@ -102,17 +105,8 @@ def list_inspirations(
                 | Inspiration.prompt.ilike(like_pattern)
                 | Inspiration.description.ilike(like_pattern)
             )
-            count_stmt = count_stmt.where(
-                Inspiration.title.ilike(like_pattern)
-                | Inspiration.prompt.ilike(like_pattern)
-                | Inspiration.description.ilike(like_pattern)
-            )
         if source and source != "all":
             stmt = stmt.where(Inspiration.source == source)
-            count_stmt = count_stmt.where(Inspiration.source == source)
-
-        inspiration_total = db.scalar(count_stmt) or 0
-        total += inspiration_total
 
         if sort == "featured":
             stmt = stmt.order_by(desc(Inspiration.is_featured), desc(Inspiration.created_at))
@@ -122,19 +116,12 @@ def list_inspirations(
         inspiration_rows = db.scalars(stmt).all()
         items.extend(_inspiration_to_response(row) for row in inspiration_rows)
 
-    # 2. Query public gallery jobs (unless source is a specific external source)
-    if source != "gallery" and source and source != "all":
-        pass  # Skip gallery items when filtering by a specific external source
-    elif source != "gallery":
+    # 2. Query public gallery jobs
+    # Skip gallery only when filtering by a specific external source
+    include_gallery = source in (None, "", "all", "gallery")
+    if include_gallery:
         gallery_stmt = (
             select(GenerationJob)
-            .where(GenerationJob.status == JobStatus.SUCCEEDED)
-            .where(GenerationJob.is_public.is_(True))
-            .where(GenerationJob.public_url.isnot(None))
-        )
-        gallery_count_stmt = (
-            select(func.count())
-            .select_from(GenerationJob)
             .where(GenerationJob.status == JobStatus.SUCCEEDED)
             .where(GenerationJob.is_public.is_(True))
             .where(GenerationJob.public_url.isnot(None))
@@ -143,19 +130,37 @@ def list_inspirations(
         if q:
             like_pattern = f"%{q}%"
             gallery_stmt = gallery_stmt.where(GenerationJob.prompt.ilike(like_pattern))
-            gallery_count_stmt = gallery_count_stmt.where(GenerationJob.prompt.ilike(like_pattern))
-
-        gallery_total = db.scalar(gallery_count_stmt) or 0
-        total += gallery_total
 
         gallery_stmt = gallery_stmt.order_by(desc(GenerationJob.finished_at)).limit(500)
         jobs = db.scalars(gallery_stmt).all()
 
+        # Filter by category (tags) in Python since tags is a JSON array
+        if category:
+            jobs = [
+                j for j in jobs
+                if isinstance(j.tags, list) and category in j.tags
+            ]
+
+        job_ids = [j.id for j in jobs]
         user_ids = list({j.user_id for j in jobs if j.user_id})
         usernames = _batch_usernames(db, user_ids)
 
+        # Batch query like counts
+        like_counts: dict[str, int] = {}
+        if job_ids:
+            rows = db.execute(
+                select(GalleryLike.job_id, func.count())
+                .where(GalleryLike.job_id.in_(job_ids))
+                .group_by(GalleryLike.job_id)
+            ).all()
+            like_counts = {job_id: count for job_id, count in rows}
+
         items.extend(
-            _gallery_job_to_response(job, usernames.get(job.user_id) if job.user_id else None)
+            _gallery_job_to_response(
+                job,
+                usernames.get(job.user_id) if job.user_id else None,
+                like_count=like_counts.get(job.id, 0),
+            )
             for job in jobs
         )
 

@@ -47,4 +47,6 @@ class GenerationJob(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_prompt_public: Mapped[bool] = mapped_column(Boolean, default=True)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)

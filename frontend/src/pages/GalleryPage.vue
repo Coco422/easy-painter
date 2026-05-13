@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 
 import GalleryGrid from '@/components/GalleryGrid.vue'
 import PromptModal from '@/components/PromptModal.vue'
-import { deleteJob, fetchGallery, toggleJobFavorite, toggleJobPublic } from '@/lib/api'
+import { deleteJob, fetchGallery, fetchPopularTags, toggleJobFavorite, toggleJobPublic } from '@/lib/api'
 import { isLoggedIn } from '@/lib/auth'
 import type { GalleryItem } from '@/lib/types'
 
@@ -21,6 +21,7 @@ const galleryToDate = ref('')
 const selectedItem = ref<GalleryItem | null>(null)
 const feedback = ref('')
 const loading = ref(true)
+const popularTags = ref<string[]>([])
 
 async function loadGallery(page = 1) {
   galleryPage.value = page
@@ -63,10 +64,37 @@ async function handleToggleFavorite(item: GalleryItem) {
 }
 
 async function handleTogglePublic(item: GalleryItem) {
-  if (!item.is_public && !confirm('确定将此作品公开到画廊吗？其他用户将可以看到它。')) return
+  if (item.is_public) {
+    // Unpublish directly
+    try {
+      const result = await toggleJobPublic(item.job_id)
+      item.is_public = result.is_public
+    } catch (e) {
+      feedback.value = e instanceof Error ? e.message : '操作失败。'
+    }
+  } else {
+    // Open PromptModal in publish mode (select the item to open modal)
+    selectedItem.value = item
+  }
+}
+
+async function handlePublish(item: GalleryItem, tags: string[], isPromptPublic: boolean) {
+  try {
+    const result = await toggleJobPublic(item.job_id, tags, isPromptPublic)
+    item.is_public = result.is_public
+    item.tags = tags
+    item.is_prompt_public = isPromptPublic
+    selectedItem.value = null
+  } catch (e) {
+    feedback.value = e instanceof Error ? e.message : '发布失败。'
+  }
+}
+
+async function handleUnpublish(item: GalleryItem) {
   try {
     const result = await toggleJobPublic(item.job_id)
     item.is_public = result.is_public
+    selectedItem.value = null
   } catch (e) {
     feedback.value = e instanceof Error ? e.message : '操作失败。'
   }
@@ -78,7 +106,11 @@ onMounted(async () => {
     return
   }
   try {
-    await loadGallery()
+    const [, tags] = await Promise.all([
+      loadGallery(),
+      fetchPopularTags().catch(() => []),
+    ])
+    popularTags.value = tags
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '画廊加载失败，请刷新重试。'
   } finally {
@@ -128,9 +160,11 @@ onMounted(async () => {
     <PromptModal
       :item="selectedItem"
       :is-owner="true"
+      :popular-tags="popularTags"
       @close="selectedItem = null"
       @toggle-favorite="handleToggleFavorite"
-      @toggle-public="handleTogglePublic"
+      @publish="handlePublish"
+      @unpublish="handleUnpublish"
     />
   </template>
 </template>

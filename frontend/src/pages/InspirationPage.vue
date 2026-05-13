@@ -3,7 +3,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import InspirationDetailModal from '@/components/InspirationDetailModal.vue'
 import InspirationGrid from '@/components/InspirationGrid.vue'
-import { fetchInspirations } from '@/lib/api'
+import { fetchInspirations, fetchPopularTags } from '@/lib/api'
 import type { InspirationItem } from '@/lib/types'
 
 const items = ref<InspirationItem[]>([])
@@ -15,9 +15,11 @@ const loadingMore = ref(false)
 const hasMore = ref(true)
 const searchQuery = ref('')
 const selectedSource = ref('')
+const selectedCategory = ref('')
 const sortMode = ref<'recent' | 'featured'>('recent')
 const selectedItem = ref<InspirationItem | null>(null)
 const scrollSentinel = ref<HTMLElement | null>(null)
+const communityTags = ref<string[]>([])
 let scrollObserver: IntersectionObserver | null = null
 
 async function loadMore() {
@@ -29,6 +31,7 @@ async function loadMore() {
       limit: limit.value,
       q: searchQuery.value || undefined,
       source: selectedSource.value || undefined,
+      category: selectedCategory.value || undefined,
       sort: sortMode.value,
     })
     items.value.push(...data.items)
@@ -57,6 +60,12 @@ function handleSearch() {
 
 function handleSourceChange(source: string) {
   selectedSource.value = source
+  selectedCategory.value = ''
+  resetFeed()
+}
+
+function handleCategoryChange(category: string) {
+  selectedCategory.value = selectedCategory.value === category ? '' : category
   resetFeed()
 }
 
@@ -91,6 +100,7 @@ onMounted(() => {
   )
   void loadMore()
   observeSentinel()
+  fetchPopularTags().then(tags => { communityTags.value = tags }).catch(() => {})
 })
 </script>
 
@@ -142,6 +152,16 @@ onMounted(() => {
           >精选</button>
         </div>
       </div>
+    </div>
+
+    <div v-if="selectedSource === 'gallery' && communityTags.length > 0" class="category-filter">
+      <button
+        v-for="tag in communityTags.slice(0, 12)"
+        :key="tag"
+        class="category-pill"
+        :class="{ active: selectedCategory === tag }"
+        @click="handleCategoryChange(tag)"
+      >{{ tag }}</button>
     </div>
 
     <InspirationGrid
@@ -281,6 +301,35 @@ onMounted(() => {
 
 .sort-btn.active {
   background: var(--accent);
+  color: var(--accent-foreground, #fff);
+}
+
+.category-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.category-pill {
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 200ms;
+}
+
+.category-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.category-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--accent-foreground, #fff);
 }
 

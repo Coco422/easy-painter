@@ -140,8 +140,14 @@ export function deleteJob(jobId: string) {
   return apiRequest<void>(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
 }
 
-export function toggleJobPublic(jobId: string) {
-  return apiRequest<{ is_public: boolean }>(`/api/v1/jobs/${jobId}/public`, { method: 'PUT' })
+export function toggleJobPublic(jobId: string, tags?: string[], isPromptPublic?: boolean) {
+  return apiRequest<{ is_public: boolean }>(`/api/v1/jobs/${jobId}/public`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      tags: tags ?? null,
+      is_prompt_public: isPromptPublic ?? true,
+    }),
+  })
 }
 
 export function toggleJobFavorite(jobId: string) {
@@ -154,6 +160,10 @@ export function likeGalleryItem(jobId: string) {
 
 export function unlikeGalleryItem(jobId: string) {
   return apiRequest<void>(`/api/v1/gallery/${jobId}/like`, { method: 'DELETE' })
+}
+
+export function fetchPopularTags(limit = 20) {
+  return apiRequest<string[]>(`/api/v1/tags/popular?limit=${limit}`)
 }
 
 export function fetchUserGallery(username: string) {

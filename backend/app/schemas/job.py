@@ -109,6 +109,20 @@ class JobDetailResponse(BaseModel):
     finished_at: datetime | None = None
 
 
+class TogglePublicRequest(BaseModel):
+    tags: list[str] | None = None
+    is_prompt_public: bool = True
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if len(v) > 5:
+            raise ValueError("最多选择 5 个标签。")
+        return [t.strip() for t in v if t.strip()]
+
+
 class GalleryItem(BaseModel):
     job_id: str
     image_url: str
@@ -120,7 +134,9 @@ class GalleryItem(BaseModel):
     finished_at: datetime
     username: str | None = None
     is_public: bool = False
+    is_prompt_public: bool = True
     is_favorite: bool = False
+    tags: list[str] | None = None
     like_count: int = 0
     liked_by_me: bool = False
 
