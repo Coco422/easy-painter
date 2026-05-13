@@ -12,6 +12,12 @@ data/minio
 data/postgres
 data/redis
 
+README_zh.md
+inspirations/
+scripts/__pycache__/
+scripts/download_inspirations.py
+scripts/upload_inspirations.py
+
 .claude/*
 !.claude/skills/
 !.claude/skills/**
