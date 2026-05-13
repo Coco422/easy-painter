@@ -1,3 +1,12 @@
+from app.schemas.inspiration import (
+    AdminInspirationItem,
+    BatchCreateInspirationsRequest,
+    BatchCreateInspirationsResponse,
+    CreateInspirationRequest,
+    CreateInspirationResponse,
+    InspirationFeedResponse,
+    InspirationItemResponse,
+)
 from app.schemas.job import (
     CreateJobRequest,
     CreateJobResponse,
@@ -9,6 +18,13 @@ from app.schemas.job import (
 )
 
 __all__ = [
+    "AdminInspirationItem",
+    "BatchCreateInspirationsRequest",
+    "BatchCreateInspirationsResponse",
+    "CreateInspirationRequest",
+    "CreateInspirationResponse",
+    "InspirationFeedResponse",
+    "InspirationItemResponse",
     "CreateJobRequest",
     "CreateJobResponse",
     "GalleryItem",

@@ -7,6 +7,7 @@ from app.db.session import SessionLocal, engine
 from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
+from app.models.inspiration import Inspiration
 from app.models.model_config import ModelConfig
 from app.models.redemption_code import RedemptionCode
 from app.models.upstream_provider import UpstreamProvider
@@ -21,6 +22,7 @@ def init_db() -> None:
     _ = User
     _ = UpstreamProvider
     _ = ModelConfig
+    _ = Inspiration
     Base.metadata.create_all(bind=engine)
     _ensure_generation_job_columns()
     _ensure_user_columns()

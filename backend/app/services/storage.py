@@ -80,6 +80,23 @@ class MinioStorageService:
             raise StorageError("Failed to store reference image.") from exc
         return object_key
 
+    def upload_inspiration_image(self, image_id: str, image_bytes: bytes, content_type: str) -> StoredImage:
+        timestamp = datetime.now(timezone.utc)
+        extension = self._guess_extension(content_type)
+        object_key = f"inspirations/{timestamp:%Y/%m/%d}/{image_id}.{extension}"
+        stream = BytesIO(image_bytes)
+        try:
+            self.client.put_object(
+                self.bucket,
+                object_key,
+                data=stream,
+                length=len(image_bytes),
+                content_type=content_type,
+            )
+        except S3Error as exc:
+            raise StorageError("Failed to store inspiration image.") from exc
+        return StoredImage(object_key=object_key, public_url=f"/media/{object_key}")
+
     def download_reference_image(self, object_key: str, content_type: str) -> StoredReferenceImage:
         try:
             response = self.client.get_object(self.reference_bucket, object_key)

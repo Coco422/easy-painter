@@ -1,11 +1,13 @@
 import { getAdminAuthHeader, getAuthHeader } from './auth'
 import type {
   AdminJobItem,
+  BatchCreateInspirationsResponse,
   CreateJobRequest,
   CreateJobResponse,
   CreditTransactionItem,
   GalleryItem,
   GalleryPageResponse,
+  InspirationFeedResponse,
   JobDetailResponse,
   ModelConfig,
   PublicMetaResponse,
@@ -337,4 +339,67 @@ export function adminFetchTransactions(userId?: string, page = 1) {
   return adminApiRequest<(CreditTransactionItem & { id: string; user_id: string; username: string | null })[]>(
     `/api/v1/admin/transactions?${params}`,
   )
+}
+
+// --- Inspiration APIs ---
+
+export function fetchInspirations(params: {
+  offset?: number
+  limit?: number
+  q?: string
+  category?: string
+  source?: string
+  sort?: 'recent' | 'featured'
+} = {}): Promise<InspirationFeedResponse> {
+  const qs = new URLSearchParams()
+  if (params.offset) qs.set('offset', String(params.offset))
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.q) qs.set('q', params.q)
+  if (params.category) qs.set('category', params.category)
+  if (params.source) qs.set('source', params.source)
+  if (params.sort) qs.set('sort', params.sort)
+  return apiRequest<InspirationFeedResponse>(`/api/v1/inspirations?${qs}`)
+}
+
+export function adminFetchInspirations(params: {
+  offset?: number
+  limit?: number
+  source?: string
+} = {}): Promise<InspirationFeedResponse> {
+  const qs = new URLSearchParams()
+  if (params.offset) qs.set('offset', String(params.offset))
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.source) qs.set('source', params.source)
+  return adminApiRequest<InspirationFeedResponse>(`/api/v1/admin/inspirations?${qs}`)
+}
+
+export function adminCreateInspiration(formData: FormData): Promise<{ id: string; image_url: string }> {
+  return adminApiRequest('/api/v1/admin/inspirations', {
+    method: 'POST',
+    body: formData,
+  })
+}
+
+export function adminBatchCreateInspirations(items: Array<{
+  title: string
+  description?: string | null
+  prompt: string
+  image_url: string
+  external_id?: string | null
+  source: string
+  source_url?: string | null
+  author_name?: string | null
+  author_url?: string | null
+  language?: string
+  categories?: string[] | null
+  is_featured?: boolean
+}>): Promise<BatchCreateInspirationsResponse> {
+  return adminApiRequest('/api/v1/admin/inspirations/batch', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  })
+}
+
+export function adminDeleteInspiration(id: string): Promise<void> {
+  return adminApiRequest(`/api/v1/admin/inspirations/${id}`, { method: 'DELETE' })
 }

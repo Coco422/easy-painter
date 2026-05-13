@@ -1,19 +1,16 @@
 <script setup lang="ts">
-import { Check, Copy, Download, Globe, Lock, Sparkles, Star, X } from 'lucide-vue-next'
+import { Check, Copy, Download, ExternalLink, Sparkles, X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import type { GalleryItem } from '@/lib/types'
+import type { InspirationItem } from '@/lib/types'
 
 const props = defineProps<{
-  item: GalleryItem | null
-  isOwner?: boolean
+  item: InspirationItem | null
 }>()
 
 const emit = defineEmits<{
   close: []
-  toggleFavorite: [item: GalleryItem]
-  togglePublic: [item: GalleryItem]
 }>()
 
 const router = useRouter()
@@ -40,9 +37,15 @@ async function copyPrompt() {
   }, 1600)
 }
 
+function goToCreate() {
+  if (!props.item) return
+  router.push({ path: '/create', query: { prompt: props.item.prompt } })
+  closeModal()
+}
+
 async function downloadImage() {
   if (!props.item) return
-  const filename = props.item.image_url.split('/').pop() || `${props.item.job_id}.png`
+  const filename = props.item.image_url.split('/').pop() || `${props.item.id}.png`
   try {
     const response = await fetch(props.item.image_url)
     if (!response.ok) throw new Error('download failed')
@@ -60,38 +63,31 @@ async function downloadImage() {
   }
 }
 
-function goToCreate() {
-  if (!props.item) return
-  router.push({ path: '/create', query: { prompt: props.item.prompt } })
+function formatSource(source: string) {
+  if (source === 'gallery') return '社区作品'
+  return source
 }
 </script>
 
 <template>
   <div v-if="open && item" class="modal-backdrop" @click.self="closeModal">
     <div class="modal-panel">
-      <div class="modal-toolbar" :class="{ 'modal-toolbar--owner': isOwner }">
-        <div v-if="isOwner" class="modal-toolbar-left">
-          <button
+      <div class="modal-toolbar">
+        <div class="modal-toolbar-left">
+          <span class="inspiration-source-badge" :class="{ 'source-gallery': item.source === 'gallery' }">
+            {{ formatSource(item.source) }}
+          </span>
+          <a
+            v-if="item.source_url"
+            :href="item.source_url"
+            target="_blank"
+            rel="noopener noreferrer"
             class="icon-button"
-            :class="{ active: item.is_favorite }"
-            type="button"
-            title="收藏"
-            aria-label="收藏"
-            @click="emit('toggleFavorite', item)"
+            title="查看来源"
+            aria-label="查看来源"
           >
-            <Star :size="20" :fill="item.is_favorite ? 'currentColor' : 'none'" />
-          </button>
-          <button
-            class="icon-button"
-            :class="{ active: item.is_public }"
-            type="button"
-            :title="item.is_public ? '公开' : '私密'"
-            :aria-label="item.is_public ? '公开' : '私密'"
-            @click="emit('togglePublic', item)"
-          >
-            <Globe v-if="item.is_public" :size="20" />
-            <Lock v-else :size="20" />
-          </button>
+            <ExternalLink :size="18" />
+          </a>
         </div>
         <div class="modal-toolbar-right">
           <button class="icon-button" type="button" title="下载图片" aria-label="下载图片" @click="downloadImage">
@@ -104,9 +100,12 @@ function goToCreate() {
       </div>
 
       <div class="modal-image-frame">
-        <img :src="item.image_url" :alt="item.prompt" class="modal-image" />
+        <img :src="item.image_url" :alt="item.title" class="modal-image" />
       </div>
+
       <div class="modal-copy">
+        <h3 class="inspiration-title">{{ item.title }}</h3>
+
         <div class="prompt-heading">
           <p class="section-label">提示词</p>
           <div class="prompt-actions">
@@ -123,14 +122,13 @@ function goToCreate() {
         </div>
         <p class="modal-prompt">{{ item.prompt }}</p>
 
-        <template v-if="item.revised_prompt">
-          <p class="section-label">模型修订提示词</p>
-          <p class="modal-revised">{{ item.revised_prompt }}</p>
-        </template>
+        <p v-if="item.description" class="section-label">描述</p>
+        <p v-if="item.description" class="modal-description">{{ item.description }}</p>
 
         <div class="modal-meta">
-          <span>{{ item.model }}</span>
-          <span>{{ new Date(item.finished_at).toLocaleString('zh-CN') }}</span>
+          <span v-if="item.author_name">{{ item.author_name }}</span>
+          <span>{{ new Date(item.created_at).toLocaleString('zh-CN') }}</span>
+          <span v-if="item.language">{{ item.language }}</span>
         </div>
       </div>
     </div>
@@ -138,6 +136,27 @@ function goToCreate() {
 </template>
 
 <style scoped>
+.inspiration-source-badge {
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+}
+
+.inspiration-source-badge.source-gallery {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.inspiration-title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .prompt-actions {
   display: flex;
   align-items: center;
@@ -162,5 +181,12 @@ function goToCreate() {
 
 .create-button:hover {
   opacity: 0.9;
+}
+
+.modal-description {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 </style>
