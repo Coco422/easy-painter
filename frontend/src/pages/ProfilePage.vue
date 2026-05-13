@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { fetchCurrentUser } from '@/lib/auth'
 import { authState } from '@/lib/auth'
-import { ApiError, fetchCreditHistory, redeemCode, updateProfile } from '@/lib/api'
+import { ApiError, changePassword, fetchCreditHistory, redeemCode, updateProfile } from '@/lib/api'
 import type { CreditTransactionItem } from '@/lib/types'
 
 const redeemInput = ref('')
@@ -15,6 +16,21 @@ const displayName = ref('')
 const isPublic = ref(false)
 const profileSaving = ref(false)
 const profileFeedback = ref('')
+const galleryCopied = ref(false)
+
+const router = useRouter()
+const galleryUrl = computed(() => {
+  const username = authState.user?.username
+  if (!username) return ''
+  return `${window.location.origin}/gallery/${username}`
+})
+
+const oldPassword = ref('')
+const newPassword = ref('')
+const confirmPassword = ref('')
+const passwordSaving = ref(false)
+const passwordFeedback = ref('')
+const passwordSuccess = ref(false)
 
 const transactions = ref<CreditTransactionItem[]>([])
 const totalTransactions = ref(0)
@@ -73,6 +89,51 @@ async function handleSaveProfile() {
     profileFeedback.value = error instanceof Error ? error.message : '保存失败。'
   } finally {
     profileSaving.value = false
+  }
+}
+
+async function copyGalleryLink() {
+  if (!galleryUrl.value) return
+  try {
+    await navigator.clipboard.writeText(galleryUrl.value)
+    galleryCopied.value = true
+    setTimeout(() => { galleryCopied.value = false }, 2000)
+  } catch {
+    const input = document.createElement('input')
+    input.value = galleryUrl.value
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand('copy')
+    document.body.removeChild(input)
+    galleryCopied.value = true
+    setTimeout(() => { galleryCopied.value = false }, 2000)
+  }
+}
+
+async function handlePasswordChange() {
+  passwordFeedback.value = ''
+  passwordSuccess.value = false
+  if (newPassword.value.length < 6) {
+    passwordFeedback.value = '新密码至少需要 6 个字符。'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    passwordFeedback.value = '两次输入的新密码不一致。'
+    return
+  }
+  passwordSaving.value = true
+  try {
+    await changePassword({ old_password: oldPassword.value, new_password: newPassword.value })
+    passwordFeedback.value = '密码已更新。'
+    passwordSuccess.value = true
+    oldPassword.value = ''
+    newPassword.value = ''
+    confirmPassword.value = ''
+  } catch (error) {
+    passwordSuccess.value = false
+    passwordFeedback.value = error instanceof Error ? error.message : '修改失败。'
+  } finally {
+    passwordSaving.value = false
   }
 }
 
@@ -146,6 +207,19 @@ onMounted(async () => {
           <input v-model="isPublic" type="checkbox" />
           <span>公开画廊（其他用户可以查看你的作品）</span>
         </label>
+        <p class="field-hint">
+          开启后，你将拥有一个专属的作品集页面。你可以在作品详情中将图片「发布」到公开画廊，
+          已发布的作品会展示在你的公开主页上，任何人均可通过链接访问（无需登录）。
+        </p>
+        <div v-if="isPublic && galleryUrl" class="gallery-link-row">
+          <code class="gallery-link-url">{{ galleryUrl }}</code>
+          <button class="ghost-button" @click="copyGalleryLink">
+            {{ galleryCopied ? '已复制' : '复制链接' }}
+          </button>
+          <button class="ghost-button" @click="router.push(`/gallery/${authState.user?.username}`)">
+            前往画廊
+          </button>
+        </div>
         <div class="profile-actions">
           <button class="secondary-button" :disabled="profileSaving" @click="handleSaveProfile">
             {{ profileSaving ? '保存中...' : '保存' }}
@@ -153,9 +227,32 @@ onMounted(async () => {
           <span v-if="profileFeedback" class="profile-feedback">{{ profileFeedback }}</span>
         </div>
       </section>
-    </div>
 
-    <!-- Credit history -->
+      <!-- Password card -->
+      <section class="profile-card password-card">
+        <p class="card-label">修改密码</p>
+        <label class="field-label">
+          <span>原密码</span>
+          <input v-model="oldPassword" type="password" class="field-input" maxlength="128" placeholder="输入当前密码" />
+        </label>
+        <label class="field-label">
+          <span>新密码</span>
+          <input v-model="newPassword" type="password" class="field-input" maxlength="128" placeholder="至少 6 个字符" />
+        </label>
+        <label class="field-label">
+          <span>确认新密码</span>
+          <input v-model="confirmPassword" type="password" class="field-input" maxlength="128" placeholder="再次输入新密码" @keyup.enter="handlePasswordChange" />
+        </label>
+        <div class="profile-actions">
+          <button class="secondary-button" :disabled="passwordSaving" @click="handlePasswordChange">
+            {{ passwordSaving ? '提交中...' : '修改密码' }}
+          </button>
+          <span v-if="passwordFeedback" class="profile-feedback" :class="{ success: passwordSuccess }">
+            {{ passwordFeedback }}
+          </span>
+        </div>
+      </section>
+    </div>
     <section class="profile-card history-card">
       <p class="card-label">消费记录</p>
       <div v-if="loadingHistory" class="history-loading">加载中...</div>

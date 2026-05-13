@@ -177,6 +177,13 @@ export function updateProfile(data: { display_name?: string; is_public?: boolean
   })
 }
 
+export function changePassword(data: { old_password: string; new_password: string }) {
+  return apiRequest<void>('/api/v1/users/me/password', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
 // Admin APIs use separate admin token
 async function adminApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
