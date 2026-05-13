@@ -12,4 +12,6 @@ data/minio
 data/postgres
 data/redis
 
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**
