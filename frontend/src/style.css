@@ -2318,6 +2318,32 @@ a {
   accent-color: var(--accent);
 }
 
+.field-hint {
+  font-size: 0.82rem;
+  color: var(--text-tertiary);
+  margin: -4px 0 12px 0;
+  line-height: 1.5;
+}
+
+.gallery-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.gallery-link-url {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
 .profile-actions {
   display: flex;
   align-items: center;

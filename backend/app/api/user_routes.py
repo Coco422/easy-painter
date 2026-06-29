@@ -9,12 +9,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.core.auth import require_current_user
+from app.core.auth import hash_password, require_current_user, verify_password
 from app.db.session import get_db
 from app.models.credit_transaction import CreditTransaction
 from app.models.redemption_code import RedemptionCode
 from app.models.user import User
-from app.schemas.auth import UpdateUserRequest, UserResponse
+from app.schemas.auth import ChangePasswordRequest, UpdateUserRequest, UserResponse
 
 logger = logging.getLogger(__name__)
 user_router = APIRouter()
@@ -49,6 +49,18 @@ def update_me(
     db.commit()
     db.refresh(current_user)
     return _user_response(current_user)
+
+
+@user_router.put("/users/me/password", status_code=204)
+def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(require_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    if not verify_password(body.old_password, current_user.password_hash):
+        raise HTTPException(status_code=403, detail="原密码不正确。")
+    current_user.password_hash = hash_password(body.new_password)
+    db.commit()
 
 
 # ---- Billing endpoints ----

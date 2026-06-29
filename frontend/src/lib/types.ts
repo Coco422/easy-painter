@@ -56,7 +56,9 @@ export interface GalleryItem {
   finished_at: string
   username?: string | null
   is_public?: boolean
+  is_prompt_public?: boolean
   is_favorite?: boolean
+  tags?: string[] | null
   like_count?: number
   liked_by_me?: boolean
 }
@@ -157,4 +159,40 @@ export interface ModelConfig {
   supported_sizes: string[]
   sort_order: number
   credit_cost: number
+}
+
+export interface InspirationItem {
+  id: string
+  title: string
+  description: string | null
+  prompt: string
+  image_url: string
+  source: string
+  source_url: string | null
+  author_name: string | null
+  author_url: string | null
+  language: string
+  categories: string[] | null
+  is_featured: boolean
+  like_count: number
+  created_at: string
+}
+
+export interface InspirationFeedResponse {
+  items: InspirationItem[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface AdminInspirationItem extends InspirationItem {
+  image_object_key: string | null
+  external_id: string | null
+  updated_at: string
+}
+
+export interface BatchCreateInspirationsResponse {
+  created: number
+  skipped: number
+  errors: string[]
 }

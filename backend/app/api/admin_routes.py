@@ -8,17 +8,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
 from app.core.auth import hash_password, require_admin
 from app.db.session import get_db
 from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.inspiration import Inspiration
 from app.models.model_config import ModelConfig
 from app.models.redemption_code import RedemptionCode
 from app.models.upstream_provider import UpstreamProvider
 from app.models.user import User
 from app.schemas.auth import AdminCreateUserRequest, AdminUpdateUserRequest, UserResponse
+from app.schemas.inspiration import (
+    AdminInspirationItem,
+    BatchCreateInspirationsRequest,
+    BatchCreateInspirationsResponse,
+    CreateInspirationRequest,
+    CreateInspirationResponse,
+)
 from app.services.storage import MinioStorageService
 
 logger = logging.getLogger(__name__)
@@ -595,3 +604,204 @@ def admin_list_transactions(
         )
         for t in txns
     ]
+
+
+# ---- Inspiration admin endpoints ----
+
+@admin_router.get("/admin/inspirations", response_model=list[AdminInspirationItem])
+def admin_list_inspirations(
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    source: str | None = Query(None),
+) -> list[AdminInspirationItem]:
+    stmt = select(Inspiration).order_by(desc(Inspiration.created_at))
+    if source:
+        stmt = stmt.where(Inspiration.source == source)
+    stmt = stmt.offset(offset).limit(limit)
+    items = db.scalars(stmt).all()
+    return [
+        AdminInspirationItem(
+            id=item.id,
+            title=item.title,
+            description=item.description,
+            prompt=item.prompt,
+            image_url=item.image_url,
+            image_object_key=item.image_object_key,
+            external_id=item.external_id,
+            source=item.source,
+            source_url=item.source_url,
+            author_name=item.author_name,
+            author_url=item.author_url,
+            language=item.language or "zh",
+            categories=item.categories if isinstance(item.categories, list) else None,
+            is_featured=item.is_featured or False,
+            like_count=item.like_count or 0,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+        for item in items
+    ]
+
+
+@admin_router.post("/admin/inspirations", response_model=CreateInspirationResponse, status_code=status.HTTP_201_CREATED)
+async def admin_create_inspiration(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> CreateInspirationResponse:
+    form = await request.form()
+
+    title = form.get("title", "")
+    description = form.get("description") or None
+    prompt = form.get("prompt", "")
+    external_id = form.get("external_id") or None
+    source = form.get("source", "")
+    source_url = form.get("source_url") or None
+    author_name = form.get("author_name") or None
+    author_url = form.get("author_url") or None
+    language = form.get("language") or "zh"
+    is_featured = form.get("is_featured", "").lower() in ("true", "1", "yes") if form.get("is_featured") else False
+
+    # Parse categories from JSON string if present
+    categories_raw = form.get("categories")
+    categories = None
+    if categories_raw:
+        import json
+        try:
+            categories = json.loads(str(categories_raw))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not title or not prompt or not source:
+        raise HTTPException(status_code=422, detail="title, prompt, source 为必填项。")
+
+    # Dedup check
+    if external_id:
+        existing = db.scalar(
+            select(Inspiration).where(
+                Inspiration.source == source,
+                Inspiration.external_id == external_id,
+            )
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="该灵感条目已存在（source + external_id 重复）。")
+
+    import uuid
+    inspiration_id = str(uuid.uuid4())
+    image_url = ""
+    image_object_key = None
+
+    # Handle image upload
+    upload = form.get("image")
+    if hasattr(upload, "read"):
+        image_bytes = await upload.read()
+        if image_bytes:
+            content_type = getattr(upload, "content_type", "image/jpeg") or "image/jpeg"
+            try:
+                stored = MinioStorageService().upload_inspiration_image(
+                    image_id=inspiration_id,
+                    image_bytes=image_bytes,
+                    content_type=content_type,
+                )
+                image_url = stored.public_url
+                image_object_key = stored.object_key
+            except Exception as exc:
+                logger.warning("Failed to upload inspiration image: %s", exc)
+                raise HTTPException(status_code=503, detail="图片上传失败。") from exc
+
+    # Also accept image_url directly (for pre-uploaded images)
+    if not image_url:
+        image_url = str(form.get("image_url", ""))
+    if not image_url:
+        raise HTTPException(status_code=422, detail="需要提供图片（image 文件或 image_url）。")
+
+    inspiration = Inspiration(
+        id=inspiration_id,
+        title=title,
+        description=description,
+        prompt=prompt,
+        image_url=image_url,
+        image_object_key=image_object_key,
+        external_id=external_id,
+        source=source,
+        source_url=source_url,
+        author_name=author_name,
+        author_url=author_url,
+        language=language,
+        categories=categories,
+        is_featured=is_featured,
+    )
+    db.add(inspiration)
+    db.commit()
+    db.refresh(inspiration)
+
+    return CreateInspirationResponse(id=inspiration.id, image_url=inspiration.image_url)
+
+
+@admin_router.post("/admin/inspirations/batch", response_model=BatchCreateInspirationsResponse)
+def admin_batch_create_inspirations(
+    body: BatchCreateInspirationsRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> BatchCreateInspirationsResponse:
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for i, item in enumerate(body.items):
+        try:
+            # Dedup check
+            if item.external_id:
+                existing = db.scalar(
+                    select(Inspiration).where(
+                        Inspiration.source == item.source,
+                        Inspiration.external_id == item.external_id,
+                    )
+                )
+                if existing:
+                    skipped += 1
+                    continue
+
+            inspiration = Inspiration(
+                title=item.title,
+                description=item.description,
+                prompt=item.prompt,
+                image_url=item.image_url,
+                external_id=item.external_id,
+                source=item.source,
+                source_url=item.source_url,
+                author_name=item.author_name,
+                author_url=item.author_url,
+                language=item.language or "zh",
+                categories=item.categories,
+                is_featured=item.is_featured or False,
+            )
+            db.add(inspiration)
+            created += 1
+        except Exception as exc:
+            errors.append(f"Item {i}: {exc}")
+
+    if created > 0:
+        db.commit()
+
+    return BatchCreateInspirationsResponse(created=created, skipped=skipped, errors=errors)
+
+
+@admin_router.delete("/admin/inspirations/{inspiration_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_inspiration(
+    inspiration_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> None:
+    inspiration = db.get(Inspiration, inspiration_id)
+    if not inspiration:
+        raise HTTPException(status_code=404, detail="灵感不存在。")
+    if inspiration.image_object_key:
+        try:
+            MinioStorageService().delete_object(inspiration.image_object_key)
+        except Exception:
+            logger.warning("Failed to delete MinIO object %s", inspiration.image_object_key)
+    db.delete(inspiration)
+    db.commit()

@@ -1,31 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import CurrentJobCard from '@/components/CurrentJobCard.vue'
-import GalleryGrid from '@/components/GalleryGrid.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
-import PromptModal from '@/components/PromptModal.vue'
 import {
   ApiError,
   createJob,
-  deleteJob,
   fetchActiveJobs,
-  fetchGallery,
   fetchJob,
-  fetchPublicGallery,
   fetchPublicMeta,
-  likeGalleryItem,
-  toggleJobFavorite,
-  toggleJobPublic,
-  unlikeGalleryItem,
 } from '@/lib/api'
 import { isLoggedIn } from '@/lib/auth'
 import type {
   BatchCount,
   CreateJobResponse,
-  GalleryItem,
   ImageSize,
   JobDetailResponse,
   PublicModel,
@@ -35,30 +25,9 @@ import type {
 const ACTIVE_JOB_STORAGE_KEY = 'easy-painter:active-job-ids'
 
 const router = useRouter()
+const route = useRoute()
 
 const meta = ref<PublicMetaResponse | null>(null)
-const galleryTab = ref<'mine' | 'public'>('public')
-
-// Private gallery — paginated
-const galleryItems = ref<GalleryItem[]>([])
-const galleryTotal = ref(0)
-const galleryPage = ref(1)
-const galleryPageSize = ref(20)
-const gallerySearch = ref('')
-const galleryFromDate = ref('')
-const galleryToDate = ref('')
-
-// Public gallery — infinite scroll
-const publicGallery = ref<GalleryItem[]>([])
-const publicOffset = ref(0)
-const publicLimit = ref(20)
-const publicLoadingMore = ref(false)
-const publicHasMore = ref(true)
-const publicSort = ref<'recent' | 'liked'>('recent')
-const scrollSentinel = ref<HTMLElement | null>(null)
-let scrollObserver: IntersectionObserver | null = null
-
-const selectedItem = ref<GalleryItem | null>(null)
 const prompt = ref('')
 const selectedModel = ref('')
 const selectedSize = ref<ImageSize>('auto')
@@ -77,98 +46,6 @@ async function loadMeta() {
   meta.value = await fetchPublicMeta()
   if (!selectedModel.value && meta.value.models.length > 0) {
     selectedModel.value = meta.value.models.find((item) => item.enabled)?.id ?? meta.value.models[0].id
-  }
-}
-
-async function loadGallery(page = 1) {
-  galleryPage.value = page
-  const data = await fetchGallery({
-    page,
-    page_size: galleryPageSize.value,
-    q: gallerySearch.value || undefined,
-    from_date: galleryFromDate.value || undefined,
-    to_date: galleryToDate.value || undefined,
-  })
-  galleryItems.value = data.items
-  galleryTotal.value = data.total
-}
-
-function resetGalleryFilters() {
-  gallerySearch.value = ''
-  galleryFromDate.value = ''
-  galleryToDate.value = ''
-  void loadGallery(1)
-}
-
-async function loadMorePublic() {
-  if (publicLoadingMore.value || !publicHasMore.value) return
-  publicLoadingMore.value = true
-  try {
-    const items = await fetchPublicGallery({
-      sort: publicSort.value,
-      offset: publicOffset.value,
-      limit: publicLimit.value,
-    })
-    publicGallery.value.push(...items)
-    publicOffset.value += items.length
-    publicHasMore.value = items.length >= publicLimit.value
-  } finally {
-    publicLoadingMore.value = false
-  }
-}
-
-function resetPublicGallery() {
-  publicGallery.value = []
-  publicOffset.value = 0
-  publicHasMore.value = true
-  void loadMorePublic()
-}
-
-function switchPublicSort(sort: 'recent' | 'liked') {
-  publicSort.value = sort
-  resetPublicGallery()
-}
-
-function observeSentinel() {
-  nextTick(() => {
-    if (scrollSentinel.value && scrollObserver) {
-      scrollObserver.observe(scrollSentinel.value)
-    }
-  })
-}
-
-function unobserveSentinel() {
-  if (scrollSentinel.value && scrollObserver) {
-    scrollObserver.unobserve(scrollSentinel.value)
-  }
-}
-
-function switchGalleryTab(tab: 'mine' | 'public') {
-  if (galleryTab.value === 'public') unobserveSentinel()
-  galleryTab.value = tab
-  if (tab === 'public') {
-    if (publicGallery.value.length === 0) {
-      void loadMorePublic()
-    }
-    observeSentinel()
-  }
-}
-
-async function bootstrap() {
-  try {
-    await loadMeta()
-    if (isLoggedIn()) {
-      galleryTab.value = 'mine'
-      await loadGallery()
-    } else {
-      galleryTab.value = 'public'
-      await loadMorePublic()
-    }
-    await restoreCachedJobs()
-  } catch (error) {
-    feedback.value = error instanceof Error ? error.message : '页面初始化失败，请刷新重试。'
-  } finally {
-    loading.value = false
   }
 }
 
@@ -429,79 +306,40 @@ async function retryJob(job: JobDetailResponse) {
   }
 }
 
-async function handleDeleteItem(item: GalleryItem) {
-  if (!confirm('确定要删除这幅作品吗？')) return
-  try {
-    await deleteJob(item.job_id)
-    galleryItems.value = galleryItems.value.filter((g) => g.job_id !== item.job_id)
-    galleryTotal.value = Math.max(0, galleryTotal.value - 1)
-  } catch (e) {
-    feedback.value = e instanceof Error ? e.message : '删除失败。'
-  }
-}
-
 function handleAddToGallery(job: JobDetailResponse) {
   removeActiveJob(job.job_id)
-  void loadGallery(galleryPage.value)
   feedback.value = '作品已加入画廊。'
 }
 
-async function handleToggleFavorite(item: GalleryItem) {
+async function bootstrap() {
   try {
-    const result = await toggleJobFavorite(item.job_id)
-    item.is_favorite = result.is_favorite
-  } catch (e) {
-    feedback.value = e instanceof Error ? e.message : '操作失败。'
-  }
-}
-
-async function handleTogglePublic(item: GalleryItem) {
-  if (!item.is_public && !confirm('确定将此作品公开到画廊吗？其他用户将可以看到它。')) return
-  try {
-    const result = await toggleJobPublic(item.job_id)
-    item.is_public = result.is_public
-  } catch (e) {
-    feedback.value = e instanceof Error ? e.message : '操作失败。'
-  }
-}
-
-async function handleToggleLike(item: GalleryItem) {
-  try {
-    if (item.liked_by_me) {
-      await unlikeGalleryItem(item.job_id)
-      item.liked_by_me = false
-      item.like_count = Math.max(0, (item.like_count ?? 1) - 1)
-    } else {
-      const result = await likeGalleryItem(item.job_id)
-      item.liked_by_me = true
-      item.like_count = result.like_count
+    await loadMeta()
+    if (typeof route.query.prompt === 'string' && route.query.prompt.trim()) {
+      prompt.value = route.query.prompt.trim()
     }
-  } catch (e) {
-    feedback.value = e instanceof Error ? e.message : '操作失败。'
+    await restoreCachedJobs()
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : '页面初始化失败，请刷新重试。'
+  } finally {
+    loading.value = false
   }
 }
 
-onBeforeUnmount(() => {
-  pollingTimers.forEach((timer) => window.clearTimeout(timer))
-  pollingTimers.clear()
-  if (scrollObserver) {
-    scrollObserver.disconnect()
-    scrollObserver = null
+watch(() => route.query.prompt, (val) => {
+  if (typeof val === 'string' && val.trim()) {
+    prompt.value = val.trim()
   }
 })
 
 watch([availableModels, selectedReferenceImage], ensureSelectableModel)
 watch([availableModels, selectedModel, selectedSize], ensureSelectableSize)
 
+onBeforeUnmount(() => {
+  pollingTimers.forEach((timer) => window.clearTimeout(timer))
+  pollingTimers.clear()
+})
+
 onMounted(() => {
-  scrollObserver = new IntersectionObserver(
-    (entries) => {
-      if (entries[0].isIntersecting && !publicLoadingMore.value && publicHasMore.value) {
-        void loadMorePublic()
-      }
-    },
-    { rootMargin: '200px' },
-  )
   void bootstrap()
 })
 </script>
@@ -539,91 +377,4 @@ onMounted(() => {
       @add-to-gallery="handleAddToGallery"
     />
   </div>
-
-  <div v-if="loading" class="loading-state">正在加载首页内容…</div>
-  <template v-else>
-    <div class="gallery-header-row">
-      <div class="gallery-tabs" v-if="isLoggedIn()">
-        <button
-          class="gallery-tab"
-          :class="{ active: galleryTab === 'mine' }"
-          @click="switchGalleryTab('mine')"
-        >我的画廊</button>
-        <button
-          class="gallery-tab"
-          :class="{ active: galleryTab === 'public' }"
-          @click="switchGalleryTab('public')"
-        >公开画廊</button>
-      </div>
-      <h2 class="gallery-heading">{{ galleryTab === 'mine' ? '我的画廊' : '公开画廊' }}</h2>
-      <div v-if="galleryTab === 'public'" class="gallery-sort-toggle">
-        <button
-          class="sort-btn"
-          :class="{ active: publicSort === 'recent' }"
-          @click="switchPublicSort('recent')"
-        >最近</button>
-        <button
-          class="sort-btn"
-          :class="{ active: publicSort === 'liked' }"
-          @click="switchPublicSort('liked')"
-        >最热</button>
-      </div>
-    </div>
-
-    <!-- Private gallery: search + filter toolbar -->
-    <div v-if="galleryTab === 'mine'" class="gallery-toolbar">
-      <input
-        v-model="gallerySearch"
-        type="text"
-        placeholder="搜索提示词..."
-        class="gallery-search-input"
-        @keyup.enter="loadGallery(1)"
-      />
-      <input v-model="galleryFromDate" type="date" class="gallery-date-input" @change="loadGallery(1)" />
-      <span class="gallery-date-sep">至</span>
-      <input v-model="galleryToDate" type="date" class="gallery-date-input" @change="loadGallery(1)" />
-      <button class="ghost-button" @click="resetGalleryFilters">重置</button>
-    </div>
-
-    <!-- Private gallery: paginated grid -->
-    <template v-if="galleryTab === 'mine'">
-      <GalleryGrid
-        :items="galleryItems"
-        :deletable="true"
-        :show-owner-actions="true"
-        @select="selectedItem = $event"
-        @delete="handleDeleteItem"
-        @toggle-favorite="handleToggleFavorite"
-        @toggle-public="handleTogglePublic"
-      />
-      <div v-if="galleryTotal > galleryPageSize" class="gallery-pagination">
-        <button class="ghost-button" :disabled="galleryPage <= 1" @click="loadGallery(galleryPage - 1)">上一页</button>
-        <span class="gallery-page-info">{{ galleryPage }} / {{ Math.ceil(galleryTotal / galleryPageSize) }}</span>
-        <button class="ghost-button" :disabled="galleryPage >= Math.ceil(galleryTotal / galleryPageSize)" @click="loadGallery(galleryPage + 1)">下一页</button>
-      </div>
-    </template>
-
-    <!-- Public gallery: infinite scroll -->
-    <template v-if="galleryTab === 'public'">
-      <GalleryGrid
-        :items="publicGallery"
-        :show-username="true"
-        :show-likes="true"
-        @select="selectedItem = $event"
-        @toggle-like="handleToggleLike"
-      />
-      <div ref="scrollSentinel" class="scroll-sentinel">
-        <span v-if="publicLoadingMore">加载中...</span>
-        <span v-else-if="!publicHasMore && publicGallery.length > 0">没有更多了</span>
-      </div>
-    </template>
-  </template>
-
-  <PromptModal
-    :item="selectedItem"
-    :is-owner="galleryTab === 'mine'"
-    @close="selectedItem = null"
-    @toggle-favorite="handleToggleFavorite"
-    @toggle-public="handleTogglePublic"
-  />
 </template>

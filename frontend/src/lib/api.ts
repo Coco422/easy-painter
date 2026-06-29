@@ -1,11 +1,13 @@
 import { getAdminAuthHeader, getAuthHeader } from './auth'
 import type {
   AdminJobItem,
+  BatchCreateInspirationsResponse,
   CreateJobRequest,
   CreateJobResponse,
   CreditTransactionItem,
   GalleryItem,
   GalleryPageResponse,
+  InspirationFeedResponse,
   JobDetailResponse,
   ModelConfig,
   PublicMetaResponse,
@@ -138,8 +140,14 @@ export function deleteJob(jobId: string) {
   return apiRequest<void>(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
 }
 
-export function toggleJobPublic(jobId: string) {
-  return apiRequest<{ is_public: boolean }>(`/api/v1/jobs/${jobId}/public`, { method: 'PUT' })
+export function toggleJobPublic(jobId: string, tags?: string[], isPromptPublic?: boolean) {
+  return apiRequest<{ is_public: boolean }>(`/api/v1/jobs/${jobId}/public`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      tags: tags ?? null,
+      is_prompt_public: isPromptPublic ?? true,
+    }),
+  })
 }
 
 export function toggleJobFavorite(jobId: string) {
@@ -154,12 +162,23 @@ export function unlikeGalleryItem(jobId: string) {
   return apiRequest<void>(`/api/v1/gallery/${jobId}/like`, { method: 'DELETE' })
 }
 
+export function fetchPopularTags(limit = 20) {
+  return apiRequest<string[]>(`/api/v1/tags/popular?limit=${limit}`)
+}
+
 export function fetchUserGallery(username: string) {
   return apiRequest<GalleryItem[]>(`/api/v1/gallery/${username}`)
 }
 
 export function updateProfile(data: { display_name?: string; is_public?: boolean }) {
   return apiRequest<UserInfo>('/api/v1/users/me', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function changePassword(data: { old_password: string; new_password: string }) {
+  return apiRequest<void>('/api/v1/users/me/password', {
     method: 'PUT',
     body: JSON.stringify(data),
   })
@@ -337,4 +356,67 @@ export function adminFetchTransactions(userId?: string, page = 1) {
   return adminApiRequest<(CreditTransactionItem & { id: string; user_id: string; username: string | null })[]>(
     `/api/v1/admin/transactions?${params}`,
   )
+}
+
+// --- Inspiration APIs ---
+
+export function fetchInspirations(params: {
+  offset?: number
+  limit?: number
+  q?: string
+  category?: string
+  source?: string
+  sort?: 'recent' | 'featured'
+} = {}): Promise<InspirationFeedResponse> {
+  const qs = new URLSearchParams()
+  if (params.offset) qs.set('offset', String(params.offset))
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.q) qs.set('q', params.q)
+  if (params.category) qs.set('category', params.category)
+  if (params.source) qs.set('source', params.source)
+  if (params.sort) qs.set('sort', params.sort)
+  return apiRequest<InspirationFeedResponse>(`/api/v1/inspirations?${qs}`)
+}
+
+export function adminFetchInspirations(params: {
+  offset?: number
+  limit?: number
+  source?: string
+} = {}): Promise<InspirationFeedResponse> {
+  const qs = new URLSearchParams()
+  if (params.offset) qs.set('offset', String(params.offset))
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.source) qs.set('source', params.source)
+  return adminApiRequest<InspirationFeedResponse>(`/api/v1/admin/inspirations?${qs}`)
+}
+
+export function adminCreateInspiration(formData: FormData): Promise<{ id: string; image_url: string }> {
+  return adminApiRequest('/api/v1/admin/inspirations', {
+    method: 'POST',
+    body: formData,
+  })
+}
+
+export function adminBatchCreateInspirations(items: Array<{
+  title: string
+  description?: string | null
+  prompt: string
+  image_url: string
+  external_id?: string | null
+  source: string
+  source_url?: string | null
+  author_name?: string | null
+  author_url?: string | null
+  language?: string
+  categories?: string[] | null
+  is_featured?: boolean
+}>): Promise<BatchCreateInspirationsResponse> {
+  return adminApiRequest('/api/v1/admin/inspirations/batch', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  })
+}
+
+export function adminDeleteInspiration(id: string): Promise<void> {
+  return adminApiRequest(`/api/v1/admin/inspirations/${id}`, { method: 'DELETE' })
 }

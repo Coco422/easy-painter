@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Moon, Sun, Wallet } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import logoUrl from '@/assets/brand/logo.png'
 import { authState, isAdmin, isLoggedIn, logout } from '@/lib/auth'
 import { themeState, toggleTheme } from '@/lib/theme'
@@ -10,6 +10,7 @@ defineProps<{
 }>()
 
 const router = useRouter()
+const route = useRoute()
 
 async function handleLogout() {
   await logout()
@@ -23,6 +24,11 @@ async function handleLogout() {
       <img class="brand-logo" :src="logoUrl" alt="" aria-hidden="true" />
       <router-link to="/" class="brand-title">{{ siteName }}</router-link>
     </div>
+    <nav class="header-primary-nav">
+      <router-link to="/" class="primary-nav-link" :class="{ active: route.path === '/' }">社区灵感</router-link>
+      <router-link to="/create" class="primary-nav-link" :class="{ active: route.path === '/create' }">创作台</router-link>
+      <router-link v-if="isLoggedIn()" to="/gallery" class="primary-nav-link" :class="{ active: route.path === '/gallery' }">画廊</router-link>
+    </nav>
     <nav class="header-nav">
       <template v-if="isLoggedIn()">
         <router-link to="/profile" class="nav-link nav-credits" title="个人中心">
@@ -102,5 +108,32 @@ async function handleLogout() {
 .nav-credits:hover {
   background: var(--accent);
   color: var(--bg);
+}
+
+.header-primary-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.primary-nav-link {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 200ms, background 200ms;
+}
+
+.primary-nav-link:hover {
+  color: var(--text);
+  background: var(--accent-glow);
+}
+
+.primary-nav-link.active {
+  color: var(--accent);
+  background: var(--accent-glow);
+  font-weight: 600;
 }
 </style>
