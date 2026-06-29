@@ -25,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 const promptLength = computed(() => props.prompt.length)
+const promptOverLimit = computed(() => promptLength.value > props.maxLength)
 const sizeOptions: Array<{ value: ImageSize; label: string }> = [
   { value: 'auto', label: '自动' },
   { value: '1024x1024', label: '1024 x 1024 方图' },
@@ -101,12 +102,11 @@ function sizeSupportedBySelectedModel(size: ImageSize) {
     <div class="prompt-stack">
       <div class="panel-topline">
         <span class="section-label">创作提示</span>
-        <p class="char-count">{{ promptLength }} / {{ maxLength }}</p>
+        <p class="char-count" :class="{ over: promptOverLimit }">{{ promptLength }} / {{ maxLength }}</p>
       </div>
       <textarea
         :value="prompt"
         class="prompt-textarea"
-        :maxlength="maxLength"
         placeholder="请输入画面描述"
         @input="emit('update:prompt', ($event.target as HTMLTextAreaElement).value)"
       />

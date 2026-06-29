@@ -68,6 +68,25 @@ async def test_parse_multipart_create_job_payload_with_reference_image():
 
 
 @pytest.mark.anyio
+async def test_create_job_rejects_prompt_over_configured_limit():
+    request = make_request(
+        content_type="application/json",
+        body=b'{"prompt":"hello world","model":"gpt-image-2-c","size":"1024x1024"}',
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_job(
+            request,
+            db=object(),
+            redis_client=object(),
+            settings=Settings(prompt_max_length=5),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "提示词不能超过 5 个字符。"
+
+
+@pytest.mark.anyio
 async def test_create_job_rejects_reference_image_for_unsupported_model():
     boundary = "----easy-painter-test"
     body = (

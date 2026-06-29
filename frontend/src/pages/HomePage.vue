@@ -515,7 +515,7 @@ onMounted(() => {
       :selected-batch-count="selectedBatchCount"
       :reference-image="selectedReferenceImage"
       :models="availableModels"
-      :max-length="meta?.prompt_max_length ?? 500"
+      :max-length="meta?.prompt_max_length ?? 4000"
       :submitting="submitting"
       @update:prompt="prompt = $event"
       @update:model="selectedModel = $event"

@@ -502,6 +502,10 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+.char-count.over {
+  color: var(--error);
+}
+
 /* ---- Feedback & Loading ---- */
 .feedback-banner, .loading-state {
   margin: 24px 0 0;

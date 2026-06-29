@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     upstream_default_background: str = "auto"
     upstream_default_moderation: str = "auto"
 
-    prompt_max_length: int = 500
+    prompt_max_length: int = 4000
     gallery_limit: int = 24
     generate_rate_limit_count: int = 12
     generate_rate_limit_window_seconds: int = 60
