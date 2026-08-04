@@ -4,6 +4,7 @@ from app.core.auth import hash_password
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.announcement import Announcement
 from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
@@ -16,6 +17,7 @@ from app.models.user import User
 
 
 def init_db() -> None:
+    _ = Announcement
     _ = CreditTransaction
     _ = GalleryLike
     _ = GenerationJob
@@ -82,9 +84,14 @@ def _ensure_user_columns() -> None:
     inspector = inspect(engine)
     columns = {column["name"] for column in inspector.get_columns("users")}
     with engine.begin() as connection:
+        if "email" not in columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(320)"))
         if "credits" not in columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 0"))
             connection.execute(text("UPDATE users SET credits = 0 WHERE credits IS NULL"))
+        connection.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email) WHERE email IS NOT NULL")
+        )
 
 
 def _ensure_model_config_columns() -> None:
@@ -107,6 +114,7 @@ def _ensure_default_user() -> None:
             return
         user = User(
             username=settings.default_username,
+            email=settings.default_email.strip().lower() or None,
             password_hash=hash_password(settings.default_password),
             display_name=settings.default_username,
         )

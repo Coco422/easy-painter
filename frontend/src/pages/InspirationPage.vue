@@ -109,6 +109,16 @@ onMounted(() => {
     <div class="inspiration-header">
       <h1 class="inspiration-title">社区灵感</h1>
       <p class="inspiration-subtitle">探索来自社区和灵感库的创作提示词，一键复用</p>
+      <div class="source-explainer" aria-label="内容来源说明">
+        <div>
+          <strong>社区</strong>
+          <span>来自本站用户主动公开发布的作品与提示词。</span>
+        </div>
+        <div>
+          <strong>灵感库</strong>
+          <span>整理自互联网公开来源的提示词和创作示例。</span>
+        </div>
+      </div>
     </div>
 
     <div class="inspiration-toolbar">
@@ -211,6 +221,39 @@ onMounted(() => {
   margin: 8px 0 0;
   font-size: 14px;
   color: var(--text-secondary);
+}
+
+.source-explainer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(680px, 100%);
+  margin: 20px auto 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  text-align: left;
+}
+
+.source-explainer > div {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+}
+
+.source-explainer > div + div {
+  border-left: 1px solid var(--border);
+}
+
+.source-explainer strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.source-explainer span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .inspiration-toolbar {
@@ -371,5 +414,10 @@ onMounted(() => {
   padding: 24px 0;
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+@media (max-width: 620px) {
+  .source-explainer { grid-template-columns: 1fr; }
+  .source-explainer > div + div { border-top: 1px solid var(--border); border-left: 0; }
 }
 </style>

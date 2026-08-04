@@ -34,6 +34,44 @@ cp .env.example .env
 提示词输入不在前端截断，后端通过 `PROMPT_MAX_LENGTH` 做硬限制，默认 4000 字符。
 `GENERATION_JOB_STALE_SECONDS` 用于把服务重启或 worker 中断后遗留的任务收敛为失败，默认 2700 秒。
 
+### SMTP、注册、忘记密码与邮箱绑定
+
+注册账号需要先验证邮箱；登录支持用户名或邮箱；忘记密码通过邮箱验证码直接设置新密码，不需要输入原密码。历史账号如果还没有邮箱，可以登录后在个人中心发送验证码并绑定邮箱；已绑定邮箱不能自行更换，需要由管理员处理。个人中心不提供修改密码入口，管理员仍可在后台直接重置任意用户密码。
+
+邮件使用标准 SMTP 发送，至少需要配置：
+
+```dotenv
+REGISTRATION_ENABLED=true
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=no-reply@example.com
+SMTP_PASSWORD=replace-with-smtp-password-or-app-token
+SMTP_FROM_EMAIL=no-reply@example.com
+SMTP_FROM_NAME=一丝绘画站
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+```
+
+- 端口 `587` 通常使用 STARTTLS：`SMTP_USE_TLS=true`、`SMTP_USE_SSL=false`。
+- 端口 `465` 通常使用 SSL：`SMTP_USE_TLS=false`、`SMTP_USE_SSL=true`。
+- Gmail、QQ 邮箱等服务通常要求使用“应用专用密码/授权码”，不要填写网页登录密码。
+- 验证码只以 HMAC 摘要形式暂存在 Redis，默认 10 分钟失效；连续输错 5 次后立即作废。
+- 发送接口使用 Redis 原子冷却，默认同一邮箱 60 秒内只允许发送一次；同时按邮箱、来源 IP 和已登录用户限制 10 分钟与 24 小时发送量，超限返回 `429` 和 `Retry-After`。
+- 找回密码对未注册邮箱返回统一成功文案且不发送邮件，避免泄露账号是否存在；绑定邮箱验证码额外绑定当前用户 ID，不能跨账号复用。
+- SMTP 发送失败会删除刚生成的验证码并释放本次冷却，不会留下可验证但未送达的验证码。
+- `DEFAULT_EMAIL` 只在首次创建默认用户时使用；已有无邮箱用户可自行验证绑定，也可由管理员在用户管理中补录邮箱。
+- `JWT_SECRET_KEY` 请使用至少 32 字节的随机值；修改后现有登录令牌会失效，需要重新登录。
+
+### 系统横幅通知
+
+管理后台的“通知管理”支持同时维护多条横幅，可设置普通、提醒或重要级别，并按以下受众投放：
+
+- `all`：所有访客，包括未登录游客。
+- `authenticated`：所有已登录用户。
+- `unbound_email`：仅已登录且尚未绑定邮箱的用户；前端会提供“去绑定邮箱”快捷入口。
+
+通知正文按纯文本渲染。后台提供“填入邮箱提醒”模板，但不会在启动时自动播种通知，避免管理员删除后又被自动重建。
+
 ### 2. 准备本地工具
 
 ```bash
@@ -107,6 +145,13 @@ docker buildx build --platform linux/amd64 -f deploy/nginx/Dockerfile -t your-re
 ## 对外接口
 
 - `GET /api/v1/meta/public`
+- `POST /api/v1/auth/email-codes`（发送注册或重置密码验证码）
+- `POST /api/v1/auth/register`（验证邮箱并注册）
+- `POST /api/v1/auth/login`（用户名或邮箱登录）
+- `POST /api/v1/auth/password/reset`（邮箱验证码重置密码）
+- `GET /api/v1/announcements`（按当前登录与邮箱状态读取启用的横幅通知）
+- `POST /api/v1/users/me/email/code`（登录后发送绑定邮箱验证码）
+- `PUT /api/v1/users/me/email`（验证并绑定邮箱）
 - `POST /api/v1/jobs`
 - `POST /api/v1/reference-images`（登录后预上传参考图）
 - `GET /api/v1/reference-images`（登录后读取参考图历史）
@@ -116,8 +161,17 @@ docker buildx build --platform linux/amd64 -f deploy/nginx/Dockerfile -t your-re
 - `GET /api/v1/gallery`
 - `GET /api/v1/healthz`
 
+Admin 通知接口保持独立管理员令牌认证：
+
+- `GET /api/v1/admin/announcements`
+- `POST /api/v1/admin/announcements`
+- `PUT /api/v1/admin/announcements/{id}`
+- `DELETE /api/v1/admin/announcements/{id}`
+
 ## 安全说明
 
 - 上游地址和密钥只允许出现在 `.env` 与后端容器环境变量。
 - 前端打包产物不包含任何上游地址。
 - API 返回值、错误提示和日志都使用通用文案，不回显上游主机名或密钥。
+- SMTP 密码只允许保存在 `.env` 与后端容器环境变量中，不会通过公开接口返回。
+- 生产环境应根据邮件服务商配额调整 `EMAIL_CODE_*` 限额；如果站点暴露在高风险公网环境，建议在反向代理层再叠加全局限流或验证码挑战。

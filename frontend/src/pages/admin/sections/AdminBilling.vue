@@ -155,6 +155,15 @@ async function copyGeneratedCodes() {
   }
 }
 
+async function copyCode(code: string) {
+  try {
+    await navigator.clipboard.writeText(code)
+    message.success(`兑换码 ${code} 已复制。`)
+  } catch {
+    message.error('复制失败，请手动选择兑换码。')
+  }
+}
+
 async function adjustCredits() {
   try {
     await adjustFormRef.value?.validate()
@@ -201,7 +210,21 @@ async function refreshAll() {
 }
 
 const codeColumns: DataTableColumns<RedemptionCodeItem> = [
-  { title: '兑换码', key: 'code', minWidth: 180, render: (row) => h('code', { class: 'code-value' }, row.code) },
+  {
+    title: '兑换码', key: 'code', minWidth: 230,
+    render: (row) => h('div', { class: 'code-cell' }, [
+      h('code', { class: 'code-value' }, row.code),
+      h(NButton, {
+        size: 'tiny',
+        quaternary: true,
+        title: '复制兑换码',
+        onClick: () => copyCode(row.code),
+      }, {
+        icon: () => h(Copy, { size: 13 }),
+        default: () => '复制',
+      }),
+    ]),
+  },
   { title: '面额', key: 'credits', width: 90 },
   {
     title: '状态', key: 'status', width: 90,
@@ -310,6 +333,8 @@ onMounted(() => {
 .form-action { margin-bottom: 24px; }
 .generated-result { margin-bottom: 16px; }
 .generated-result-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; }
+.code-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.code-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-empty { padding: 48px 0; }
 .transaction-filter { width: 220px; }
 .transaction-pagination { justify-content: flex-end; margin-top: 14px; }

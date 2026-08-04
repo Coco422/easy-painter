@@ -92,12 +92,32 @@ class Settings(BaseSettings):
     minio_reference_bucket: str = "easy-painter-references"
     minio_secure: bool = False
 
-    jwt_secret_key: str = "change-me-jwt-secret"
+    jwt_secret_key: str = "change-me-jwt-secret-at-least-32-bytes"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
     admin_secret_key: str = ""
     default_username: str = "admin"
     default_password: str = ""
+    default_email: str = ""
+    registration_enabled: bool = True
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    smtp_timeout_seconds: int = 15
+    email_code_expire_seconds: int = 600
+    email_code_cooldown_seconds: int = 60
+    email_code_rate_limit_count: int = 3
+    email_code_rate_limit_window_seconds: int = 600
+    email_code_daily_limit_count: int = 10
+    email_code_daily_limit_window_seconds: int = 86400
+    email_code_ip_rate_limit_count: int = 15
+    email_code_ip_daily_limit_count: int = 50
 
     upstream_base_url: str = ""
     upstream_api_key: str = ""
@@ -157,6 +177,10 @@ class Settings(BaseSettings):
         if self.allowed_origins_json:
             return [str(item) for item in json.loads(self.allowed_origins_json)]
         return ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host.strip() and self.smtp_from_email.strip())
 
 
 @lru_cache(maxsize=1)

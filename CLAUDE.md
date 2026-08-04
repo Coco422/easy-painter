@@ -51,7 +51,10 @@ cd frontend && npx vue-tsc --noEmit
 
 ### Auth System
 
-- No public registration — users created by admin or auto-created from `DEFAULT_USERNAME`/`DEFAULT_PASSWORD` env vars on first startup
+- Public registration verifies email through SMTP; login accepts username or email; password reset uses a one-time email code stored as a Redis HMAC digest
+- Existing signed-in users without email can bind one through `POST /users/me/email/code` + `PUT /users/me/email`; a bound email cannot be self-replaced, while admin can still update it directly
+- Email code sending uses a Redis atomic 60-second cooldown plus short-window and daily limits across email, IP, and (for authenticated binding) user ID; binding codes are scoped to the current user ID
+- Users can also be created by admin or auto-created from `DEFAULT_USERNAME`/`DEFAULT_PASSWORD`/optional `DEFAULT_EMAIL` on first startup
 - JWT tokens stored in `localStorage`, sent as `Authorization: Bearer <token>` header
 - Admin access via secret key (`ADMIN_SECRET_KEY` env var), produces a separate JWT with `role=admin` claim
 - Frontend uses vue-router with routes: `/` (home), `/login`, `/gallery/:username` (public gallery), `/admin`
@@ -59,14 +62,21 @@ cd frontend && npx vue-tsc --noEmit
 ### Gallery Logic
 
 - Logged-in users see only their own succeeded jobs
-- Anonymous visitors see succeeded jobs from users with `is_public=True` plus legacy anonymous jobs (`user_id IS NULL`)
-- Public user gallery accessible at `/gallery/{username}` (requires `is_public=True`)
+- Anonymous visitors see explicitly published succeeded jobs from users with `is_public=True` plus legacy anonymous jobs (`user_id IS NULL`)
+- Public user gallery accessible to anonymous and logged-in visitors at `/gallery/{username}`; only jobs explicitly published with `is_public=True` are included
+
+### Announcement Logic
+
+- `GET /announcements` returns enabled plain-text banners filtered by audience: `all`, `authenticated`, or `unbound_email`
+- Admin CRUD lives under `/admin/announcements`; notifications are not seeded at startup
+- The frontend banner reloads when login state or the current user's email changes, so a successful email binding removes `unbound_email` notices immediately
 
 ### Backend Structure (`backend/app/`)
 
 - `api/routes.py` — Job endpoints (meta, jobs CRUD, gallery, healthz)
-- `api/auth_routes.py` — Login and admin verify endpoints
-- `api/user_routes.py` — User profile (GET/PUT /users/me)
+- `api/auth_routes.py` — Login, registration, email-code, password-reset, and admin verify endpoints
+- `api/user_routes.py` — User profile, email binding, redemption, and credit history
+- `api/announcement_routes.py` — Audience-filtered announcement reads and admin CRUD
 - `api/admin_routes.py` — Admin endpoints (list/delete jobs, list/create users)
 - `core/auth.py` — JWT encode/decode, password hashing, FastAPI auth dependencies
 - `core/config.py` — Pydantic `Settings` class, reads `.env`
@@ -83,7 +93,8 @@ cd frontend && npx vue-tsc --noEmit
 - `App.vue` — Router shell with persistent header
 - `router.ts` — Vue Router config
 - `pages/HomePage.vue` — Generate panel + gallery (main page)
-- `pages/LoginPage.vue` — Login form
+- `pages/LoginPage.vue` — Login, registration, and email-code password reset
+- `components/AnnouncementBanner.vue` — Audience-filtered system banners
 - `pages/PublicGalleryPage.vue` — Per-user public gallery view
 - `pages/AdminPage.vue` — Admin dashboard (secret key auth, job/user management)
 - `components/AppHeader.vue` — Header with auth-aware navigation

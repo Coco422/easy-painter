@@ -125,8 +125,16 @@ onMounted(async () => {
   <div v-if="loading" class="loading-state">正在加载画廊...</div>
   <template v-else>
     <div class="gallery-header-row">
-      <h2 class="gallery-heading">我的画廊</h2>
+      <div>
+        <h2 class="gallery-heading">我的画廊</h2>
+        <p class="gallery-heading-copy">管理自己的生成记录，并决定哪些作品对外公开。</p>
+      </div>
     </div>
+
+    <section class="gallery-visibility-note" aria-label="公开画廊说明">
+      <strong>公开画廊对游客和登录用户均可见</strong>
+      <p>需要先在个人中心开启“公开画廊”，并主动发布具体作品。关闭总开关或取消发布后，作品会从公开页面和“社区”灵感中移除。</p>
+    </section>
 
     <div class="gallery-toolbar">
       <input

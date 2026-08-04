@@ -4,17 +4,39 @@ import logging
 import secrets
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from redis import Redis
 from sqlalchemy import desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.auth import hash_password, require_current_user, verify_password
+from app.core.auth import require_current_user
+from app.core.config import Settings, get_settings
+from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
 from app.models.credit_transaction import CreditTransaction
 from app.models.redemption_code import RedemptionCode
 from app.models.user import User
-from app.schemas.auth import ChangePasswordRequest, UpdateUserRequest, UserResponse
+from app.schemas.auth import (
+    BindEmailCodeRequest,
+    BindEmailRequest,
+    EmailCodePurpose,
+    EmailCodeResponse,
+    UpdateUserRequest,
+    UserResponse,
+)
+from app.services.email_codes import (
+    EmailCodeRateLimitExceeded,
+    consume_email_code,
+    enforce_email_code_send_limits,
+    normalize_email,
+    release_email_code_cooldown,
+    store_email_code,
+    verify_email_code,
+)
+from app.services.mailer import EmailDeliveryError, SmtpEmailSender
+from app.services.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 user_router = APIRouter()
@@ -24,6 +46,7 @@ def _user_response(u: User) -> UserResponse:
     return UserResponse(
         id=u.id,
         username=u.username,
+        email=u.email,
         display_name=u.display_name,
         is_public=u.is_public,
         credits=u.credits,
@@ -51,16 +74,123 @@ def update_me(
     return _user_response(current_user)
 
 
-@user_router.put("/users/me/password", status_code=204)
-def change_password(
-    body: ChangePasswordRequest,
+@user_router.post(
+    "/users/me/email/code",
+    response_model=EmailCodeResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def request_email_binding_code(
+    body: BindEmailCodeRequest,
+    request: Request,
     current_user: User = Depends(require_current_user),
     db: Session = Depends(get_db),
-) -> None:
-    if not verify_password(body.old_password, current_user.password_hash):
-        raise HTTPException(status_code=403, detail="原密码不正确。")
-    current_user.password_hash = hash_password(body.new_password)
-    db.commit()
+    redis_client: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+) -> EmailCodeResponse:
+    if current_user.email:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前账号已绑定邮箱。")
+    if not settings.smtp_configured:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="邮件服务尚未配置。")
+
+    email = normalize_email(str(body.email))
+    try:
+        enforce_email_code_send_limits(
+            redis_client,
+            settings,
+            email=email,
+            ip_identity=rate_limit_identity(extract_client_ip(request)),
+            user_id=current_user.id,
+        )
+    except EmailCodeRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="验证码发送过于频繁，请稍后再试。",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from None
+
+    if db.scalar(select(User).where(func.lower(User.email) == email)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已被其他账号使用。")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    store_email_code(
+        redis_client,
+        settings,
+        email=email,
+        purpose=EmailCodePurpose.BIND_EMAIL,
+        code=code,
+        subject=current_user.id,
+    )
+    try:
+        SmtpEmailSender(settings).send_verification_code(
+            recipient=email,
+            code=code,
+            purpose=EmailCodePurpose.BIND_EMAIL,
+        )
+    except EmailDeliveryError:
+        consume_email_code(
+            redis_client,
+            email=email,
+            purpose=EmailCodePurpose.BIND_EMAIL,
+            subject=current_user.id,
+        )
+        release_email_code_cooldown(redis_client, email=email)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="验证码邮件发送失败，请稍后再试。",
+        ) from None
+
+    return EmailCodeResponse(
+        message="验证码已发送，请检查邮箱。",
+        expires_in=settings.email_code_expire_seconds,
+        retry_after=settings.email_code_cooldown_seconds,
+    )
+
+
+@user_router.put("/users/me/email", response_model=UserResponse)
+def bind_email(
+    body: BindEmailRequest,
+    current_user: User = Depends(require_current_user),
+    db: Session = Depends(get_db),
+    redis_client: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+) -> UserResponse:
+    if current_user.email:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前账号已绑定邮箱。")
+
+    email = normalize_email(str(body.email))
+    if db.scalar(select(User).where(func.lower(User.email) == email, User.id != current_user.id)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已被其他账号使用。")
+    if not verify_email_code(
+        redis_client,
+        settings,
+        email=email,
+        purpose=EmailCodePurpose.BIND_EMAIL,
+        code=body.email_code,
+        subject=current_user.id,
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="验证码无效或已过期。")
+
+    current_user.email = email
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        consume_email_code(
+            redis_client,
+            email=email,
+            purpose=EmailCodePurpose.BIND_EMAIL,
+            subject=current_user.id,
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已被其他账号使用。") from None
+
+    consume_email_code(
+        redis_client,
+        email=email,
+        purpose=EmailCodePurpose.BIND_EMAIL,
+        subject=current_user.id,
+    )
+    db.refresh(current_user)
+    return _user_response(current_user)
 
 
 # ---- Billing endpoints ----

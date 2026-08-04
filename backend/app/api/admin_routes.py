@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -163,7 +163,7 @@ def admin_list_users(
     users = db.scalars(select(User).order_by(User.created_at)).all()
     return [
         UserResponse(
-            id=u.id, username=u.username, display_name=u.display_name,
+            id=u.id, username=u.username, email=u.email, display_name=u.display_name,
             is_public=u.is_public, credits=u.credits, created_at=u.created_at,
         )
         for u in users
@@ -179,8 +179,12 @@ def admin_create_user(
     existing = db.scalar(select(User).where(User.username == body.username))
     if existing:
         raise HTTPException(status_code=409, detail="用户名已存在。")
+    normalized_email = str(body.email).strip().lower() if body.email else None
+    if normalized_email and db.scalar(select(User).where(func.lower(User.email) == normalized_email)):
+        raise HTTPException(status_code=409, detail="该邮箱已被使用。")
     user = User(
         username=body.username,
+        email=normalized_email,
         password_hash=hash_password(body.password),
         display_name=body.display_name or body.username,
     )
@@ -188,7 +192,7 @@ def admin_create_user(
     db.commit()
     db.refresh(user)
     return UserResponse(
-        id=user.id, username=user.username, display_name=user.display_name,
+        id=user.id, username=user.username, email=user.email, display_name=user.display_name,
         is_public=user.is_public, credits=user.credits, created_at=user.created_at,
     )
 
@@ -205,6 +209,15 @@ def admin_update_user(
         raise HTTPException(status_code=404, detail="用户不存在。")
     if body.password is not None:
         user.password_hash = hash_password(body.password)
+    if "email" in body.model_fields_set:
+        normalized_email = str(body.email).strip().lower() if body.email else None
+        if normalized_email:
+            existing = db.scalar(
+                select(User).where(func.lower(User.email) == normalized_email, User.id != user.id)
+            )
+            if existing:
+                raise HTTPException(status_code=409, detail="该邮箱已被使用。")
+        user.email = normalized_email
     if body.display_name is not None:
         user.display_name = body.display_name
     if body.is_public is not None:
@@ -212,7 +225,7 @@ def admin_update_user(
     db.commit()
     db.refresh(user)
     return UserResponse(
-        id=user.id, username=user.username, display_name=user.display_name,
+        id=user.id, username=user.username, email=user.email, display_name=user.display_name,
         is_public=user.is_public, credits=user.credits, created_at=user.created_at,
     )
 

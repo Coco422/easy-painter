@@ -122,9 +122,11 @@ def list_inspirations(
     if include_gallery:
         gallery_stmt = (
             select(GenerationJob)
+            .join(User, GenerationJob.user_id == User.id)
             .where(GenerationJob.status == JobStatus.SUCCEEDED)
             .where(GenerationJob.is_public.is_(True))
             .where(GenerationJob.public_url.isnot(None))
+            .where(User.is_public.is_(True))
         )
 
         if q:

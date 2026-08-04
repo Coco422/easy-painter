@@ -11,6 +11,8 @@ export interface PublicModel {
 
 export interface PublicMetaResponse {
   site_name: string
+  registration_enabled: boolean
+  email_delivery_enabled: boolean
   prompt_max_length: number
   polling_interval_ms: number
   example_prompts: string[]
@@ -100,6 +102,7 @@ export interface GalleryPageResponse {
 export interface UserInfo {
   id: string
   username: string
+  email: string | null
   display_name: string
   is_public: boolean
   credits: number
@@ -125,6 +128,28 @@ export interface RedemptionCodeItem {
 export interface TokenResponse {
   access_token: string
   token_type: string
+}
+
+export type EmailCodePurpose = 'register' | 'reset_password'
+
+export interface EmailCodeResponse {
+  message: string
+  expires_in: number
+  retry_after: number
+}
+
+export type AnnouncementLevel = 'info' | 'warning' | 'critical'
+export type AnnouncementAudience = 'all' | 'authenticated' | 'unbound_email'
+
+export interface AnnouncementItem {
+  id: string
+  title: string
+  content: string
+  level: AnnouncementLevel
+  audience: AnnouncementAudience
+  enabled: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface AdminJobItem {

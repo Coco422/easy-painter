@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
 from redis import Redis
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -70,6 +70,8 @@ def get_public_meta(
 ) -> PublicMetaResponse:
     return PublicMetaResponse(
         site_name=settings.site_name,
+        registration_enabled=settings.registration_enabled,
+        email_delivery_enabled=settings.smtp_configured,
         prompt_max_length=settings.prompt_max_length,
         polling_interval_ms=settings.polling_interval_ms,
         example_prompts=settings.example_prompts,
@@ -89,17 +91,17 @@ async def create_job(
     payload = parsed_payload.request
     prompt = payload.prompt.strip()
     if not prompt:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="提示词不能为空。")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="提示词不能为空。")
     if len(prompt) > settings.prompt_max_length:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"提示词不能超过 {settings.prompt_max_length} 个字符。",
         )
 
     enabled_models = {item["id"]: item for item in _load_models(db, settings) if item["enabled"]}
     model_config = enabled_models.get(payload.model)
     if not model_config:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前模型不可用。")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="当前模型不可用。")
     staged_reference_image = None
     if payload.reference_image_id:
         staged_reference_image = db.scalar(
@@ -110,18 +112,18 @@ async def create_job(
         )
         if not staged_reference_image:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="参考图不存在或已删除。",
             )
     if (parsed_payload.reference_image or staged_reference_image) and not model_config.get("supports_reference_image", True):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="当前模型不支持参考图，请切换到支持参考图的模型。",
         )
     supported_sizes = model_config.get("supported_sizes", [])
     if isinstance(supported_sizes, list) and supported_sizes and payload.size not in supported_sizes:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="当前模型不支持该尺寸，请切换尺寸或模型。",
         )
 
@@ -246,7 +248,7 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
         try:
             payload = CreateJobRequest.model_validate(raw_payload)
         except ValidationError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors()) from exc
 
         upload = form.get("reference_image")
         reference_image = None
@@ -259,13 +261,13 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
                     image_bytes=image_bytes,
                 )
             except ReferenceImageValidationError as exc:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
         return ParsedCreateJobPayload(request=payload, reference_image=reference_image)
 
     try:
         payload = CreateJobRequest.model_validate(await request.json())
     except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors()) from exc
     return ParsedCreateJobPayload(request=payload)
 
 
@@ -406,7 +408,9 @@ def get_popular_tags(
 ) -> list[str]:
     jobs = db.scalars(
         select(GenerationJob.tags)
+        .outerjoin(User, GenerationJob.user_id == User.id)
         .where(GenerationJob.is_public.is_(True))
+        .where(or_(GenerationJob.user_id.is_(None), User.is_public.is_(True)))
         .where(GenerationJob.tags.isnot(None))
         .limit(1000)
     ).all()
@@ -527,8 +531,10 @@ def get_public_gallery(
 ) -> list[GalleryItem]:
     stmt = (
         select(GenerationJob)
+        .outerjoin(User, GenerationJob.user_id == User.id)
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
         .where(GenerationJob.is_public.is_(True))
+        .where(or_(GenerationJob.user_id.is_(None), User.is_public.is_(True)))
     )
     if sort == "liked":
         like_count_sub = (
@@ -553,8 +559,8 @@ def get_user_gallery(
     limit: int = Query(20, ge=1, le=100),
 ) -> list[GalleryItem]:
     user = db.scalar(select(User).where(User.username == username))
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该用户不存在。")
+    if not user or not user.is_public:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该用户不存在或未公开画廊。")
     stmt = (
         select(GenerationJob)
         .where(GenerationJob.status == JobStatus.SUCCEEDED)

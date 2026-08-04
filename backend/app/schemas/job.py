@@ -30,6 +30,8 @@ class PublicModel(BaseModel):
 
 class PublicMetaResponse(BaseModel):
     site_name: str
+    registration_enabled: bool = True
+    email_delivery_enabled: bool = False
     prompt_max_length: int
     polling_interval_ms: int
     example_prompts: list[str]

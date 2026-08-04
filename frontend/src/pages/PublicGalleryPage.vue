@@ -44,7 +44,16 @@ onMounted(() => {
       <router-link to="/" class="back-link">返回首页</router-link>
     </div>
     <template v-else>
-      <h2 class="gallery-heading">{{ displayName }} 的画廊</h2>
+      <div class="gallery-header-row public-gallery-heading-row">
+        <div>
+          <h2 class="gallery-heading">{{ displayName }} 的画廊</h2>
+          <p class="gallery-heading-copy">这里展示该用户主动公开发布的作品。</p>
+        </div>
+      </div>
+      <section class="gallery-visibility-note compact" aria-label="公开范围说明">
+        <strong>这是公开页面</strong>
+        <p>无需登录即可访问和查看作品；只有画廊总开关已开启、且用户主动发布的内容会显示在这里。</p>
+      </section>
       <GalleryGrid :items="gallery" @select="selectedItem = $event" />
     </template>
 

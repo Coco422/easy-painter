@@ -12,13 +12,20 @@ class RateLimitResult:
 
 
 class GenerationRateLimiter:
-    def __init__(self, redis_client: Redis, limit: int, window_seconds: int) -> None:
+    def __init__(
+        self,
+        redis_client: Redis,
+        limit: int,
+        window_seconds: int,
+        namespace: str = "generation",
+    ) -> None:
         self.redis_client = redis_client
         self.limit = limit
         self.window_seconds = window_seconds
+        self.namespace = namespace
 
     def check(self, identity: str) -> RateLimitResult:
-        key = f"rate_limit:generation:{identity}"
+        key = f"rate_limit:{self.namespace}:{identity}"
         count = self.redis_client.incr(key)
         if count == 1:
             self.redis_client.expire(key, self.window_seconds)

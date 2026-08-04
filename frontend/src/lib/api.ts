@@ -1,6 +1,7 @@
 import { getAdminAuthHeader, getAuthHeader } from './auth'
 import type {
   AdminJobItem,
+  AnnouncementItem,
   BatchCreateInspirationsResponse,
   CreateJobRequest,
   CreateJobResponse,
@@ -22,6 +23,7 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly detail?: Record<string, unknown>,
+    readonly retryAfter?: number,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -67,7 +69,13 @@ async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
     } catch {
       // Keep the generic message.
     }
-    throw new ApiError(message, response.status, detail)
+    const retryAfterHeader = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    throw new ApiError(
+      message,
+      response.status,
+      detail,
+      Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader : undefined,
+    )
   }
 
   if (response.status === 204) return undefined as T
@@ -76,6 +84,10 @@ async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function fetchPublicMeta() {
   return apiRequest<PublicMetaResponse>('/api/v1/meta/public')
+}
+
+export function fetchAnnouncements() {
+  return apiRequest<AnnouncementItem[]>('/api/v1/announcements')
 }
 
 export function createJob(payload: CreateJobRequest) {
@@ -200,10 +212,17 @@ export function updateProfile(data: { display_name?: string; is_public?: boolean
   })
 }
 
-export function changePassword(data: { old_password: string; new_password: string }) {
-  return apiRequest<void>('/api/v1/users/me/password', {
+export function requestBindEmailCode(email: string) {
+  return apiRequest<{ message: string; expires_in: number; retry_after: number }>('/api/v1/users/me/email/code', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export function bindEmail(email: string, emailCode: string) {
+  return apiRequest<UserInfo>('/api/v1/users/me/email', {
     method: 'PUT',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ email, email_code: emailCode }),
   })
 }
 
@@ -226,7 +245,13 @@ async function adminApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
       const payload = (await response.json()) as { detail?: string }
       if (payload.detail) message = payload.detail
     } catch {}
-    throw new ApiError(message, response.status)
+    const retryAfterHeader = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    throw new ApiError(
+      message,
+      response.status,
+      undefined,
+      Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader : undefined,
+    )
   }
 
   if (response.status === 204) return undefined as T
@@ -254,14 +279,14 @@ export function adminFetchUsers() {
   return adminApiRequest<UserInfo[]>('/api/v1/admin/users')
 }
 
-export function adminCreateUser(data: { username: string; password: string; display_name?: string }) {
+export function adminCreateUser(data: { username: string; email?: string; password: string; display_name?: string }) {
   return adminApiRequest<UserInfo>('/api/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export function adminUpdateUser(userId: string, data: { password?: string; display_name?: string; is_public?: boolean }) {
+export function adminUpdateUser(userId: string, data: { email?: string | null; password?: string; display_name?: string; is_public?: boolean }) {
   return adminApiRequest<UserInfo>(`/api/v1/admin/users/${userId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
@@ -270,6 +295,36 @@ export function adminUpdateUser(userId: string, data: { password?: string; displ
 
 export function adminDeleteUser(userId: string) {
   return adminApiRequest<void>(`/api/v1/admin/users/${userId}`, { method: 'DELETE' })
+}
+
+// ---- Admin Announcement APIs ----
+
+export function adminFetchAnnouncements() {
+  return adminApiRequest<AnnouncementItem[]>('/api/v1/admin/announcements')
+}
+
+export function adminCreateAnnouncement(data: {
+  title: string
+  content: string
+  level: AnnouncementItem['level']
+  audience: AnnouncementItem['audience']
+  enabled: boolean
+}) {
+  return adminApiRequest<AnnouncementItem>('/api/v1/admin/announcements', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminUpdateAnnouncement(id: string, data: Partial<Pick<AnnouncementItem, 'title' | 'content' | 'level' | 'audience' | 'enabled'>>) {
+  return adminApiRequest<AnnouncementItem>(`/api/v1/admin/announcements/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function adminDeleteAnnouncement(id: string) {
+  return adminApiRequest<void>(`/api/v1/admin/announcements/${id}`, { method: 'DELETE' })
 }
 
 // ---- Admin Provider APIs ----

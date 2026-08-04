@@ -41,7 +41,7 @@ const saving = ref(false)
 const searchQuery = ref('')
 
 const createFormRef = ref<FormInst | null>(null)
-const createForm = reactive({ username: '', password: '', display_name: '' })
+const createForm = reactive({ username: '', email: '', password: '', display_name: '' })
 const createRules: FormRules = {
   username: { required: true, message: '请输入用户名', trigger: ['input', 'blur'] },
   password: { required: true, message: '请输入密码', trigger: ['input', 'blur'] },
@@ -49,7 +49,7 @@ const createRules: FormRules = {
 
 const editModalOpen = ref(false)
 const editFormRef = ref<FormInst | null>(null)
-const editForm = reactive({ id: '', username: '', display_name: '', password: '', is_public: false })
+const editForm = reactive({ id: '', username: '', email: '', display_name: '', password: '', is_public: false })
 const editRules: FormRules = {
   display_name: { required: true, message: '请输入显示名称', trigger: ['input', 'blur'] },
 }
@@ -59,7 +59,8 @@ const filteredUsers = computed(() => {
   if (!query) return users.value
   return users.value.filter((user) =>
     user.username.toLocaleLowerCase().includes(query) ||
-    user.display_name.toLocaleLowerCase().includes(query)
+    user.display_name.toLocaleLowerCase().includes(query) ||
+    (user.email?.toLocaleLowerCase().includes(query) ?? false)
   )
 })
 
@@ -97,11 +98,13 @@ async function createUser() {
   try {
     const created = await adminCreateUser({
       username: createForm.username,
+      email: createForm.email || undefined,
       password: createForm.password,
       display_name: createForm.display_name || undefined,
     })
     users.value.push(created)
     createForm.username = ''
+    createForm.email = ''
     createForm.password = ''
     createForm.display_name = ''
     createFormRef.value?.restoreValidation()
@@ -116,6 +119,7 @@ async function createUser() {
 function openEdit(user: UserInfo) {
   editForm.id = user.id
   editForm.username = user.username
+  editForm.email = user.email || ''
   editForm.display_name = user.display_name
   editForm.password = ''
   editForm.is_public = user.is_public
@@ -132,6 +136,7 @@ async function saveUser() {
   saving.value = true
   try {
     const updated = await adminUpdateUser(editForm.id, {
+      email: editForm.email || null,
       display_name: editForm.display_name,
       is_public: editForm.is_public,
       ...(editForm.password ? { password: editForm.password } : {}),
@@ -168,6 +173,7 @@ function deleteUser(user: UserInfo) {
 
 const columns: DataTableColumns<UserInfo> = [
   { title: '用户名', key: 'username', minWidth: 130 },
+  { title: '邮箱', key: 'email', minWidth: 200, render: (row) => row.email || '-' },
   { title: '显示名称', key: 'display_name', minWidth: 150 },
   { title: '灵感丝线', key: 'credits', width: 100 },
   {
@@ -195,7 +201,7 @@ onMounted(loadUsers)
       <div>
         <p class="section-kicker">Users</p>
         <h1>用户管理</h1>
-        <span>创建账户、修改公开状态并检索已有用户。</span>
+        <span>创建账户、补录邮箱、重置密码并检索已有用户。</span>
       </div>
       <NButton :loading="loading" @click="loadUsers"><template #icon><RefreshCw :size="15" /></template>刷新</NButton>
     </header>
@@ -203,14 +209,15 @@ onMounted(loadUsers)
     <NCard size="small" title="新增用户" class="create-card">
       <NForm ref="createFormRef" :model="createForm" :rules="createRules" label-placement="top" class="create-user-form" @submit.prevent="createUser">
         <NFormItem label="用户名" path="username"><NInput v-model:value="createForm.username" maxlength="64" /></NFormItem>
-        <NFormItem label="密码" path="password"><NInput v-model:value="createForm.password" type="password" show-password-on="click" maxlength="128" /></NFormItem>
+        <NFormItem label="邮箱"><NInput v-model:value="createForm.email" maxlength="320" placeholder="可选" /></NFormItem>
+        <NFormItem label="密码" path="password"><NInput v-model:value="createForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" /></NFormItem>
         <NFormItem label="显示名称"><NInput v-model:value="createForm.display_name" maxlength="128" placeholder="可选" /></NFormItem>
         <NButton type="primary" :loading="creating" class="create-button" @click="createUser"><template #icon><UserPlus :size="16" /></template>创建用户</NButton>
       </NForm>
     </NCard>
 
     <div class="table-toolbar">
-      <NInput v-model:value="searchQuery" clearable placeholder="搜索用户名或显示名称" class="search-input">
+      <NInput v-model:value="searchQuery" clearable placeholder="搜索用户名、邮箱或显示名称" class="search-input">
         <template #prefix><Search :size="15" /></template>
       </NInput>
       <span>{{ filteredUsers.length }} / {{ users.length }} 位用户</span>
@@ -218,14 +225,15 @@ onMounted(loadUsers)
 
     <NSpin :show="loading">
       <NEmpty v-if="!loading && filteredUsers.length === 0" :description="searchQuery ? '没有匹配的用户' : '还没有用户'" class="section-empty" />
-      <NDataTable v-else :columns="columns" :data="filteredUsers" :row-key="(row: UserInfo) => row.id" size="small" :single-line="false" :scroll-x="900" />
+      <NDataTable v-else :columns="columns" :data="filteredUsers" :row-key="(row: UserInfo) => row.id" size="small" :single-line="false" :scroll-x="1080" />
     </NSpin>
 
     <NModal v-model:show="editModalOpen" preset="card" title="编辑用户" class="admin-form-modal" :mask-closable="!saving">
       <NForm ref="editFormRef" :model="editForm" :rules="editRules" label-placement="top">
         <NFormItem label="用户名"><NInput :value="editForm.username" disabled /></NFormItem>
+        <NFormItem label="邮箱"><NInput v-model:value="editForm.email" maxlength="320" placeholder="留空则不绑定邮箱" /></NFormItem>
         <NFormItem label="显示名称" path="display_name"><NInput v-model:value="editForm.display_name" maxlength="128" /></NFormItem>
-        <NFormItem label="新密码"><NInput v-model:value="editForm.password" type="password" show-password-on="click" maxlength="128" placeholder="留空则不修改" /></NFormItem>
+        <NFormItem label="重置密码"><NInput v-model:value="editForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" placeholder="超管可直接设置，留空则不修改" /></NFormItem>
         <NFormItem label="公开画廊"><NSwitch v-model:value="editForm.is_public" /></NFormItem>
       </NForm>
       <template #footer>
@@ -240,7 +248,7 @@ onMounted(loadUsers)
 
 <style scoped>
 .create-card { margin-bottom: 20px; }
-.create-user-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 0 12px; align-items: end; }
+.create-user-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 0 12px; align-items: end; }
 .create-button { margin-bottom: 24px; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; }
 .search-input { width: min(360px, 100%); }

@@ -46,7 +46,7 @@ async def upload_staged_reference_image(
             image_bytes=image_bytes,
         )
     except ReferenceImageValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
     image_id = str(uuid4())
     storage = MinioStorageService()

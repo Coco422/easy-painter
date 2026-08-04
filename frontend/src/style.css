@@ -188,8 +188,7 @@ a {
   max-width: none;
   margin: 0;
   padding: 0;
-  width: 100vw;
-  margin-left: calc(-50vw + 50%);
+  width: 100%;
 }
 
 /* ---- Section Labels ---- */
@@ -1441,6 +1440,43 @@ a {
   flex: 1;
 }
 
+.gallery-heading-copy {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.gallery-visibility-note {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-glow);
+}
+
+.gallery-visibility-note strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.gallery-visibility-note p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.gallery-visibility-note.compact {
+  margin-top: -4px;
+}
+
+.public-gallery-heading-row {
+  justify-content: space-between;
+}
+
 /* ---- Sort Toggle ---- */
 .gallery-sort-toggle {
   display: flex;
@@ -2097,10 +2133,151 @@ a {
   background: var(--bg-input);
   color: var(--text-primary);
   font-size: 0.9rem;
+  outline: none;
+  transition: border-color 160ms, box-shadow 160ms, background 160ms;
 }
 
 .field-input::placeholder {
   color: var(--text-muted);
+}
+
+.field-input:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+}
+
+.field-input:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.email-binding-panel {
+  display: grid;
+  gap: 12px;
+  margin: 4px 0 18px;
+  padding: 16px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  background: var(--accent-glow);
+}
+
+.email-binding-panel.verified {
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+  background: color-mix(in srgb, var(--success) 6%, var(--bg-surface));
+}
+
+.email-binding-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.email-binding-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.email-binding-heading strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.email-binding-label {
+  color: var(--text-muted);
+  font: 700 10px/1.4 var(--font-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.email-status-tag {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: var(--accent);
+  font: 700 11px/1.3 var(--font-mono);
+}
+
+.verified .email-status-tag {
+  color: var(--success);
+}
+
+.verified-email {
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.email-binding-hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.profile-edit-card .email-binding-field {
+  margin: 0;
+}
+
+.email-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 126px;
+  gap: 8px;
+}
+
+.email-code-button,
+.email-bind-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.email-code-button {
+  border: 1px solid var(--border-accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  transition: border-color 160ms, background 160ms, color 160ms;
+}
+
+.email-code-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent-strong);
+}
+
+.email-code-button:disabled,
+.email-bind-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.email-code-input {
+  font-family: var(--font-mono);
+  letter-spacing: .16em;
+}
+
+.email-binding-feedback {
+  margin: 0;
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.email-binding-feedback.success {
+  color: var(--success);
 }
 
 .field-checkbox {
@@ -2211,7 +2388,32 @@ a {
 
 @media (max-width: 640px) {
   .profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .profile-page {
+    padding-inline: 16px;
+  }
+
+  .profile-card,
+  .redeem-input,
+  .field-input,
+  .email-field-row {
+    min-width: 0;
+  }
+
+  .redeem-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .email-field-row {
     grid-template-columns: 1fr;
+  }
+
+  .email-code-button,
+  .email-bind-button {
+    width: 100%;
   }
 }
 
@@ -2240,7 +2442,9 @@ a {
 
   .reference-drawer,
   .reference-drawer-panel,
-  .admin-sidebar {
+  .admin-sidebar,
+  .field-input,
+  .email-code-button {
     transition: none;
   }
 }

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
+import AnnouncementBanner from '@/components/AnnouncementBanner.vue'
 import { fetchPublicMeta } from '@/lib/api'
 import { fetchCurrentUser, isLoggedIn } from '@/lib/auth'
 import { initTheme } from '@/lib/theme'
@@ -27,6 +28,7 @@ onMounted(async () => {
 <template>
   <div class="page-shell">
     <AppHeader v-if="!isAdminRoute" :site-name="siteName" />
+    <AnnouncementBanner v-if="!isAdminRoute" />
     <main class="page-content" :class="{ 'page-content--admin': isAdminRoute }">
       <router-view />
     </main>

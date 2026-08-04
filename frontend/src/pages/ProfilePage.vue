@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { fetchCurrentUser } from '@/lib/auth'
 import { authState } from '@/lib/auth'
-import { ApiError, changePassword, fetchCreditHistory, redeemCode, updateProfile } from '@/lib/api'
+import {
+  ApiError,
+  bindEmail as bindVerifiedEmail,
+  fetchCreditHistory,
+  redeemCode,
+  requestBindEmailCode,
+  updateProfile,
+} from '@/lib/api'
 import type { CreditTransactionItem } from '@/lib/types'
 
 const redeemInput = ref('')
@@ -17,6 +24,15 @@ const isPublic = ref(false)
 const profileSaving = ref(false)
 const profileFeedback = ref('')
 const galleryCopied = ref(false)
+const bindEmailInput = ref('')
+const bindCodeInput = ref('')
+const bindCodeSentTo = ref('')
+const bindSending = ref(false)
+const bindSaving = ref(false)
+const bindCountdown = ref(0)
+const bindFeedback = ref('')
+const bindSuccess = ref(false)
+let bindCountdownTimer: number | null = null
 
 const router = useRouter()
 const galleryUrl = computed(() => {
@@ -24,13 +40,9 @@ const galleryUrl = computed(() => {
   if (!username) return ''
   return `${window.location.origin}/gallery/${username}`
 })
-
-const oldPassword = ref('')
-const newPassword = ref('')
-const confirmPassword = ref('')
-const passwordSaving = ref(false)
-const passwordFeedback = ref('')
-const passwordSuccess = ref(false)
+const normalizedBindEmail = computed(() => bindEmailInput.value.trim().toLowerCase())
+const bindEmailValid = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedBindEmail.value))
+const bindCodeValid = computed(() => /^\d{6}$/.test(bindCodeInput.value.trim()))
 
 const transactions = ref<CreditTransactionItem[]>([])
 const totalTransactions = ref(0)
@@ -92,6 +104,92 @@ async function handleSaveProfile() {
   }
 }
 
+function stopBindCountdown() {
+  if (bindCountdownTimer !== null) {
+    window.clearInterval(bindCountdownTimer)
+    bindCountdownTimer = null
+  }
+}
+
+function startBindCountdown(seconds: number) {
+  stopBindCountdown()
+  bindCountdown.value = Math.max(1, seconds)
+  bindCountdownTimer = window.setInterval(() => {
+    bindCountdown.value -= 1
+    if (bindCountdown.value <= 0) stopBindCountdown()
+  }, 1000)
+}
+
+function handleBindEmailInput() {
+  if (bindCodeSentTo.value && normalizedBindEmail.value !== bindCodeSentTo.value) {
+    bindCodeSentTo.value = ''
+    bindCodeInput.value = ''
+    bindFeedback.value = '邮箱已变更，请重新发送验证码。'
+    bindSuccess.value = false
+  }
+}
+
+async function handleRequestBindCode() {
+  if (!bindEmailValid.value) {
+    bindFeedback.value = '请输入有效的邮箱地址。'
+    bindSuccess.value = false
+    return
+  }
+  bindSending.value = true
+  bindFeedback.value = ''
+  bindSuccess.value = false
+  try {
+    const result = await requestBindEmailCode(normalizedBindEmail.value)
+    bindCodeSentTo.value = normalizedBindEmail.value
+    bindFeedback.value = `验证码已发送至 ${bindCodeSentTo.value}。`
+    bindSuccess.value = true
+    startBindCountdown(result.retry_after)
+  } catch (error) {
+    bindFeedback.value = error instanceof Error ? error.message : '验证码发送失败。'
+    if (error instanceof ApiError && error.status === 429) {
+      startBindCountdown(error.retryAfter ?? 60)
+    }
+  } finally {
+    bindSending.value = false
+  }
+}
+
+async function handleBindEmail() {
+  if (!bindEmailValid.value) {
+    bindFeedback.value = '请输入有效的邮箱地址。'
+    bindSuccess.value = false
+    return
+  }
+  if (normalizedBindEmail.value !== bindCodeSentTo.value) {
+    bindFeedback.value = '请先向当前邮箱发送验证码。'
+    bindSuccess.value = false
+    return
+  }
+  if (!bindCodeValid.value) {
+    bindFeedback.value = '请输入 6 位数字验证码。'
+    bindSuccess.value = false
+    return
+  }
+
+  bindSaving.value = true
+  bindFeedback.value = ''
+  bindSuccess.value = false
+  try {
+    await bindVerifiedEmail(normalizedBindEmail.value, bindCodeInput.value.trim())
+    await fetchCurrentUser()
+    bindFeedback.value = '邮箱已验证并绑定。'
+    bindSuccess.value = true
+    bindCodeInput.value = ''
+    bindCodeSentTo.value = ''
+    stopBindCountdown()
+    bindCountdown.value = 0
+  } catch (error) {
+    bindFeedback.value = error instanceof Error ? error.message : '邮箱绑定失败。'
+  } finally {
+    bindSaving.value = false
+  }
+}
+
 async function copyGalleryLink() {
   if (!galleryUrl.value) return
   try {
@@ -107,33 +205,6 @@ async function copyGalleryLink() {
     document.body.removeChild(input)
     galleryCopied.value = true
     setTimeout(() => { galleryCopied.value = false }, 2000)
-  }
-}
-
-async function handlePasswordChange() {
-  passwordFeedback.value = ''
-  passwordSuccess.value = false
-  if (newPassword.value.length < 6) {
-    passwordFeedback.value = '新密码至少需要 6 个字符。'
-    return
-  }
-  if (newPassword.value !== confirmPassword.value) {
-    passwordFeedback.value = '两次输入的新密码不一致。'
-    return
-  }
-  passwordSaving.value = true
-  try {
-    await changePassword({ old_password: oldPassword.value, new_password: newPassword.value })
-    passwordFeedback.value = '密码已更新。'
-    passwordSuccess.value = true
-    oldPassword.value = ''
-    newPassword.value = ''
-    confirmPassword.value = ''
-  } catch (error) {
-    passwordSuccess.value = false
-    passwordFeedback.value = error instanceof Error ? error.message : '修改失败。'
-  } finally {
-    passwordSaving.value = false
   }
 }
 
@@ -160,6 +231,8 @@ onMounted(async () => {
   }
   await loadHistory()
 })
+
+onBeforeUnmount(stopBindCountdown)
 </script>
 
 <template>
@@ -203,6 +276,75 @@ onMounted(async () => {
           <span>显示名称</span>
           <input v-model="displayName" type="text" class="field-input" maxlength="128" placeholder="留空则使用用户名" />
         </label>
+        <div class="email-binding-panel" :class="{ verified: Boolean(authState.user?.email) }">
+          <div class="email-binding-heading">
+            <div>
+              <span class="email-binding-label">验证邮箱</span>
+              <strong>{{ authState.user?.email ? '邮箱已绑定' : '绑定邮箱以保护账号' }}</strong>
+            </div>
+            <span class="email-status-tag">{{ authState.user?.email ? '已验证' : '未绑定' }}</span>
+          </div>
+
+          <template v-if="authState.user?.email">
+            <code class="verified-email">{{ authState.user.email }}</code>
+            <p class="email-binding-hint">已绑定邮箱不能在个人中心自行更换；如需更换，请联系管理员处理。</p>
+          </template>
+
+          <template v-else>
+            <p class="email-binding-hint">验证码会发送到目标邮箱。服务端会按邮箱、IP 和当前账号限制发送频率。</p>
+            <label class="field-label email-binding-field">
+              <span>邮箱地址</span>
+              <span class="email-field-row">
+                <input
+                  v-model="bindEmailInput"
+                  type="email"
+                  class="field-input"
+                  autocomplete="email"
+                  maxlength="320"
+                  placeholder="name@example.com"
+                  :disabled="bindSaving"
+                  @input="handleBindEmailInput"
+                  @keyup.enter="handleRequestBindCode"
+                />
+                <button
+                  type="button"
+                  class="email-code-button"
+                  :disabled="bindSending || bindSaving || bindCountdown > 0"
+                  @click="handleRequestBindCode"
+                >
+                  {{ bindCountdown > 0 ? `${bindCountdown}s 后重试` : bindSending ? '发送中…' : '发送验证码' }}
+                </button>
+              </span>
+            </label>
+            <label class="field-label email-binding-field">
+              <span>邮箱验证码</span>
+              <span class="email-field-row">
+                <input
+                  v-model="bindCodeInput"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  class="field-input email-code-input"
+                  maxlength="6"
+                  placeholder="6 位数字"
+                  :disabled="bindSaving"
+                  @keyup.enter="handleBindEmail"
+                />
+                <button
+                  type="button"
+                  class="secondary-button email-bind-button"
+                  :disabled="bindSaving || !bindCodeValid || normalizedBindEmail !== bindCodeSentTo"
+                  @click="handleBindEmail"
+                >
+                  {{ bindSaving ? '验证中…' : '验证并绑定' }}
+                </button>
+              </span>
+            </label>
+          </template>
+
+          <p v-if="bindFeedback" class="email-binding-feedback" :class="{ success: bindSuccess }">
+            {{ bindFeedback }}
+          </p>
+        </div>
         <label class="field-checkbox">
           <input v-model="isPublic" type="checkbox" />
           <span>公开画廊（其他用户可以查看你的作品）</span>
@@ -228,30 +370,6 @@ onMounted(async () => {
         </div>
       </section>
 
-      <!-- Password card -->
-      <section class="profile-card password-card">
-        <p class="card-label">修改密码</p>
-        <label class="field-label">
-          <span>原密码</span>
-          <input v-model="oldPassword" type="password" class="field-input" maxlength="128" placeholder="输入当前密码" />
-        </label>
-        <label class="field-label">
-          <span>新密码</span>
-          <input v-model="newPassword" type="password" class="field-input" maxlength="128" placeholder="至少 6 个字符" />
-        </label>
-        <label class="field-label">
-          <span>确认新密码</span>
-          <input v-model="confirmPassword" type="password" class="field-input" maxlength="128" placeholder="再次输入新密码" @keyup.enter="handlePasswordChange" />
-        </label>
-        <div class="profile-actions">
-          <button class="secondary-button" :disabled="passwordSaving" @click="handlePasswordChange">
-            {{ passwordSaving ? '提交中...' : '修改密码' }}
-          </button>
-          <span v-if="passwordFeedback" class="profile-feedback" :class="{ success: passwordSuccess }">
-            {{ passwordFeedback }}
-          </span>
-        </div>
-      </section>
     </div>
     <section class="profile-card history-card">
       <p class="card-label">消费记录</p>

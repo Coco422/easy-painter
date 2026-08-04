@@ -18,6 +18,7 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(128))
     display_name: Mapped[str] = mapped_column(String(128), default="")
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
