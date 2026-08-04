@@ -113,7 +113,7 @@ make frontend
 - `/media` 仍然走 `http://127.0.0.1:8080`
 - `make backend` 会自动把数据库、Redis、MinIO 连接改成本机端口，配合 `make deps` 启动的容器使用
 
-## 一键部署
+## 本地镜像部署
 
 ```bash
 cp .env.example .env
@@ -126,11 +126,51 @@ make deploy
 - `/api/...` 反代到 `api`
 - `/media/...` 反代到 MinIO 公共 bucket
 
-## M2 开发机与 amd64 服务器
+## 服务器部署（GHCR）
+
+`main` 分支更新前后端或 Nginx 文件时，GitHub Actions 会构建两个 `linux/amd64` 镜像并推送到 GHCR：
+
+- `ghcr.io/coco422/easy-painter-backend`
+- `ghcr.io/coco422/easy-painter-nginx`
+
+服务器不需要 Git 仓库、Node.js 或 Python 构建环境，只需保留：
+
+- `.env`
+- `compose.yml`（使用仓库中的 `deploy/compose.yml`）
+- `data/postgres`、`data/redis`、`data/minio` 持久化目录
+
+首次部署：
+
+```bash
+mkdir -p ~/easy-painter
+cd ~/easy-painter
+curl -fsSLo compose.yml https://raw.githubusercontent.com/Coco422/easy-painter/main/deploy/compose.yml
+cp /path/to/existing/.env .env
+docker compose -f compose.yml pull
+docker compose -f compose.yml up -d --remove-orphans
+```
+
+后续更新：
+
+```bash
+cd ~/easy-painter
+docker compose -f compose.yml pull
+docker compose -f compose.yml up -d --remove-orphans
+```
+
+默认拉取 `main` 标签。生产部署也可以用不可变提交标签，便于精确回滚：
+
+```bash
+IMAGE_TAG=sha-<完整提交 SHA> docker compose -f compose.yml pull
+IMAGE_TAG=sha-<完整提交 SHA> docker compose -f compose.yml up -d --remove-orphans
+```
+
+GHCR 包必须允许服务器拉取：公开包可匿名拉取；私有包需先执行 `docker login ghcr.io`。只有在新镜像成功启动并通过健康检查后，才能删除服务器上的源码，且不得删除 `.env`、`compose.yml` 和 `data/`。
+
+## M2 开发机与 amd64 镜像
 
 这个项目的 Dockerfile 和依赖都兼容多架构，不需要在 `docker-compose.yml` 里强行写死 `platform`。
 
-- 如果你在 `linux/amd64` 服务器上直接部署：最简单，直接在服务器执行 `docker compose build && docker compose up -d`。
 - 如果你在 M2 本机先构建镜像再推送到 amd64 服务器：请使用 `docker buildx` 指定 `linux/amd64`。
 
 示例：
