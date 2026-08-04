@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { History, ImagePlus, Loader2, X } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { Check, ChevronDown, History, ImagePlus, Loader2, TriangleAlert, X } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import ReferenceHistoryDrawer from '@/components/ReferenceHistoryDrawer.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
+import { resolveImageLayout } from '@/lib/image-layout'
 import type { BatchCount, ImageSize, PublicModel } from '@/lib/types'
 
 const props = defineProps<{
@@ -38,31 +39,36 @@ const {
 
 const promptLength = computed(() => props.prompt.length)
 const promptOverLimit = computed(() => promptLength.value > props.maxLength)
-const sizeOptions: Array<{ value: ImageSize; label: string }> = [
-  { value: 'auto', label: '自动' },
-  { value: '1024x1024', label: '1024 x 1024 方图' },
-  { value: '1280x720', label: '1280 x 720 横图' },
-  { value: '720x1280', label: '720 x 1280 竖图' },
-  { value: '1792x1024', label: '1792 x 1024 横图' },
-  { value: '1024x1792', label: '1024 x 1792 竖图' },
-  { value: '1536x1024', label: '1536 x 1024 横图' },
-  { value: '1024x1536', label: '1024 x 1536 竖图' },
-  { value: '2048x2048', label: '2048 x 2048 2K 方图' },
-  { value: '2048x1152', label: '2048 x 1152 2K 横图' },
-  { value: '1152x2048', label: '1152 x 2048 2K 竖图' },
-  { value: '3840x2160', label: '3840 x 2160 4K 横图' },
-  { value: '2160x3840', label: '2160 x 3840 4K 竖图' },
+const sizeOptions: Array<{ value: ImageSize; label: string; detail: string }> = [
+  { value: 'auto', label: '自动', detail: '由渠道决定' },
+  { value: '1024x1024', label: '方图', detail: '1024 × 1024' },
+  { value: '1280x720', label: '横图', detail: '1280 × 720' },
+  { value: '720x1280', label: '竖图', detail: '720 × 1280' },
+  { value: '1792x1024', label: '横图', detail: '1792 × 1024' },
+  { value: '1024x1792', label: '竖图', detail: '1024 × 1792' },
+  { value: '1536x1024', label: '横图', detail: '1536 × 1024' },
+  { value: '1024x1536', label: '竖图', detail: '1024 × 1536' },
+  { value: '2048x2048', label: '2K 方图', detail: '2048 × 2048' },
+  { value: '2048x1152', label: '2K 横图', detail: '2048 × 1152' },
+  { value: '1152x2048', label: '2K 竖图', detail: '1152 × 2048' },
+  { value: '3840x2160', label: '4K 横图', detail: '3840 × 2160' },
+  { value: '2160x3840', label: '4K 竖图', detail: '2160 × 3840' },
 ]
 const batchOptions: BatchCount[] = [1, 2, 4]
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const isDragging = ref(false)
 const drawerOpen = ref(false)
+const sizePickerOpen = ref(false)
+const sizePickerDialog = ref<HTMLElement | null>(null)
 const referenceError = ref('')
 const chipThumbUrl = computed(() => pendingPreviewUrl.value ?? (selected.value ? getObjectUrl(selected.value.id) : undefined))
 const chipName = computed(() => (uploading.value ? pendingFilename.value : selected.value?.filename) ?? '')
+const selectedSizeOption = computed(() => sizeOptions.find((option) => option.value === props.selectedSize) ?? sizeOptions[0])
+const selectedSizeLayout = computed(() => resolveImageLayout(selectedSizeOption.value.value))
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleSizePickerKeydown)
   releaseObjectUrls()
 })
 
@@ -147,6 +153,35 @@ function sizeSupportedBySelectedModel(size: ImageSize) {
   const model = selectedModelConfig()
   return !model?.supported_sizes.length || model.supported_sizes.includes(size)
 }
+
+function sizePreviewStyle(size: ImageSize) {
+  const layout = resolveImageLayout(size)
+  return {
+    aspectRatio: layout.aspectRatio,
+    '--image-ratio': layout.ratio,
+  }
+}
+
+function handleSizePickerKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') sizePickerOpen.value = false
+}
+
+async function openSizePicker() {
+  sizePickerOpen.value = true
+  await nextTick()
+  sizePickerDialog.value?.focus()
+}
+
+function chooseSize(size: ImageSize) {
+  if (!sizeSupportedBySelectedModel(size)) return
+  emit('update:size', size)
+  sizePickerOpen.value = false
+}
+
+watch(sizePickerOpen, (open) => {
+  if (open) window.addEventListener('keydown', handleSizePickerKeydown)
+  else window.removeEventListener('keydown', handleSizePickerKeydown)
+})
 </script>
 
 <template>
@@ -229,23 +264,28 @@ function sizeSupportedBySelectedModel(size: ImageSize) {
         </select>
       </label>
 
-      <label class="field-label">
+      <div class="field-label">
         <span>尺寸</span>
-        <select
-          :value="selectedSize"
-          class="model-select"
-          @change="emit('update:size', ($event.target as HTMLSelectElement).value as ImageSize)"
+        <button
+          type="button"
+          class="size-picker-trigger"
+          aria-haspopup="dialog"
+          :aria-expanded="sizePickerOpen"
+          @click="openSizePicker"
         >
-          <option
-            v-for="option in sizeOptions"
-            :key="option.value"
-            :value="option.value"
-            :disabled="!sizeSupportedBySelectedModel(option.value)"
-          >
-            {{ option.label }}{{ !sizeSupportedBySelectedModel(option.value) ? '（当前模型不支持）' : '' }}
-          </option>
-        </select>
-      </label>
+          <span
+            class="size-trigger-preview"
+            :class="{ 'is-auto': selectedSizeOption.value === 'auto' }"
+            :style="{ aspectRatio: selectedSizeLayout.aspectRatio }"
+            aria-hidden="true"
+          />
+          <span class="size-trigger-copy">
+            <strong>{{ selectedSizeOption.label }}</strong>
+            <small>{{ selectedSizeOption.detail }}</small>
+          </span>
+          <ChevronDown :size="15" aria-hidden="true" />
+        </button>
+      </div>
 
       <label class="field-label">
         <span>数量</span>
@@ -267,5 +307,58 @@ function sizeSupportedBySelectedModel(size: ImageSize) {
         {{ submitting ? '正在提交...' : '开始创作' }}
       </button>
     </div>
+
+    <Teleport to="body">
+      <div v-if="sizePickerOpen" class="size-picker-backdrop" @click.self="sizePickerOpen = false">
+        <section
+          ref="sizePickerDialog"
+          class="size-picker-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="size-picker-title"
+          tabindex="-1"
+        >
+          <header class="size-picker-header">
+            <div>
+              <p class="section-label">Canvas size</p>
+              <h2 id="size-picker-title">选择画布尺寸</h2>
+              <span>方框展示成图的大致宽高比例。</span>
+            </div>
+            <button type="button" aria-label="关闭尺寸选择" @click="sizePickerOpen = false"><X :size="19" /></button>
+          </header>
+
+          <div class="size-picker-warning">
+            <TriangleAlert :size="17" aria-hidden="true" />
+            <span>当前接入的是低成本渠道，尺寸参数可能不会被严格执行，最终请以实际成图为准。</span>
+          </div>
+
+          <div class="size-picker-grid" role="listbox" aria-label="画布尺寸">
+            <button
+              v-for="option in sizeOptions"
+              :key="option.value"
+              type="button"
+              class="size-option-card"
+              :class="{ selected: selectedSize === option.value, 'is-auto': option.value === 'auto' }"
+              :disabled="!sizeSupportedBySelectedModel(option.value)"
+              role="option"
+              :aria-selected="selectedSize === option.value"
+              @click="chooseSize(option.value)"
+            >
+              <span class="size-option-visual" aria-hidden="true">
+                <span class="size-option-shape" :style="sizePreviewStyle(option.value)">
+                  <small v-if="option.value === 'auto'">AUTO</small>
+                </span>
+              </span>
+              <span class="size-option-copy">
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.detail }}</small>
+                <em v-if="!sizeSupportedBySelectedModel(option.value)">当前模型不支持</em>
+              </span>
+              <Check v-if="selectedSize === option.value" :size="16" class="size-option-check" aria-hidden="true" />
+            </button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>

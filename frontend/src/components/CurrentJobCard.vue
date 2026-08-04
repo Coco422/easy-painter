@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { resolveImageLayout } from '@/lib/image-layout'
 import type { JobDetailResponse } from '@/lib/types'
 
 const props = defineProps<{
@@ -63,6 +64,9 @@ const now = ref(Date.now())
 const typedText = ref('')
 const activeMessageIndex = ref(0)
 const prefersReducedMotion = ref(false)
+const resultImageLoaded = ref(false)
+const resultImageFailed = ref(false)
+const actualImageAspectRatio = ref<string | null>(null)
 let clockTimer: number | undefined
 let typingTimer: number | undefined
 let messageTimer: number | undefined
@@ -99,6 +103,8 @@ const displayedLoadingText = computed(() => {
   if (prefersReducedMotion.value) return activeMessage.value
   return typedText.value || activeMessage.value.slice(0, 1)
 })
+const imageLayout = computed(() => resolveImageLayout(props.job?.size, props.job?.aspect_ratio))
+const displayedImageAspectRatio = computed(() => actualImageAspectRatio.value ?? imageLayout.value.aspectRatio)
 
 function statusText(status: JobDetailResponse['status']) {
   switch (status) {
@@ -123,6 +129,20 @@ function placeholderText(job: JobDetailResponse) {
   if (job.status === 'failed') return '生成失败'
   if (job.status === 'queued') return '等待执行'
   return '异步创作中'
+}
+
+function markResultImageLoaded(event: Event) {
+  const image = event.currentTarget as HTMLImageElement
+  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+    actualImageAspectRatio.value = `${image.naturalWidth} / ${image.naturalHeight}`
+  }
+  resultImageLoaded.value = true
+  resultImageFailed.value = false
+}
+
+function markResultImageFailed() {
+  resultImageLoaded.value = false
+  resultImageFailed.value = true
 }
 
 function hashSeed(value: string) {
@@ -205,6 +225,15 @@ watch(
   () => resetLoadingSequence(),
 )
 
+watch(
+  () => `${props.job?.job_id ?? ''}:${props.job?.image_url ?? ''}`,
+  () => {
+    resultImageLoaded.value = false
+    resultImageFailed.value = false
+    actualImageAspectRatio.value = null
+  },
+)
+
 onMounted(() => {
   now.value = Date.now()
   clockTimer = window.setInterval(() => {
@@ -247,10 +276,36 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="current-job-visual">
-      <img v-if="job.image_url" :src="job.image_url" alt="当前任务结果图" />
+    <div
+      class="current-job-visual"
+      :class="{ 'is-landscape': imageLayout.ratio >= 1.45 }"
+      :style="{ aspectRatio: displayedImageAspectRatio }"
+    >
+      <img
+        v-if="job.image_url"
+        :src="job.image_url"
+        :width="imageLayout.width"
+        :height="imageLayout.height"
+        :class="{ 'is-loaded': resultImageLoaded }"
+        class="current-job-result-image"
+        alt="当前任务结果图"
+        @load="markResultImageLoaded"
+        @error="markResultImageFailed"
+      />
       <div
-        v-else-if="isLiveStatus(job.status)"
+        v-if="job.image_url && !resultImageLoaded"
+        class="result-image-skeleton"
+        :class="{ 'is-error': resultImageFailed }"
+        role="status"
+        aria-live="polite"
+      >
+        <span>{{ resultImageFailed ? '图片载入失败，请刷新重试' : '成图载入中' }}</span>
+        <small v-if="!resultImageFailed">
+          {{ imageLayout.estimated ? '预估比例' : `${imageLayout.width} × ${imageLayout.height}` }}
+        </small>
+      </div>
+      <div
+        v-else-if="!job.image_url && isLiveStatus(job.status)"
         class="loading-ritual-panel"
         role="progressbar"
         :aria-valuenow="loadingProgress"
