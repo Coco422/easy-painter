@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Heart, Star, Globe, Lock } from 'lucide-vue-next'
 
+import RetryableImage from '@/components/RetryableImage.vue'
 import { resolveImageLayout } from '@/lib/image-layout'
 import type { GalleryItem } from '@/lib/types'
 
@@ -22,9 +23,10 @@ const emit = defineEmits<{
 }>()
 
 const columnCount = ref(4)
-const loadedImageIds = ref(new Set<string>())
 const failedImageIds = ref(new Set<string>())
 const actualImageAspectRatios = ref(new Map<string, string>())
+const imageRetryKeys = ref(new Map<string, number>())
+const GALLERY_IMAGE_RETRY_DELAYS_MS = [2000, 8000]
 
 function updateColumnCount() {
   const w = window.innerWidth
@@ -35,6 +37,10 @@ function displayedAspectRatio(item: GalleryItem) {
   return actualImageAspectRatios.value.get(item.job_id) ?? resolveImageLayout(item.size, item.aspect_ratio).aspectRatio
 }
 
+function imageRetryKey(jobId: string) {
+  return imageRetryKeys.value.get(jobId) ?? 0
+}
+
 function markImageLoaded(jobId: string, event: Event) {
   const image = event.currentTarget as HTMLImageElement
   if (image.naturalWidth > 0 && image.naturalHeight > 0) {
@@ -42,7 +48,6 @@ function markImageLoaded(jobId: string, event: Event) {
     ratios.set(jobId, `${image.naturalWidth} / ${image.naturalHeight}`)
     actualImageAspectRatios.value = ratios
   }
-  loadedImageIds.value = new Set(loadedImageIds.value).add(jobId)
   const failed = new Set(failedImageIds.value)
   failed.delete(jobId)
   failedImageIds.value = failed
@@ -50,6 +55,21 @@ function markImageLoaded(jobId: string, event: Event) {
 
 function markImageFailed(jobId: string) {
   failedImageIds.value = new Set(failedImageIds.value).add(jobId)
+}
+
+function handleCardClick(item: GalleryItem) {
+  if (!failedImageIds.value.has(item.job_id)) {
+    emit('select', item)
+    return
+  }
+
+  const retryKeys = new Map(imageRetryKeys.value)
+  retryKeys.set(item.job_id, (retryKeys.get(item.job_id) ?? 0) + 1)
+  imageRetryKeys.value = retryKeys
+
+  const failed = new Set(failedImageIds.value)
+  failed.delete(item.job_id)
+  failedImageIds.value = failed
 }
 
 onMounted(() => {
@@ -81,26 +101,32 @@ const columns = computed(() => {
           class="gallery-card"
           type="button"
           :style="{ aspectRatio: displayedAspectRatio(item) }"
-          @click="emit('select', item)"
+          @click="handleCardClick(item)"
         >
-          <span
-            v-if="!loadedImageIds.has(item.job_id)"
-            class="gallery-card-skeleton"
-            :class="{ 'is-error': failedImageIds.has(item.job_id) }"
-            aria-hidden="true"
-          >
-            <small>{{ failedImageIds.has(item.job_id) ? '载入失败' : '' }}</small>
-          </span>
-          <img
+          <RetryableImage
             :src="item.image_url"
             :alt="item.prompt"
+            :retry-delays="GALLERY_IMAGE_RETRY_DELAYS_MS"
+            :reset-key="imageRetryKey(item.job_id)"
             :width="resolveImageLayout(item.size, item.aspect_ratio).width"
             :height="resolveImageLayout(item.size, item.aspect_ratio).height"
-            :class="{ 'is-loaded': loadedImageIds.has(item.job_id) }"
             loading="lazy"
             @load="markImageLoaded(item.job_id, $event)"
-            @error="markImageFailed(item.job_id)"
-          />
+            @failed="markImageFailed(item.job_id)"
+          >
+            <template #status="{ loaded, failed, retrying }">
+              <span
+                v-if="!loaded"
+                class="gallery-card-skeleton"
+                :class="{ 'is-error': failed }"
+                role="status"
+                aria-live="polite"
+              >
+                <small v-if="failed">载入失败，点击重试</small>
+                <small v-else-if="retrying">连接不稳定，正在重试</small>
+              </span>
+            </template>
+          </RetryableImage>
           <span v-if="showUsername && item.username" class="gallery-card-username">{{ item.username }}</span>
         </button>
         <div v-if="showOwnerActions" class="gallery-card-owner-actions">

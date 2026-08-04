@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import RetryableImage from '@/components/RetryableImage.vue'
 import { resolveImageLayout } from '@/lib/image-layout'
 import type { JobDetailResponse } from '@/lib/types'
 
@@ -19,6 +20,7 @@ const CLOCK_INTERVAL_MS = 1000
 const TYPE_INTERVAL_MS = 54
 const MESSAGE_HOLD_MS = 2200
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+const RESULT_IMAGE_RETRY_DELAYS_MS = [1500, 5000, 15000, 30000]
 
 const MAIN_LOADING_LINES = [
   '给云层办理临时身份证',
@@ -64,8 +66,6 @@ const now = ref(Date.now())
 const typedText = ref('')
 const activeMessageIndex = ref(0)
 const prefersReducedMotion = ref(false)
-const resultImageLoaded = ref(false)
-const resultImageFailed = ref(false)
 const actualImageAspectRatio = ref<string | null>(null)
 let clockTimer: number | undefined
 let typingTimer: number | undefined
@@ -136,13 +136,6 @@ function markResultImageLoaded(event: Event) {
   if (image.naturalWidth > 0 && image.naturalHeight > 0) {
     actualImageAspectRatio.value = `${image.naturalWidth} / ${image.naturalHeight}`
   }
-  resultImageLoaded.value = true
-  resultImageFailed.value = false
-}
-
-function markResultImageFailed() {
-  resultImageLoaded.value = false
-  resultImageFailed.value = true
 }
 
 function hashSeed(value: string) {
@@ -228,8 +221,6 @@ watch(
 watch(
   () => `${props.job?.job_id ?? ''}:${props.job?.image_url ?? ''}`,
   () => {
-    resultImageLoaded.value = false
-    resultImageFailed.value = false
     actualImageAspectRatio.value = null
   },
 )
@@ -281,29 +272,35 @@ onBeforeUnmount(() => {
       :class="{ 'is-landscape': imageLayout.ratio >= 1.45 }"
       :style="{ aspectRatio: displayedImageAspectRatio }"
     >
-      <img
+      <RetryableImage
         v-if="job.image_url"
         :src="job.image_url"
+        :retry-delays="RESULT_IMAGE_RETRY_DELAYS_MS"
         :width="imageLayout.width"
         :height="imageLayout.height"
-        :class="{ 'is-loaded': resultImageLoaded }"
         class="current-job-result-image"
         alt="当前任务结果图"
         @load="markResultImageLoaded"
-        @error="markResultImageFailed"
-      />
-      <div
-        v-if="job.image_url && !resultImageLoaded"
-        class="result-image-skeleton"
-        :class="{ 'is-error': resultImageFailed }"
-        role="status"
-        aria-live="polite"
       >
-        <span>{{ resultImageFailed ? '图片载入失败，请刷新重试' : '成图载入中' }}</span>
-        <small v-if="!resultImageFailed">
-          {{ imageLayout.estimated ? '预估比例' : `${imageLayout.width} × ${imageLayout.height}` }}
-        </small>
-      </div>
+        <template #status="{ loaded, failed, retrying, retryCount, maxRetries, retry }">
+          <div
+            v-if="!loaded"
+            class="result-image-skeleton"
+            :class="{ 'is-error': failed }"
+            role="status"
+            aria-live="polite"
+          >
+            <span v-if="failed">图片暂时不可用</span>
+            <span v-else-if="retrying">连接不稳定，正在自动重试（{{ retryCount }}/{{ maxRetries }}）</span>
+            <span v-else>成图载入中</span>
+            <small v-if="failed">源站恢复后可直接重新加载，无需重新生成</small>
+            <small v-else-if="!retrying">
+              {{ imageLayout.estimated ? '预估比例' : `${imageLayout.width} × ${imageLayout.height}` }}
+            </small>
+            <button v-if="failed" type="button" class="image-retry-button" @click="retry">重新加载图片</button>
+          </div>
+        </template>
+      </RetryableImage>
       <div
         v-else-if="!job.image_url && isLiveStatus(job.status)"
         class="loading-ritual-panel"

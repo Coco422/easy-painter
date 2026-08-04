@@ -32,8 +32,9 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering on;
-        expires 30d;
-        add_header Cache-Control "public, max-age=2592000, immutable" always;
+        # Only successful media responses should be immutable. Keeping this
+        # header off 4xx/5xx responses lets browsers retry transient MinIO errors.
+        add_header Cache-Control "public, max-age=2592000, immutable";
     }
 
     location / {
