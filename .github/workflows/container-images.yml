@@ -8,6 +8,8 @@ on:
       - "v*.*.*"
     paths:
       - ".github/workflows/container-images.yml"
+      - "VERSION"
+      - "CHANGELOG.md"
       - "backend/**"
       - "frontend/**"
       - "deploy/nginx/**"

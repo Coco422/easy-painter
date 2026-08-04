@@ -13,12 +13,33 @@
 
 ```text
 .
+├── VERSION
+├── CHANGELOG.md
+├── ROADMAP.md
 ├── backend
 ├── deploy/nginx
 ├── frontend
+├── scripts/version.py
 ├── docker-compose.yml
 └── .env.example
 ```
+
+## 版本与发布
+
+项目使用标准语义化版本 `vX.Y.Z`。根目录 [`VERSION`](VERSION) 是当前版本号的唯一来源，[`CHANGELOG.md`](CHANGELOG.md) 是发布说明的唯一来源；维护者在发布时用中文人工概括两个版本之间的用户可感知变化。产品方向记录在 [`ROADMAP.md`](ROADMAP.md)。
+
+```bash
+# 同步 VERSION、前后端 manifest 和 lockfile
+python3 scripts/version.py set v0.12.0
+
+# 检查版本文件、changelog 和 manifest 是否一致
+python3 scripts/version.py check v0.12.0
+
+# 预览该版本将写入 GitHub Release 的说明
+python3 scripts/version.py notes v0.12.0
+```
+
+前端构建时会把当前版本和 changelog 编译进静态资源。所有访客都可以从 Header 打开版本中心；弹窗打开后只读查询官方仓库最新正式 GitHub Release，发现新版时提供 Release 链接，但不会自动下载或升级。正式发布时推送 `vX.Y.Z` tag，GitHub Actions 会先执行一致性检查，再用对应 changelog 章节创建 Release。
 
 ## 本地开发
 

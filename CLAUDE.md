@@ -37,6 +37,13 @@ cd backend && uv run pytest tests/test_reference_images.py
 
 # Type-check frontend
 cd frontend && npx vue-tsc --noEmit
+
+# Synchronize and validate a semantic version
+python3 scripts/version.py set vX.Y.Z
+python3 scripts/version.py check vX.Y.Z
+
+# Preview the GitHub Release body sourced from CHANGELOG.md
+python3 scripts/version.py notes vX.Y.Z
 ```
 
 ## Architecture
@@ -71,6 +78,14 @@ cd frontend && npx vue-tsc --noEmit
 - Admin CRUD lives under `/admin/announcements`; notifications are not seeded at startup
 - The frontend banner reloads when login state or the current user's email changes, so a successful email binding removes `unbound_email` notices immediately
 
+### Version and Release Logic
+
+- Root `VERSION` is the canonical current version; frontend/backend manifests store the same value without the `v` prefix
+- Root `CHANGELOG.md` is the only release-notes source and uses `## vX.Y.Z - YYYY-MM-DD` plus `+ [type] content` entries
+- Vite embeds the current version and parsed changelog at build time; the header version dialog checks the latest stable GitHub Release only when opened
+- GitHub failures never block the bundled release history, and the UI never downloads or installs updates
+- Pushing a semantic-version tag runs `scripts/version.py check` and creates the GitHub Release from that changelog section
+
 ### Backend Structure (`backend/app/`)
 
 - `api/routes.py` — Job endpoints (meta, jobs CRUD, gallery, healthz)
@@ -95,6 +110,7 @@ cd frontend && npx vue-tsc --noEmit
 - `pages/HomePage.vue` — Generate panel + gallery (main page)
 - `pages/LoginPage.vue` — Login, registration, and email-code password reset
 - `components/AnnouncementBanner.vue` — Audience-filtered system banners
+- `components/VersionReleaseDialog.vue` — Build version, changelog timeline, and read-only GitHub Release check
 - `pages/PublicGalleryPage.vue` — Per-user public gallery view
 - `pages/AdminPage.vue` — Admin dashboard (secret key auth, job/user management)
 - `components/AppHeader.vue` — Header with auth-aware navigation
@@ -111,3 +127,4 @@ cd frontend && npx vue-tsc --noEmit
 - `backend/.env` is a symlink to the project root `.env`
 - Admin uses a separate JWT (not a user account) — verified via `ADMIN_SECRET_KEY` env var
 - No frontend state management library — auth state is a simple Vue `reactive()` object in `lib/auth.ts`
+- Frontend and backend must be released together; the version center only reports updates and does not perform partial upgrades

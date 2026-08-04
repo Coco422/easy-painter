@@ -2,6 +2,7 @@
 import { Moon, Sun, Wallet } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import logoUrl from '@/assets/brand/logo.png'
+import VersionReleaseDialog from '@/components/VersionReleaseDialog.vue'
 import { authState, isAdmin, isLoggedIn, logout } from '@/lib/auth'
 import { themeState, toggleTheme } from '@/lib/theme'
 
@@ -45,6 +46,7 @@ async function handleLogout() {
       <template v-else>
         <router-link to="/login" class="nav-link">登录</router-link>
       </template>
+      <VersionReleaseDialog />
       <button class="theme-toggle" :title="themeState.current === 'dark' ? '切换到浅色模式' : '切换到深色模式'" @click="toggleTheme">
         <Sun v-if="themeState.current === 'dark'" :size="18" />
         <Moon v-else :size="18" />

@@ -1,155 +1,104 @@
 ---
 name: release
-description: Use this skill whenever the user asks to release, publish a version, bump a version, create a git tag, push a tagged release, or says "发版", "版本更新", "打 tag", "release", or "push tag". It performs the project release workflow: inspect git state, cleanly stage only intended files, create a commit, determine the next semantic version from existing tags, create the git tag, and push branch plus tag to origin.
+description: Use this skill when the user asks to release, bump a version, create a tag, publish a GitHub Release, or says "发版", "版本更新", "打 tag", "release", or "push tag". It maintains VERSION and the Chinese CHANGELOG, validates the monorepo version, creates an annotated semantic-version tag, and pushes only when explicitly authorized.
 ---
 
 # Release Workflow
 
-Use this skill for this repository's release flow. The goal is a safe, repeatable release: preserve unrelated work, commit only intended changes, choose the correct semantic version, tag the exact release commit, and push both branch and tag.
+Easy Painter releases the frontend and backend together from one repository. `VERSION` is the canonical version source, while `CHANGELOG.md` is the only source for human-written release notes and GitHub Release content.
 
-## Core Principles
+## Safety Rules
 
-- Preserve unrelated local work. This repo may have another Claude session or a human editing files at the same time.
-- Never use destructive cleanup (`git reset --hard`, `git checkout --`, `git clean -fd`, branch deletion, force push) unless the user explicitly asks for that exact destructive action.
-- Do not stage everything blindly. Prefer explicit file paths based on the release scope.
-- Do not bypass hooks (`--no-verify`) or signing checks.
-- Use a new commit. Do not amend unless the user explicitly asks.
-- Push only after commit and tag creation succeed.
+- Preserve unrelated local changes and stage only explicit release paths.
+- Never use destructive cleanup, amend, force push, overwrite a tag, or bypass hooks.
+- Do not create a commit, tag, or push unless the user explicitly authorizes that action.
+- A release must not proceed when version checks, relevant tests, or builds fail.
+- GitHub Release notes must come from `CHANGELOG.md`; do not generate a second feat-only commit list.
 
 ## Required Workflow
 
-### 1. Inspect repository state
+### 1. Inspect state and determine the version
 
-Run these checks first:
+Run:
 
 ```bash
 git status
 git log --oneline -10
-git tag --sort=-v:refname | head -10
-```
-
-If there are unrelated modified or untracked files, leave them unstaged and call them out briefly. Continue with only the files that belong to the requested release.
-
-### 2. Review intended changes
-
-Run `git diff -- <paths>` for the files you intend to release. If the user did not specify files, infer intended files from the current task context and recently edited files, then use explicit paths.
-
-If the diff includes secrets, `.env`, credentials, generated caches, build artifacts, or unrelated imports/uploads, stop and ask the user what to include.
-
-### 3. Validate before commit
-
-Run the cheapest relevant checks for the changed areas:
-
-- Frontend changes: `cd frontend && npx vue-tsc --noEmit`
-- Backend Python changes: at minimum parse changed Python files with `python -m py_compile <files>` or run relevant tests if available
-- If the user asks for a full release verification, run the repository's documented checks from `CLAUDE.md`
-
-If checks fail, fix the issue before committing. Do not tag a failing release.
-
-### 4. Stage only intended files
-
-Use explicit paths:
-
-```bash
-git add path/to/file1 path/to/file2
-```
-
-Avoid `git add .` or `git add -A` because this repository often has parallel work and generated import assets.
-
-### 5. Create the commit
-
-Inspect recent commit style and write a concise message in the repo's style, usually Chinese Conventional Commit style such as:
-
-- `feat: ...`
-- `fix: ...`
-- `chore: ...`
-
-Always pass the commit message via heredoc:
-
-```bash
-git commit -m "$(cat <<'EOF'
-feat: 简短说明本次发布内容
-
-- 关键变化 1
-- 关键变化 2
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
-EOF
-)"
-```
-
-If there is nothing staged, do not create an empty commit unless the user explicitly requests one.
-
-### 6. Determine the next version
-
-Inspect existing tags with:
-
-```bash
 git tag --sort=-v:refname | head -20
 ```
 
-Use strict semantic versioning tags in the format `vMAJOR.MINOR.PATCH`.
+Use strict `vMAJOR.MINOR.PATCH` tags:
 
-Version bump rules:
+- Patch for compatible fixes and small operational changes.
+- Minor for backward-compatible user-visible features or APIs.
+- Major for breaking contracts or migrations requiring manual intervention.
 
-- Patch (`vX.Y.Z+1`) for bug fixes, small UI tweaks, docs, scripts, or operational changes.
-- Minor (`vX.Y+1.0`) for new user-visible features, new API fields/endpoints, or backward-compatible functionality.
-- Major (`vX+1.0.0`) for breaking changes, data migrations requiring manual intervention, incompatible API changes, or behavior that could break existing clients.
+Stop if the target tag already exists; never replace it without explicit approval.
 
-When in doubt:
+### 2. Write the Chinese changelog
 
-- Prefer patch for fixes.
-- Prefer minor for new feature work.
-- Ask one targeted question only if the release type is genuinely ambiguous and materially changes the version.
+Review commits since the latest semantic-version tag and summarize user-visible changes under a new heading directly below `## Unreleased`:
 
-### 7. Create the tag
+```md
+## vX.Y.Z - YYYY-MM-DD
 
-Tag the commit you just created. Use an annotated tag:
-
-```bash
-git tag vX.Y.Z -m "$(cat <<'EOF'
-vX.Y.Z
-
-- 关键变化 1
-- 关键变化 2
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
-EOF
-)"
++ [新增] 新能力。
++ [调整] 行为或结构调整。
++ [优化] 体验或性能优化。
++ [修复] 问题修复。
 ```
 
-If the tag already exists, stop and inspect it. Do not overwrite or delete an existing tag unless the user explicitly approves.
+Allowed types are `新增`、`调整`、`优化`、`修复`、`安全` and `文档`. Keep `## Unreleased` for future work, avoid implementation trivia, and do not duplicate an existing version section.
 
-### 8. Push branch and tag
+### 3. Synchronize and validate
 
-After commit and tag succeed:
+Run:
 
 ```bash
-git push origin <current-branch> --tags
+python3 scripts/version.py set vX.Y.Z
+python3 scripts/version.py check vX.Y.Z
+python3 scripts/version.py notes vX.Y.Z
 ```
 
-Do not force push. If push is rejected, report the rejection and inspect `git status` / branch divergence before doing anything else.
+Review the notes output because it is exactly what the tag workflow will publish to GitHub Release.
 
-### 9. Final response
+Run the relevant gates before release:
 
-Report:
+```bash
+cd frontend && npm run build
+cd ../backend && uv run pytest -q
+cd .. && git diff --check
+```
 
-- Commit hash
-- Tag name
-- Remote push result
-- Any unrelated local files intentionally left out
+Use narrower tests only when the user explicitly requests a partial validation; never tag known failing code.
 
-Keep it short.
+### 4. Commit only authorized files
 
-## Common Local Noise In This Repo
+Review the diff and stage explicit paths. The normal version release set includes `VERSION`, `CHANGELOG.md`, frontend/backend manifests and lockfiles, plus actual feature files intended for this release. Never use `git add .` or `git add -A` in a dirty worktree.
 
-Do not include these unless explicitly requested:
+Create a new Conventional Commit in the repository's Chinese style. Do not amend unless explicitly requested.
 
-- `scripts/__pycache__/`
-- `inspirations/`
-- `README_zh.md`
-- inspiration upload/download scripts from a parallel import session
-- `.claude/settings.local.json`
-- `.claude/worktrees/`
+### 5. Create an annotated tag
 
-The project release skill itself is the exception: `.claude/skills/release/SKILL.md` is intended to be tracked.
+After the release commit succeeds:
+
+```bash
+git tag -a vX.Y.Z -m "vX.Y.Z"
+```
+
+Confirm the tag points to the intended commit and that `python3 scripts/version.py check vX.Y.Z` still passes.
+
+### 6. Push only with authorization
+
+When the user explicitly asks to publish or push:
+
+```bash
+git push origin <current-branch>
+git push origin vX.Y.Z
+```
+
+Do not force push. The tag workflow validates the repository and creates the GitHub Release from `CHANGELOG.md`. If the workflow fails, diagnose it instead of recreating or moving the tag.
+
+## Final Report
+
+Report the version, commit hash, tag, validation results, push result, and any unrelated local files intentionally excluded.
