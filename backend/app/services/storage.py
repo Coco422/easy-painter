@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 from minio import Minio
+from minio.commonconfig import CopySource
 from minio.error import S3Error
 
 from app.core.config import get_settings
@@ -78,6 +79,50 @@ class MinioStorageService:
             )
         except S3Error as exc:
             raise StorageError("Failed to store reference image.") from exc
+        return object_key
+
+    def upload_staging_reference_image(
+        self,
+        *,
+        image_id: str,
+        image_bytes: bytes,
+        content_type: str,
+    ) -> str:
+        timestamp = datetime.now(timezone.utc)
+        extension = self._guess_extension(content_type)
+        object_key = f"references/{timestamp:%Y/%m/%d}/staging/{image_id}.{extension}"
+        stream = BytesIO(image_bytes)
+        try:
+            self.client.put_object(
+                self.reference_bucket,
+                object_key,
+                data=stream,
+                length=len(image_bytes),
+                content_type=content_type,
+            )
+        except S3Error as exc:
+            raise StorageError("Failed to store reference image.") from exc
+        return object_key
+
+    def copy_reference_image_to_job(
+        self,
+        src_key: str,
+        *,
+        job_id: str,
+        filename: str,
+        content_type: str,
+    ) -> str:
+        timestamp = datetime.now(timezone.utc)
+        extension = self._guess_extension(content_type)
+        object_key = f"references/{timestamp:%Y/%m/%d}/{job_id}/{self._safe_stem(filename)}.{extension}"
+        try:
+            self.client.copy_object(
+                self.reference_bucket,
+                object_key,
+                CopySource(self.reference_bucket, src_key),
+            )
+        except S3Error as exc:
+            raise StorageError("Failed to copy reference image.") from exc
         return object_key
 
     def upload_inspiration_image(self, image_id: str, image_bytes: bytes, content_type: str) -> StoredImage:

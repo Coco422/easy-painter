@@ -15,7 +15,7 @@ const routes = [
     },
   },
   { path: '/gallery/:username', component: () => import('@/pages/PublicGalleryPage.vue') },
-  { path: '/admin', component: () => import('@/pages/AdminPage.vue') },
+  { path: '/admin', component: () => import('@/pages/admin/AdminPage.vue') },
 ]
 
 export default createRouter({

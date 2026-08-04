@@ -18,6 +18,7 @@ from app.db.session import get_db
 from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.reference_image import ReferenceImage
 from app.models.user import User
 from app.schemas.job import (
     CreateJobRequest,
@@ -99,7 +100,20 @@ async def create_job(
     model_config = enabled_models.get(payload.model)
     if not model_config:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前模型不可用。")
-    if parsed_payload.reference_image and not model_config.get("supports_reference_image", True):
+    staged_reference_image = None
+    if payload.reference_image_id:
+        staged_reference_image = db.scalar(
+            select(ReferenceImage).where(
+                ReferenceImage.id == payload.reference_image_id,
+                ReferenceImage.user_id == current_user.id,
+            )
+        )
+        if not staged_reference_image:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="参考图不存在或已删除。",
+            )
+    if (parsed_payload.reference_image or staged_reference_image) and not model_config.get("supports_reference_image", True):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="当前模型不支持参考图，请切换到支持参考图的模型。",
@@ -175,6 +189,25 @@ async def create_job(
             job.reference_image_key = object_key
             job.reference_image_content_type = parsed_payload.reference_image.content_type
             job.reference_image_filename = parsed_payload.reference_image.filename
+        elif staged_reference_image:
+            try:
+                object_key = MinioStorageService().copy_reference_image_to_job(
+                    staged_reference_image.object_key,
+                    job_id=job.id,
+                    filename=staged_reference_image.filename,
+                    content_type=staged_reference_image.content_type,
+                )
+            except StorageError:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="参考图保存失败，请稍后重试。",
+                ) from None
+            job.reference_image_key = object_key
+            job.reference_image_content_type = staged_reference_image.content_type
+            job.reference_image_filename = staged_reference_image.filename
+            staged_reference_image.used_count = (staged_reference_image.used_count or 0) + 1
+            staged_reference_image.last_used_at = utcnow()
         db.commit()
         db.refresh(job)
     except HTTPException:

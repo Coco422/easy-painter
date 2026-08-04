@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import CurrentJobCard from '@/components/CurrentJobCard.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
+import { useReferenceImages } from '@/composables/useReferenceImages'
 import {
   ApiError,
   createJob,
@@ -32,7 +33,7 @@ const prompt = ref('')
 const selectedModel = ref('')
 const selectedSize = ref<ImageSize>('auto')
 const selectedBatchCount = ref<BatchCount>(1)
-const selectedReferenceImage = ref<File | null>(null)
+const { selected: selectedReferenceImage } = useReferenceImages()
 const activeJobs = ref<JobDetailResponse[]>([])
 const loading = ref(true)
 const submitting = ref(false)
@@ -222,14 +223,14 @@ async function submitJobs(options: {
   model: string
   size: ImageSize
   batchCount: BatchCount
-  referenceImage: File | null
+  referenceImageId: string | null
 }) {
   const submissions = Array.from({ length: options.batchCount }, () =>
     createJob({
       prompt: options.promptText,
       model: options.model,
       size: options.size,
-      reference_image: options.referenceImage,
+      reference_image_id: options.referenceImageId,
     }),
   )
   const results = await Promise.allSettled(submissions)
@@ -270,7 +271,7 @@ async function submitPrompt() {
       model: selectedModel.value,
       size: selectedSize.value,
       batchCount: selectedBatchCount.value,
-      referenceImage: selectedReferenceImage.value,
+      referenceImageId: selectedReferenceImage.value?.id ?? null,
     })
   } catch (error) {
     if (error instanceof ApiError && error.status === 402) {
@@ -297,7 +298,7 @@ async function retryJob(job: JobDetailResponse) {
       model: job.model,
       size: job.size as ImageSize,
       batchCount: 1,
-      referenceImage: selectedReferenceImage.value,
+      referenceImageId: selectedReferenceImage.value?.id ?? null,
     })
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '提交失败，请稍后重试。'
@@ -351,7 +352,6 @@ onMounted(() => {
       :selected-model="selectedModel"
       :selected-size="selectedSize"
       :selected-batch-count="selectedBatchCount"
-      :reference-image="selectedReferenceImage"
       :models="availableModels"
       :max-length="meta?.prompt_max_length ?? 4000"
       :submitting="submitting"
@@ -359,7 +359,6 @@ onMounted(() => {
       @update:model="selectedModel = $event"
       @update:size="selectedSize = $event"
       @update:batch-count="selectedBatchCount = $event"
-      @update:reference-image="selectedReferenceImage = $event"
       @submit="submitPrompt"
     />
   </section>

@@ -21,7 +21,16 @@ export interface CreateJobRequest {
   prompt: string
   model: string
   size: ImageSize
-  reference_image?: File | null
+  reference_image_id?: string | null
+}
+
+export interface ReferenceImageItem {
+  id: string
+  filename: string
+  content_type: string
+  used_count: number
+  created_at: string
+  last_used_at: string | null
 }
 
 export interface CreateJobResponse {

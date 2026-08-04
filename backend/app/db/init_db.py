@@ -10,6 +10,7 @@ from app.models.generation_job import GenerationJob
 from app.models.inspiration import Inspiration
 from app.models.model_config import ModelConfig
 from app.models.redemption_code import RedemptionCode
+from app.models.reference_image import ReferenceImage
 from app.models.upstream_provider import UpstreamProvider
 from app.models.user import User
 
@@ -19,6 +20,7 @@ def init_db() -> None:
     _ = GalleryLike
     _ = GenerationJob
     _ = RedemptionCode
+    _ = ReferenceImage
     _ = User
     _ = UpstreamProvider
     _ = ModelConfig

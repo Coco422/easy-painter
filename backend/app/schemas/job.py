@@ -41,6 +41,7 @@ class CreateJobRequest(BaseModel):
     model: str = Field(min_length=1, max_length=128)
     size: str = "auto"
     aspect_ratio: ImageAspectRatio | None = None
+    reference_image_id: str | None = None
 
     @model_validator(mode="before")
     @classmethod

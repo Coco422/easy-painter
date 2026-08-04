@@ -108,6 +108,10 @@ docker buildx build --platform linux/amd64 -f deploy/nginx/Dockerfile -t your-re
 
 - `GET /api/v1/meta/public`
 - `POST /api/v1/jobs`
+- `POST /api/v1/reference-images`（登录后预上传参考图）
+- `GET /api/v1/reference-images`（登录后读取参考图历史）
+- `GET /api/v1/reference-images/{id}/file`（登录后读取私有参考图）
+- `DELETE /api/v1/reference-images/{id}`（登录后删除参考图）
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/gallery`
 - `GET /api/v1/healthz`

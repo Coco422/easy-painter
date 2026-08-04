@@ -12,6 +12,7 @@ import type {
   ModelConfig,
   PublicMetaResponse,
   RedemptionCodeItem,
+  ReferenceImageItem,
   UpstreamProvider,
   UserInfo,
 } from './types'
@@ -78,26 +79,48 @@ export function fetchPublicMeta() {
 }
 
 export function createJob(payload: CreateJobRequest) {
-  if (payload.reference_image) {
-    const formData = new FormData()
-    formData.append('prompt', payload.prompt)
-    formData.append('model', payload.model)
-    formData.append('size', payload.size)
-    formData.append('reference_image', payload.reference_image)
-    return apiRequest<CreateJobResponse>('/api/v1/jobs', {
-      method: 'POST',
-      body: formData,
-    })
+  const body: Record<string, unknown> = {
+    prompt: payload.prompt,
+    model: payload.model,
+    size: payload.size,
   }
-
+  if (payload.reference_image_id) {
+    body.reference_image_id = payload.reference_image_id
+  }
   return apiRequest<CreateJobResponse>('/api/v1/jobs', {
     method: 'POST',
-    body: JSON.stringify({
-      prompt: payload.prompt,
-      model: payload.model,
-      size: payload.size,
-    }),
+    body: JSON.stringify(body),
   })
+}
+
+// ---- Reference Image APIs ----
+
+export function uploadReferenceImage(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiRequest<ReferenceImageItem>('/api/v1/reference-images', {
+    method: 'POST',
+    body: formData,
+  })
+}
+
+export function fetchReferenceImages() {
+  return apiRequest<ReferenceImageItem[]>('/api/v1/reference-images')
+}
+
+export function deleteReferenceImage(id: string) {
+  return apiRequest<void>(`/api/v1/reference-images/${id}`, { method: 'DELETE' })
+}
+
+export async function fetchReferenceImageObjectUrl(id: string): Promise<string> {
+  const response = await fetch(`/api/v1/reference-images/${id}/file`, {
+    headers: getAuthHeader(),
+  })
+  if (!response.ok) {
+    throw new ApiError('参考图加载失败，请稍后重试。', response.status)
+  }
+  const blob = await response.blob()
+  return URL.createObjectURL(blob)
 }
 
 export function fetchJob(jobId: string) {
