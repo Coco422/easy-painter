@@ -31,13 +31,13 @@
 
 ```bash
 # 同步 VERSION、前后端 manifest 和 lockfile
-python3 scripts/version.py set v0.12.0
+python3 scripts/version.py set vX.Y.Z
 
 # 检查版本文件、changelog 和 manifest 是否一致
-python3 scripts/version.py check v0.12.0
+python3 scripts/version.py check vX.Y.Z
 
 # 预览该版本将写入 GitHub Release 的说明
-python3 scripts/version.py notes v0.12.0
+python3 scripts/version.py notes vX.Y.Z
 ```
 
 前端构建时会把当前版本和 changelog 编译进静态资源。所有访客都可以从 Header 打开版本中心；弹窗打开后只读查询官方仓库最新正式 GitHub Release，发现新版时提供 Release 链接，但不会自动下载或升级。正式发布时推送 `vX.Y.Z` tag，GitHub Actions 会先执行一致性检查，再用对应 changelog 章节创建 Release。
@@ -50,7 +50,7 @@ python3 scripts/version.py notes v0.12.0
 cp .env.example .env
 ```
 
-把 `.env` 中的 `UPSTREAM_BASE_URL` 和 `UPSTREAM_API_KEY` 替换成你的私有上游配置，不要把真实值写进前端或提交到仓库。
+将 `.env` 中的 `UPSTREAM_BASE_URL` 和 `UPSTREAM_API_KEY` 配置为实际使用的私有上游地址与密钥，不要把真实值写进前端或提交到仓库。
 模型下拉列表、参考图能力和尺寸限制由 `PUBLIC_MODELS_JSON` 控制；如果生产环境要开放新模型，需要同步更新服务器上的 `.env`。
 部分绘图模型生成时间可能达到 30 到 600 秒，生产环境的 `UPSTREAM_TIMEOUT_SECONDS` 应保持在 700 左右。
 提示词输入不在前端截断，后端通过 `PROMPT_MAX_LENGTH` 做硬限制，默认 4000 字符。
@@ -102,7 +102,7 @@ node --version
 docker --version
 ```
 
-需要本机具备：
+本地开发环境需要具备：
 
 - Python 3.12
 - `uv`
@@ -148,7 +148,7 @@ make frontend
 
 - 前端会把 `/api` 转发到 `http://127.0.0.1:8000`
 - `/media` 仍然走 `http://127.0.0.1:8080`
-- `make backend` 会自动把数据库、Redis、MinIO 连接改成本机端口，配合 `make deps` 启动的容器使用
+- `make backend` 会自动把数据库、Redis、MinIO 连接改为宿主机端口，配合 `make deps` 启动的容器使用
 
 ## 本地镜像部署
 
@@ -165,7 +165,7 @@ make deploy
 
 ## 服务器部署（GHCR）
 
-`main` 分支更新前后端、迁移或 Nginx 文件时，GitHub Actions 会构建三个 `linux/amd64` 镜像并推送到 GHCR：
+`main` 分支更新相关文件或推送 `vX.Y.Z` 正式版本标签时，GitHub Actions 会构建三个 `linux/amd64` 镜像并推送到 GHCR：
 
 - `ghcr.io/coco422/easy-painter-backend`
 - `ghcr.io/coco422/easy-painter-nginx`
@@ -183,7 +183,12 @@ make deploy
 mkdir -p ~/easy-painter
 cd ~/easy-painter
 curl -fsSLo compose.yml https://raw.githubusercontent.com/Coco422/easy-painter/main/deploy/compose.yml
-cp /path/to/existing/.env .env
+curl -fsSLo .env https://raw.githubusercontent.com/Coco422/easy-painter/main/.env.example
+```
+
+启动前必须编辑 `.env`，替换示例凭证、上游配置和管理员密钥；不要直接使用模板中的默认值部署到公网。配置完成后启动服务：
+
+```bash
 docker compose -f compose.yml pull
 docker compose -f compose.yml up -d --remove-orphans
 ```
@@ -196,7 +201,11 @@ docker compose -f compose.yml pull
 docker compose -f compose.yml up -d --remove-orphans
 ```
 
-默认拉取 `main` 标签。生产部署也可以用不可变提交标签，便于精确回滚：
+`IMAGE_TAG` 默认使用 `main`，适合跟踪最新构建。生产部署建议固定为已经发布的 `vX.Y.Z` 正式版本标签；需要精确定位构建或回滚时，可以使用不可变的提交 SHA 标签：
+
+```dotenv
+IMAGE_TAG=vX.Y.Z
+```
 
 ```bash
 IMAGE_TAG=sha-<完整提交 SHA> docker compose -f compose.yml pull
@@ -205,11 +214,11 @@ IMAGE_TAG=sha-<完整提交 SHA> docker compose -f compose.yml up -d --remove-or
 
 GHCR 包必须允许服务器拉取：公开包可匿名拉取；私有包需先执行 `docker login ghcr.io`。只有在新镜像成功启动并通过健康检查后，才能删除服务器上的源码，且不得删除 `.env`、`compose.yml` 和 `data/`。
 
-## M2 开发机与 amd64 镜像
+## Apple Silicon 与 amd64 镜像
 
-这个项目的 Dockerfile 和依赖都兼容多架构，不需要在 `docker-compose.yml` 里强行写死 `platform`。
+项目的 Dockerfile 和依赖兼容多架构，通常不需要在 `docker-compose.yml` 中写死 `platform`。
 
-- 如果你在 M2 本机先构建镜像再推送到 amd64 服务器：请使用 `docker buildx` 指定 `linux/amd64`。
+- 使用 Apple M 系列芯片构建并将镜像部署到 amd64 环境时，需要通过 `docker buildx` 指定 `--platform linux/amd64` 进行交叉构建。
 
 示例：
 
