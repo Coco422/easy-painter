@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Easy Painter is a text-to-image generation app with user authentication. Users submit prompts via the frontend; the backend enqueues a Celery task that calls a private upstream image API, stores the result in MinIO, and the frontend polls for completion.
+Easy Painter is a text-to-image generation app with user authentication. Users submit prompts via the frontend; the backend atomically creates the job, billing reservation, credit transaction, and transactional outbox event. A dispatcher publishes the Celery task, the worker calls a private upstream image API and stores the result in MinIO, and the frontend polls for completion.
 
 ## Tech Stack
 
@@ -12,7 +12,7 @@ Easy Painter is a text-to-image generation app with user authentication. Users s
 - **Backend**: FastAPI + SQLAlchemy + Celery + Redis + PostgreSQL + MinIO
 - **Auth**: JWT (bcrypt password hashing, PyJWT tokens)
 - **Python tooling**: `uv` (dependency management), `pytest` (testing)
-- **Infra**: Docker Compose (nginx, api, worker, redis, postgres, minio, minio-init)
+- **Infra**: Docker Compose (Flyway migrate, nginx, api, dispatcher, worker, redis, postgres, minio, minio-init)
 
 ## Common Commands
 
@@ -50,11 +50,12 @@ python3 scripts/version.py notes vX.Y.Z
 
 ### Request Flow
 
-1. Frontend submits `POST /api/v1/jobs` with prompt + model + optional reference image (+ JWT if logged in)
-2. API validates, saves `GenerationJob` to PostgreSQL (with `user_id` if authenticated), enqueues `generate_image_task` via Celery
-3. Celery worker calls upstream image API (configured via `UPSTREAM_BASE_URL` / `UPSTREAM_API_KEY` in `.env`)
-4. Result image is uploaded to MinIO; job status updated in DB
-5. Frontend polls `GET /api/v1/jobs/{job_id}` until status is `succeeded` or `failed`
+1. Frontend submits `POST /api/v1/jobs` with prompt, model, optional staged reference image, JWT, and a stable `Idempotency-Key`
+2. API atomically creates `GenerationJob`, `JobCharge`, the negative credit transaction, and an `OutboxEvent`; the balance update is conditional and cannot go below zero
+3. The dispatcher publishes due outbox events to Celery and maintains the heartbeat used by readiness checks
+4. A worker conditionally claims the queued job, calls the configured upstream, and uploads a successful result to MinIO
+5. Success settles the reserved charge; final failure or watchdog timeout uses the same idempotent path to mark the job failed and refund it in full
+6. Frontend polls `GET /api/v1/jobs/{job_id}` until a final state and refreshes balance and billing status
 
 ### Auth System
 
@@ -88,20 +89,26 @@ python3 scripts/version.py notes vX.Y.Z
 
 ### Backend Structure (`backend/app/`)
 
-- `api/routes.py` — Job endpoints (meta, jobs CRUD, gallery, healthz)
+- `api/routes.py` — Job endpoints (meta, idempotent creation, jobs CRUD, gallery, liveness/readiness)
 - `api/auth_routes.py` — Login, registration, email-code, password-reset, and admin verify endpoints
 - `api/user_routes.py` — User profile, email binding, redemption, and credit history
 - `api/announcement_routes.py` — Audience-filtered announcement reads and admin CRUD
-- `api/admin_routes.py` — Admin endpoints (list/delete jobs, list/create users)
+- `api/admin_routes.py` — Admin overview/health, task inspection, users, billing, models, and upstream management
 - `core/auth.py` — JWT encode/decode, password hashing, FastAPI auth dependencies
 - `core/config.py` — Pydantic `Settings` class, reads `.env`
 - `models/generation_job.py` — SQLAlchemy model with status enum and `user_id` FK
+- `models/job_charge.py` — Per-job reserved/settled/refunded billing state and price snapshot
+- `models/outbox_event.py` — Transactional task-dispatch events and retry state
 - `models/user.py` — User model (username, password_hash, display_name, is_public)
-- `services/tasks.py` — Celery task definition and result handling
+- `services/billing.py` — Atomic balance changes, immutable credit ledger, settlement, refund, and reconciliation
+- `services/dispatcher.py` — Outbox publishing, heartbeat, watchdog, and periodic reconciliation loop
+- `services/job_lifecycle.py` — Idempotent job claim, success settlement, and failure/refund transitions
+- `services/health.py` — Public readiness and detailed admin dependency health
+- `services/tasks.py` — Idempotent Celery worker execution and result handling
 - `services/upstream.py` — HTTP client to upstream image API
 - `services/storage.py` — MinIO upload/download/delete
 - `services/rate_limit.py` — Redis-based rate limiting
-- `db/init_db.py` — Table creation, column migrations, default user creation
+- `db/init_db.py` — Default user, upstream, and model seed data only; schema changes live in `backend/db/migration/`
 
 ### Frontend Structure (`frontend/src/`)
 
@@ -112,7 +119,7 @@ python3 scripts/version.py notes vX.Y.Z
 - `components/AnnouncementBanner.vue` — Audience-filtered system banners
 - `components/VersionReleaseDialog.vue` — Build version, changelog timeline, and read-only GitHub Release check
 - `pages/PublicGalleryPage.vue` — Per-user public gallery view
-- `pages/AdminPage.vue` — Admin dashboard (secret key auth, job/user management)
+- `pages/admin/AdminPage.vue` — Naive UI admin shell with lazy-loaded overview, upstream, model, user, job, billing, and announcement sections
 - `components/AppHeader.vue` — Header with auth-aware navigation
 - `lib/auth.ts` — Reactive auth state, login/logout/admin-verify functions
 - `lib/api.ts` — API client with auto-injected auth headers
@@ -128,3 +135,4 @@ python3 scripts/version.py notes vX.Y.Z
 - Admin uses a separate JWT (not a user account) — verified via `ADMIN_SECRET_KEY` env var
 - No frontend state management library — auth state is a simple Vue `reactive()` object in `lib/auth.ts`
 - Frontend and backend must be released together; the version center only reports updates and does not perform partial upgrades
+- Database schema is managed only by forward-only Flyway SQL migrations; API startup must not run `create_all` or ad-hoc `ALTER TABLE`
