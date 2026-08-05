@@ -40,6 +40,9 @@ export interface CreateJobResponse {
   status: JobStatus
   poll_url: string
   rate_limit_remaining: number
+  credit_cost: number
+  balance_after: number
+  billing_status: string
 }
 
 export interface JobDetailResponse {
@@ -49,9 +52,14 @@ export interface JobDetailResponse {
   prompt: string
   revised_prompt: string | null
   model: string
+  model_label: string | null
+  provider_name: string | null
   size: string
   aspect_ratio?: ImageAspectRatio | null
   error_message: string | null
+  credit_cost: number
+  billing_status: string
+  refunded_at: string | null
   created_at: string
   finished_at: string | null
 }
@@ -110,6 +118,12 @@ export interface UserInfo {
 }
 
 export interface CreditTransactionItem {
+  id: string
+  transaction_type: string
+  job_id: string | null
+  model_label: string | null
+  billing_status: string | null
+  related_transaction_id: string | null
   amount: number
   balance_after: number
   reason: string
@@ -165,9 +179,51 @@ export interface AdminJobItem {
   provider_job_meta: Record<string, unknown> | null
   image_url: string | null
   reference_image_filename: string | null
+  model_label: string | null
+  provider_name: string | null
+  credit_cost: number
+  billing_status: string
+  refunded_at: string | null
+  execution_claimed: boolean
+  lease_expires_at: string | null
+  outbox_status: string | null
+  outbox_attempts: number
+  outbox_published_at: string | null
+  outbox_last_error: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
+}
+
+export interface AdminMetricItem {
+  label: string
+  total: number
+  succeeded: number
+  failed: number
+  credits: number
+}
+
+export interface AdminOverview {
+  window: '24h' | '7d' | '30d'
+  total_jobs: number
+  succeeded_jobs: number
+  failed_jobs: number
+  queued_jobs: number
+  processing_jobs: number
+  success_rate: number
+  p50_seconds: number | null
+  p95_seconds: number | null
+  refunded_credits: number
+  refund_count: number
+  active_users: number
+  top_errors: Array<{ message: string; count: number }>
+  models: AdminMetricItem[]
+  providers: AdminMetricItem[]
+}
+
+export interface AdminHealth {
+  status: string
+  components: Record<string, { status: string; [key: string]: unknown }>
 }
 
 export interface UpstreamProvider {

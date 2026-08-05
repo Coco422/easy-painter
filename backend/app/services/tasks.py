@@ -2,24 +2,30 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from celery import Celery
-from celery.signals import worker_ready
 from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.models.generation_job import GenerationJob, JobStatus
-from app.services.model_service import load_provider_for_model
+from app.services.job_lifecycle import (
+    claim_generation_job,
+    mark_generation_failed,
+    mark_generation_succeeded,
+    update_retry_message,
+)
+from app.services.model_service import load_provider_by_id, load_provider_for_model
 from app.services.storage import MinioStorageService, StorageError
-from app.services.upstream import GeneratedImageResult, ReferenceImageForUpstream, UpstreamImageClient, UpstreamServiceError
+from app.services.upstream import ReferenceImageForUpstream, UpstreamImageClient, UpstreamServiceError
 
 
 configure_logging()
 settings = get_settings()
 logger = logging.getLogger(__name__)
-INTERRUPTED_JOB_MESSAGE = "服务重启后生成任务已中断，请重新生成。"
+INTERRUPTED_JOB_MESSAGE = "服务中断导致生成任务未完成，灵感丝线已自动退回。"
 LIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.PROCESSING)
 
 celery_app = Celery(
@@ -33,6 +39,8 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     timezone="UTC",
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
 )
 
 
@@ -43,25 +51,34 @@ def utcnow() -> datetime:
 @celery_app.task(name="app.generate_image_task", bind=True, max_retries=2)
 def generate_image_task(self, job_id: str) -> None:
     db = SessionLocal()
+    execution_token = str(self.request.id or uuid4())
+    storage: MinioStorageService | None = None
+    stored_object_key: str | None = None
     try:
-        job = db.get(GenerationJob, job_id)
+        job = claim_generation_job(
+            db,
+            job_id=job_id,
+            execution_token=execution_token,
+            is_retry=self.request.retries > 0,
+            lease_seconds=settings.generation_job_stale_seconds,
+        )
         if not job:
-            logger.warning("Generation job missing.")
+            logger.info("Generation job %s was already claimed or settled.", job_id)
             return
-
-        if job.status not in LIVE_JOB_STATUSES:
-            logger.info("Generation job %s already settled status=%s.", job.id, job.status.value)
-            return
-
-        job.status = JobStatus.PROCESSING
-        job.started_at = job.started_at or utcnow()
-        job.error_message = None
-        db.commit()
 
         try:
-            provider_config = load_provider_for_model(db, job.model)
+            provider_config = (
+                load_provider_by_id(db, job.provider_id_snapshot)
+                if job.provider_id_snapshot
+                else load_provider_for_model(db, job.model)
+            )
             if not provider_config:
-                _mark_failed(db=db, job=job, message="模型配置不存在，请联系管理员。")
+                mark_generation_failed(
+                    db,
+                    job_id=job.id,
+                    execution_token=execution_token,
+                    message="模型配置不存在，请联系管理员。",
+                )
                 return
 
             storage = MinioStorageService()
@@ -89,18 +106,43 @@ def generate_image_task(self, job_id: str) -> None:
                 image_bytes=result.image_bytes,
                 content_type=result.content_type,
             )
-            _mark_succeeded(db=db, job=job, result=result, object_key=stored.object_key, public_url=stored.public_url)
+            stored_object_key = stored.object_key
+            if not mark_generation_succeeded(
+                db,
+                job_id=job.id,
+                execution_token=execution_token,
+                result=result,
+                object_key=stored.object_key,
+                public_url=stored.public_url,
+            ):
+                storage.delete_object(stored.object_key)
+                stored_object_key = None
+                logger.warning("Discarded late result for already settled job %s.", job.id)
+                return
+            stored_object_key = None
+            logger.info("Generation job %s succeeded object_key=%s.", job.id, stored.object_key)
         except UpstreamServiceError as exc:
-            logger.warning("Upstream generation error for job %s retryable=%s: %s", job.id, exc.retryable, exc.user_message)
+            logger.warning(
+                "Upstream generation error for job %s retryable=%s: %s",
+                job.id,
+                exc.retryable,
+                exc.user_message,
+            )
             if exc.retryable and _can_retry(self):
                 retry_number = self.request.retries + 1
                 retry_total = self.max_retries or retry_number
-                job.error_message = f"{exc.user_message}正在自动重试（{retry_number}/{retry_total}）。"
-                db.commit()
+                update_retry_message(
+                    db,
+                    job_id=job.id,
+                    execution_token=execution_token,
+                    message=f"{exc.user_message}正在自动重试（{retry_number}/{retry_total}）。",
+                    lease_seconds=settings.generation_job_stale_seconds,
+                )
                 raise self.retry(exc=exc, countdown=15 * retry_number)
-            _mark_failed(
-                db=db,
-                job=job,
+            mark_generation_failed(
+                db,
+                job_id=job.id,
+                execution_token=execution_token,
                 message="生成服务暂时不可用，请稍后重试。" if exc.retryable else exc.user_message,
             )
         except StorageError:
@@ -108,42 +150,37 @@ def generate_image_task(self, job_id: str) -> None:
             if _can_retry(self):
                 retry_number = self.request.retries + 1
                 retry_total = self.max_retries or retry_number
-                job.error_message = f"图片保存失败，正在自动重试（{retry_number}/{retry_total}）。"
-                db.commit()
+                update_retry_message(
+                    db,
+                    job_id=job.id,
+                    execution_token=execution_token,
+                    message=f"图片保存失败，正在自动重试（{retry_number}/{retry_total}）。",
+                    lease_seconds=settings.generation_job_stale_seconds,
+                )
                 raise self.retry(countdown=15 * retry_number)
-            _mark_failed(db=db, job=job, message="图片保存失败，请稍后重试。")
+            mark_generation_failed(
+                db,
+                job_id=job.id,
+                execution_token=execution_token,
+                message="图片保存失败，请稍后重试。",
+            )
         except Exception:
             logger.exception("Unexpected generation task failure for job %s.", job.id)
-            _mark_failed(db=db, job=job, message="生成任务执行失败，请稍后重试。")
+            db.rollback()
+            if storage and stored_object_key:
+                try:
+                    storage.delete_object(stored_object_key)
+                except Exception:
+                    logger.exception("Failed to clean generated object %s after task failure.", stored_object_key)
+                stored_object_key = None
+            mark_generation_failed(
+                db,
+                job_id=job.id,
+                execution_token=execution_token,
+                message="生成任务执行失败，请稍后重试。",
+            )
     finally:
         db.close()
-
-
-def _mark_succeeded(
-    *,
-    db,
-    job: GenerationJob,
-    result: GeneratedImageResult,
-    object_key: str,
-    public_url: str,
-) -> None:
-    job.status = JobStatus.SUCCEEDED
-    job.revised_prompt = result.revised_prompt
-    job.object_key = object_key
-    job.public_url = public_url
-    job.provider_job_meta = result.provider_meta
-    job.finished_at = utcnow()
-    job.error_message = None
-    db.commit()
-    logger.info("Generation job %s succeeded object_key=%s.", job.id, object_key)
-
-
-def _mark_failed(*, db, job: GenerationJob, message: str) -> None:
-    job.status = JobStatus.FAILED
-    job.error_message = message
-    job.finished_at = utcnow()
-    db.commit()
-    logger.info("Generation job %s failed message=%s.", job.id, message)
 
 
 def mark_interrupted_generation_jobs_failed(
@@ -152,29 +189,30 @@ def mark_interrupted_generation_jobs_failed(
     now: datetime | None = None,
 ) -> int:
     db = session_factory()
-    failed_at = now or utcnow()
     try:
-        jobs = db.scalars(select(GenerationJob).where(GenerationJob.status.in_(LIVE_JOB_STATUSES))).all()
-        for job in jobs:
-            job.status = JobStatus.FAILED
-            job.error_message = INTERRUPTED_JOB_MESSAGE
-            job.finished_at = failed_at
-        if jobs:
-            db.commit()
-        return len(jobs)
+        job_ids = [
+            job.id
+            for job in db.scalars(
+                select(GenerationJob).where(GenerationJob.status.in_(LIVE_JOB_STATUSES))
+            ).all()
+        ]
     finally:
         db.close()
 
-
-@worker_ready.connect
-def _mark_interrupted_jobs_on_worker_ready(**_: object) -> None:
-    try:
-        failed_count = mark_interrupted_generation_jobs_failed()
-    except Exception:
-        logger.exception("Failed to mark interrupted generation jobs.")
-        return
-    if failed_count:
-        logger.warning("Marked %s interrupted generation jobs as failed.", failed_count)
+    changed = 0
+    for job_id in job_ids:
+        db = session_factory()
+        try:
+            if mark_generation_failed(
+                db,
+                job_id=job_id,
+                message=INTERRUPTED_JOB_MESSAGE,
+                now=now,
+            ):
+                changed += 1
+        finally:
+            db.close()
+    return changed
 
 
 def _can_retry(task) -> bool:

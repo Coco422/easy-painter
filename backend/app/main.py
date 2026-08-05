@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api import admin_router, announcement_router, auth_router, inspiration_router, reference_router, router, user_router
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.init_db import init_db
 from app.db.session import get_db
+from app.services.health import collect_core_health
 from app.services.redis_client import get_redis
 
 
@@ -53,12 +53,13 @@ app.include_router(reference_router, prefix=settings.api_v1_prefix)
 
 @app.get("/api/healthz")
 def legacy_healthz(
+    response: Response,
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
-) -> dict[str, str]:
-    try:
-        db.execute(select(1))
-        redis_client.ping()
-    except Exception:
-        return {"status": "degraded"}
-    return {"status": "ok"}
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    components = collect_core_health(db=db, redis_client=redis_client, settings=settings)
+    if any(component.get("status") != "ok" for component in components.values()):
+        response.status_code = 503
+        return {"status": "degraded", "components": components}
+    return {"status": "ok", "components": components}

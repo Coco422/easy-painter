@@ -56,7 +56,11 @@ def load_provider_for_model(db: Session, model_id: str) -> ProviderConfig | None
     model = db.get(ModelConfig, model_id)
     if not model:
         return None
-    provider = db.get(UpstreamProvider, model.provider_id)
+    return load_provider_by_id(db, model.provider_id)
+
+
+def load_provider_by_id(db: Session, provider_id: str) -> ProviderConfig | None:
+    provider = db.get(UpstreamProvider, provider_id)
     if not provider:
         return None
     return ProviderConfig(

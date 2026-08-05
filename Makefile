@@ -2,14 +2,18 @@ SHELL := /bin/bash
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif docker-compose version >/dev/null 2>&1; then echo "docker-compose"; else echo "docker compose"; fi)
 DEV_COMPOSE := $(COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: deps backend frontend deploy
+.PHONY: deps migrate backend frontend deploy
+
+migrate:
+	@test -f .env || { echo "Missing .env. Run: cp .env.example .env"; exit 1; }
+	$(DEV_COMPOSE) run --rm migrate
 
 deps:
 	@test -f .env || { echo "Missing .env. Run: cp .env.example .env"; exit 1; }
 	@trap 'status=$$?; $(DEV_COMPOSE) down --remove-orphans >/dev/null 2>&1 || true; exit $$status' EXIT INT TERM; \
-	$(DEV_COMPOSE) up --remove-orphans postgres redis minio minio-init worker
+	$(DEV_COMPOSE) up --remove-orphans postgres redis minio minio-init migrate worker dispatcher
 
-backend:
+backend: migrate
 	@test -f .env || { echo "Missing .env. Run: cp .env.example .env"; exit 1; }
 	@cd backend && \
 	ln -sf ../.env .env && \

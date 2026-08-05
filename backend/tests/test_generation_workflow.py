@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
@@ -10,7 +11,9 @@ from app.core.config import Settings
 from app.db.base import Base
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.user import User
-from app.services import tasks
+from app.services import dispatcher, tasks
+from app.services.storage import StoredImage
+from app.services.upstream import GeneratedImageResult
 
 
 def make_session_factory():
@@ -30,8 +33,9 @@ def test_retryable_upstream_error_marks_job_failed_after_retries_are_exhausted(m
         prompt="画一朵花",
         model="gpt-image-2-c",
         size="1024x1024",
-        status=JobStatus.PROCESSING,
+        status=JobStatus.QUEUED,
         user_id="user-1",
+        provider_id_snapshot="provider-snapshot",
     )
     db.add(job)
     db.commit()
@@ -49,8 +53,18 @@ def test_retryable_upstream_error_marks_job_failed_after_retries_are_exhausted(m
         def generate_image(self, **kwargs):
             raise tasks.UpstreamServiceError("生成服务响应超时，请稍后再试。", retryable=True)
 
+    provider_calls = []
     monkeypatch.setattr(tasks, "SessionLocal", session_factory)
-    monkeypatch.setattr(tasks, "load_provider_for_model", lambda db, model: FakeProviderConfig())
+    monkeypatch.setattr(
+        tasks,
+        "load_provider_by_id",
+        lambda db, provider_id: provider_calls.append(provider_id) or FakeProviderConfig(),
+    )
+    monkeypatch.setattr(
+        tasks,
+        "load_provider_for_model",
+        lambda db, model: pytest.fail("snapshot jobs must not follow the model's current provider"),
+    )
     monkeypatch.setattr(tasks, "MinioStorageService", lambda: object())
     monkeypatch.setattr(tasks, "UpstreamImageClient", TimeoutClient)
 
@@ -65,6 +79,7 @@ def test_retryable_upstream_error_marks_job_failed_after_retries_are_exhausted(m
     assert saved_job.status == JobStatus.FAILED
     assert saved_job.error_message == "生成服务暂时不可用，请稍后重试。"
     assert saved_job.finished_at is not None
+    assert provider_calls == ["provider-snapshot"]
     db.close()
 
 
@@ -75,7 +90,7 @@ def test_retryable_upstream_error_records_retry_message_before_next_retry(monkey
         prompt="画一朵花",
         model="gpt-image-2-c",
         size="1024x1024",
-        status=JobStatus.PROCESSING,
+        status=JobStatus.QUEUED,
         user_id="user-1",
     )
     db.add(job)
@@ -114,7 +129,7 @@ def test_retryable_upstream_error_records_retry_message_before_next_retry(monkey
     db.close()
 
 
-def test_worker_startup_marks_interrupted_live_jobs_failed():
+def test_manual_interrupted_job_recovery_marks_live_jobs_failed():
     session_factory = make_session_factory()
     db = session_factory()
     queued_job = GenerationJob(
@@ -152,7 +167,7 @@ def test_worker_startup_marks_interrupted_live_jobs_failed():
     assert db.get(GenerationJob, queued_job.id).status == JobStatus.FAILED
     assert db.get(GenerationJob, processing_job.id).status == JobStatus.FAILED
     assert db.get(GenerationJob, succeeded_job.id).status == JobStatus.SUCCEEDED
-    assert db.get(GenerationJob, queued_job.id).error_message == "服务重启后生成任务已中断，请重新生成。"
+    assert db.get(GenerationJob, queued_job.id).error_message == tasks.INTERRUPTED_JOB_MESSAGE
     db.close()
 
 
@@ -185,6 +200,77 @@ def test_generation_task_ignores_terminal_jobs(monkeypatch):
     saved_job = db.get(GenerationJob, job_id)
     assert saved_job.status == JobStatus.FAILED
     assert saved_job.error_message == "服务重启后生成任务已中断，请重新生成。"
+    db.close()
+
+
+def test_generation_commit_failure_cleans_late_object_and_fails_job(monkeypatch):
+    session_factory = make_session_factory()
+    db = session_factory()
+    job = GenerationJob(
+        prompt="画一朵花",
+        model="gpt-image-2-c",
+        size="1024x1024",
+        status=JobStatus.QUEUED,
+        user_id="user-1",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    class FakeProviderConfig:
+        def as_dict(self):
+            return {"base_url": "https://test.example.com", "api_key": "test-key"}
+
+    class SuccessfulClient:
+        def __init__(self, provider_config):
+            self.provider_config = provider_config
+
+        def generate_image(self, **kwargs):
+            return GeneratedImageResult(
+                image_bytes=b"image",
+                content_type="image/png",
+                revised_prompt=None,
+                provider_meta={"source": "test"},
+            )
+
+    class FakeStorage:
+        deleted = []
+
+        def upload_generated_image(self, **kwargs):
+            return StoredImage(object_key="generated/job.png", public_url="/media/generated/job.png")
+
+        def delete_object(self, object_key):
+            self.deleted.append(object_key)
+
+    session_class = session_factory.class_
+    original_commit = session_class.commit
+    commit_calls = 0
+
+    def fail_success_commit(self):
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 2:
+            raise RuntimeError("database commit failed")
+        return original_commit(self)
+
+    monkeypatch.setattr(session_class, "commit", fail_success_commit)
+    monkeypatch.setattr(tasks, "SessionLocal", session_factory)
+    monkeypatch.setattr(tasks, "load_provider_for_model", lambda db, model: FakeProviderConfig())
+    monkeypatch.setattr(tasks, "MinioStorageService", FakeStorage)
+    monkeypatch.setattr(tasks, "UpstreamImageClient", SuccessfulClient)
+
+    tasks.generate_image_task.push_request(retries=0, id="test-task")
+    try:
+        tasks.generate_image_task.run(job_id)
+    finally:
+        tasks.generate_image_task.pop_request()
+
+    db = session_factory()
+    saved_job = db.get(GenerationJob, job_id)
+    assert saved_job.status == JobStatus.FAILED
+    assert saved_job.public_url is None
+    assert FakeStorage.deleted == ["generated/job.png"]
     db.close()
 
 
@@ -236,8 +322,6 @@ def test_list_active_jobs_returns_only_current_users_live_jobs():
     jobs = routes.list_active_jobs(
         db=db,
         current_user=user,
-        settings=Settings(),
-        now=base_time + timedelta(seconds=20),
     )
 
     assert [job.job_id for job in jobs] == [newer_job.id, older_job.id]
@@ -245,7 +329,7 @@ def test_list_active_jobs_returns_only_current_users_live_jobs():
     db.close()
 
 
-def test_list_active_jobs_marks_stale_live_jobs_failed():
+def test_watchdog_marks_stale_live_jobs_failed(monkeypatch):
     session_factory = make_session_factory()
     db = session_factory()
     user = User(id="user-1", username="ray", password_hash="hash")
@@ -271,22 +355,29 @@ def test_list_active_jobs_marks_stale_live_jobs_failed():
     db.add_all([user, stale_job, fresh_job])
     db.commit()
 
-    jobs = routes.list_active_jobs(
-        db=db,
-        current_user=user,
-        settings=Settings(generation_job_stale_seconds=60),
-        now=datetime(2026, 5, 7, 8, 31, 30, tzinfo=timezone.utc),
+    db.close()
+    monkeypatch.setattr(dispatcher, "SessionLocal", session_factory)
+    monkeypatch.setattr(
+        dispatcher,
+        "settings",
+        Settings(generation_job_stale_seconds=60, generation_queue_stale_seconds=60),
     )
 
-    assert [job.job_id for job in jobs] == [fresh_job.id]
+    changed = dispatcher.run_watchdog(
+        now=datetime(2026, 5, 7, 8, 31, 30, tzinfo=timezone.utc)
+    )
+
+    db = session_factory()
+    assert changed == 1
     saved_stale_job = db.get(GenerationJob, stale_job.id)
     assert saved_stale_job.status == JobStatus.FAILED
-    assert saved_stale_job.error_message == "生成任务长时间没有响应，可能已在服务重启或 worker 中断后丢失，请重新生成。"
-    assert saved_stale_job.finished_at == datetime(2026, 5, 7, 8, 31, 30, tzinfo=timezone.utc)
+    assert saved_stale_job.error_message == "生成任务长时间没有响应，灵感丝线已自动退回。"
+    assert saved_stale_job.finished_at.replace(tzinfo=timezone.utc) == datetime(2026, 5, 7, 8, 31, 30, tzinfo=timezone.utc)
+    assert db.get(GenerationJob, fresh_job.id).status == JobStatus.QUEUED
     db.close()
 
 
-def test_get_job_marks_stale_live_job_failed():
+def test_get_job_requires_ownership():
     session_factory = make_session_factory()
     db = session_factory()
     job = GenerationJob(
@@ -294,7 +385,7 @@ def test_get_job_marks_stale_live_job_failed():
         prompt="旧任务",
         model="gpt-image-2-c",
         size="1024x1024",
-        status=JobStatus.PROCESSING,
+        status=JobStatus.SUCCEEDED,
         user_id="user-1",
         created_at=datetime(2026, 5, 7, 8, 0, tzinfo=timezone.utc),
         started_at=datetime(2026, 5, 7, 8, 1, tzinfo=timezone.utc),
@@ -302,13 +393,14 @@ def test_get_job_marks_stale_live_job_failed():
     db.add(job)
     db.commit()
 
-    response = routes.get_job(
-        job_id=job.id,
-        db=db,
-        settings=Settings(generation_job_stale_seconds=60),
-        now=datetime(2026, 5, 7, 8, 31, 30, tzinfo=timezone.utc),
-    )
+    owner = User(id="user-1", username="owner", password_hash="hash")
+    stranger = User(id="user-2", username="stranger", password_hash="hash")
+    db.add_all([owner, stranger])
+    db.commit()
 
-    assert response.status == JobStatus.FAILED.value
-    assert response.error_message == "生成任务长时间没有响应，可能已在服务重启或 worker 中断后丢失，请重新生成。"
+    response = routes.get_job(job_id=job.id, db=db, current_user=owner)
+    assert response.status == JobStatus.SUCCEEDED.value
+    with pytest.raises(HTTPException) as exc_info:
+        routes.get_job(job_id=job.id, db=db, current_user=stranger)
+    assert exc_info.value.status_code == 404
     db.close()

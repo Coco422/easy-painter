@@ -591,6 +591,28 @@ a {
   margin-top: 4px;
 }
 
+.billing-estimate {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, auto)) minmax(220px, 1fr);
+  align-items: center;
+  gap: 12px 24px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.billing-estimate > div { display: grid; gap: 2px; }
+.billing-estimate span { color: var(--text-muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.billing-estimate strong { color: var(--text-primary); font: 600 13px/1.4 var(--font-mono); }
+.billing-estimate p { justify-self: end; margin: 0; color: var(--text-muted); text-align: right; }
+.billing-estimate.insufficient { border-color: color-mix(in srgb, var(--error) 35%, var(--border)); background: var(--error-soft); }
+.billing-estimate.insufficient p,
+.billing-estimate.insufficient strong { color: var(--error); }
+
 .model-select {
   width: 100%;
   min-width: 0;
@@ -1029,6 +1051,37 @@ a {
 
 .job-error {
   color: var(--error);
+}
+
+.job-billing-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.job-billing-meta span,
+.job-billing-meta strong {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font: 600 11px/1.3 var(--font-mono);
+}
+
+.job-billing-meta .billing-reserved { color: var(--accent); border-color: var(--border-accent); }
+.job-billing-meta .billing-settled { color: var(--success); }
+.job-billing-meta .billing-refunded { color: var(--success); border-color: color-mix(in srgb, var(--success) 34%, var(--border)); }
+
+.job-refund-note {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-left: 2px solid var(--success);
+  background: color-mix(in srgb, var(--success) 6%, var(--bg-surface));
+  color: var(--success);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .current-job-actions {
@@ -2353,6 +2406,9 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .billing-estimate { grid-template-columns: 1fr 1fr; }
+  .billing-estimate p { grid-column: 1 / -1; justify-self: start; text-align: left; }
+
   .reference-drawer-panel {
     width: 100%;
   }
@@ -2515,6 +2571,10 @@ a {
   grid-column: 1 / -1;
 }
 
+.email-card { grid-column: 1 / -1; }
+.email-card .email-binding-panel,
+.email-card .email-binding-panel.verified { margin: 0; padding: 0; border: 0; background: transparent; }
+
 .profile-edit-card .field-label {
   display: flex;
   flex-direction: column;
@@ -2625,7 +2685,7 @@ a {
   line-height: 1.6;
 }
 
-.profile-edit-card .email-binding-field {
+.email-card .email-binding-field {
   margin: 0;
 }
 
@@ -2734,6 +2794,7 @@ a {
 
 .history-card {
   grid-column: 1 / -1;
+  overflow-x: auto;
 }
 
 .history-loading,
@@ -2746,6 +2807,7 @@ a {
 
 .history-table {
   width: 100%;
+  min-width: 650px;
   border-collapse: collapse;
   font-size: 0.88rem;
 }
@@ -2776,6 +2838,12 @@ a {
   color: var(--error);
   font-weight: 600;
 }
+
+.txn-type { color: var(--text-secondary); font-size: 12px; }
+.txn-model { display: block; color: var(--text-secondary); font-size: 12px; }
+.txn-billing-status { display: inline-block; margin-top: 3px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-muted); font: 600 10px/1.3 var(--font-mono); }
+.txn-billing-status.is-refunded,
+.txn-billing-status.is-settled { color: var(--success); }
 
 .history-pagination {
   display: flex;

@@ -13,7 +13,7 @@ import {
   fetchJob,
   fetchPublicMeta,
 } from '@/lib/api'
-import { isLoggedIn } from '@/lib/auth'
+import { authState, fetchCurrentUser, isLoggedIn } from '@/lib/auth'
 import type {
   BatchCount,
   CreateJobResponse,
@@ -126,6 +126,7 @@ function removeActiveJob(jobId: string) {
 }
 
 function makeQueuedJob(result: CreateJobResponse, promptText: string, model: string, size: ImageSize): JobDetailResponse {
+  const modelConfig = availableModels.value.find((item) => item.id === model)
   return {
     job_id: result.job_id,
     status: result.status,
@@ -133,9 +134,14 @@ function makeQueuedJob(result: CreateJobResponse, promptText: string, model: str
     prompt: promptText,
     revised_prompt: null,
     model,
+    model_label: modelConfig?.label ?? model,
+    provider_name: null,
     size,
     aspect_ratio: null,
     error_message: null,
+    credit_cost: result.credit_cost,
+    billing_status: result.billing_status,
+    refunded_at: null,
     created_at: new Date().toISOString(),
     finished_at: null,
   }
@@ -145,11 +151,14 @@ async function handleSettledJob(job: JobDetailResponse) {
   clearJobTimer(job.job_id)
   uncacheJob(job.job_id)
   upsertActiveJob(job)
+  await fetchCurrentUser().catch(() => undefined)
   if (job.status === 'succeeded') {
     feedback.value = '作品已生成，你可以将其加入画廊。'
     return
   }
-  feedback.value = job.error_message ?? '生成失败，请稍后再试。'
+  feedback.value = job.billing_status === 'refunded'
+    ? `${job.error_message ?? '生成失败。'} 已全额退回 ${job.credit_cost} 丝。`
+    : job.error_message ?? '生成失败，请稍后再试。'
 }
 
 function pollJob(jobId: string) {
@@ -225,14 +234,20 @@ async function submitJobs(options: {
   batchCount: BatchCount
   referenceImageId: string | null
 }) {
-  const submissions = Array.from({ length: options.batchCount }, () =>
-    createJob({
+  const submissions = Array.from({ length: options.batchCount }, () => {
+    const idempotencyKey = crypto.randomUUID()
+    const payload = {
       prompt: options.promptText,
       model: options.model,
       size: options.size,
       reference_image_id: options.referenceImageId,
-    }),
-  )
+    }
+    const submit = () => createJob(payload, idempotencyKey)
+    return submit().catch((error) => {
+      if (error instanceof ApiError) throw error
+      return submit()
+    })
+  })
   const results = await Promise.allSettled(submissions)
   const fulfilled = results.filter((item): item is PromiseFulfilledResult<CreateJobResponse> => item.status === 'fulfilled')
   const rejected = results.filter((item): item is PromiseRejectedResult => item.status === 'rejected')
@@ -246,11 +261,13 @@ async function submitJobs(options: {
     const firstError = rejected[0]?.reason
     throw firstError instanceof Error ? firstError : new Error('提交失败，请稍后重试。')
   }
+  await fetchCurrentUser().catch(() => undefined)
   const remaining = Math.min(...fulfilled.map((item) => item.value.rate_limit_remaining))
+  const actualReserved = fulfilled.reduce((total, item) => total + item.value.credit_cost, 0)
   feedback.value =
     rejected.length > 0
-      ? `已提交 ${fulfilled.length} 个任务，${rejected.length} 个任务提交失败。本分钟还可再创建 ${remaining} 次。`
-      : `已提交 ${fulfilled.length} 个任务，本分钟还可再创建 ${remaining} 次。`
+      ? `已提交 ${fulfilled.length} 个任务，${rejected.length} 个任务提交失败；实际预扣 ${actualReserved} 丝。本分钟还可再创建 ${remaining} 次。`
+      : `已提交 ${fulfilled.length} 个任务，实际预扣 ${actualReserved} 丝。本分钟还可再创建 ${remaining} 次。`
 }
 
 async function submitPrompt() {
@@ -355,6 +372,7 @@ onMounted(() => {
       :models="availableModels"
       :max-length="meta?.prompt_max_length ?? 4000"
       :submitting="submitting"
+      :credits="isLoggedIn() ? (authState.user?.credits ?? 0) : null"
       @update:prompt="prompt = $event"
       @update:model="selectedModel = $event"
       @update:size="selectedSize = $event"

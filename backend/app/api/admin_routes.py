@@ -2,21 +2,27 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from redis import Redis
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.core.auth import hash_password, require_admin
+from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.models.credit_transaction import CreditTransaction
+from app.models.credit_transaction import CreditTransaction, CreditTransactionType
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
+from app.models.job_charge import JobCharge, JobChargeStatus
 from app.models.model_config import ModelConfig
+from app.models.outbox_event import OutboxEvent
 from app.models.redemption_code import RedemptionCode
 from app.models.upstream_provider import UpstreamProvider
 from app.models.user import User
@@ -25,13 +31,133 @@ from app.schemas.inspiration import (
     AdminInspirationItem,
     BatchCreateInspirationsRequest,
     BatchCreateInspirationsResponse,
-    CreateInspirationRequest,
     CreateInspirationResponse,
 )
 from app.services.storage import MinioStorageService
+from app.services.billing import adjust_user_credits
+from app.services.job_lifecycle import mark_generation_failed
+from app.services.health import collect_admin_health
+from app.services.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 admin_router = APIRouter()
+
+
+class AdminMetricItem(BaseModel):
+    label: str
+    total: int
+    succeeded: int = 0
+    failed: int = 0
+    credits: int = 0
+
+
+class AdminOverviewResponse(BaseModel):
+    window: str
+    total_jobs: int
+    succeeded_jobs: int
+    failed_jobs: int
+    queued_jobs: int
+    processing_jobs: int
+    success_rate: float
+    p50_seconds: float | None = None
+    p95_seconds: float | None = None
+    refunded_credits: int
+    refund_count: int
+    active_users: int
+    top_errors: list[dict[str, int | str]]
+    models: list[AdminMetricItem]
+    providers: list[AdminMetricItem]
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = (len(ordered) - 1) * percentile
+    lower = int(index)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = index - lower
+    return round(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction, 2)
+
+
+@admin_router.get("/admin/overview", response_model=AdminOverviewResponse)
+def admin_overview(
+    window: str = Query("24h", pattern="^(24h|7d|30d)$"),
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_admin),
+) -> AdminOverviewResponse:
+    duration = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}[window]
+    since = datetime.now(timezone.utc) - duration
+    jobs = db.scalars(
+        select(GenerationJob)
+        .where(GenerationJob.created_at >= since)
+        .order_by(desc(GenerationJob.created_at))
+        .limit(10_000)
+    ).all()
+    charges = db.scalars(
+        select(JobCharge).where(JobCharge.job_id.in_([job.id for job in jobs]))
+    ).all() if jobs else []
+    charge_map = {charge.job_id: charge for charge in charges}
+
+    succeeded = [job for job in jobs if job.status == JobStatus.SUCCEEDED]
+    failed = [job for job in jobs if job.status == JobStatus.FAILED]
+    terminal_count = len(succeeded) + len(failed)
+    durations = [
+        max(0.0, (job.finished_at - job.started_at).total_seconds())
+        for job in jobs
+        if job.started_at and job.finished_at
+    ]
+    refunds = db.scalars(
+        select(CreditTransaction).where(
+            CreditTransaction.transaction_type == CreditTransactionType.JOB_REFUND,
+            CreditTransaction.created_at >= since,
+        )
+    ).all()
+
+    model_stats: dict[str, AdminMetricItem] = {}
+    provider_stats: dict[str, AdminMetricItem] = {}
+    for job in jobs:
+        charge = charge_map.get(job.id)
+        credits = charge.amount if charge and charge.status == JobChargeStatus.SETTLED else 0
+        model_label = job.model_label_snapshot or job.model
+        provider_label = job.provider_name_snapshot or "未记录渠道"
+        for bucket, label in ((model_stats, model_label), (provider_stats, provider_label)):
+            item = bucket.setdefault(label, AdminMetricItem(label=label, total=0))
+            item.total += 1
+            item.credits += credits
+            if job.status == JobStatus.SUCCEEDED:
+                item.succeeded += 1
+            elif job.status == JobStatus.FAILED:
+                item.failed += 1
+
+    errors = Counter((job.error_message or "未知失败")[:160] for job in failed)
+    return AdminOverviewResponse(
+        window=window,
+        total_jobs=len(jobs),
+        succeeded_jobs=len(succeeded),
+        failed_jobs=len(failed),
+        queued_jobs=sum(job.status == JobStatus.QUEUED for job in jobs),
+        processing_jobs=sum(job.status == JobStatus.PROCESSING for job in jobs),
+        success_rate=round(len(succeeded) / terminal_count * 100, 2) if terminal_count else 0.0,
+        p50_seconds=_percentile(durations, 0.5),
+        p95_seconds=_percentile(durations, 0.95),
+        refunded_credits=sum(transaction.amount for transaction in refunds),
+        refund_count=len(refunds),
+        active_users=len({job.user_id for job in jobs if job.user_id}),
+        top_errors=[{"message": message, "count": count} for message, count in errors.most_common(5)],
+        models=sorted(model_stats.values(), key=lambda item: item.total, reverse=True)[:10],
+        providers=sorted(provider_stats.values(), key=lambda item: item.total, reverse=True)[:10],
+    )
+
+
+@admin_router.get("/admin/health")
+def admin_health(
+    db: Session = Depends(get_db),
+    redis_client: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    return collect_admin_health(db=db, redis_client=redis_client, settings=settings)
 
 
 class AdminJobItem(BaseModel):
@@ -47,6 +173,17 @@ class AdminJobItem(BaseModel):
     provider_job_meta: dict[str, Any] | None = None
     image_url: str | None = None
     reference_image_filename: str | None = None
+    model_label: str | None = None
+    provider_name: str | None = None
+    credit_cost: int = 0
+    billing_status: str = "not_charged"
+    refunded_at: str | None = None
+    execution_claimed: bool = False
+    lease_expires_at: str | None = None
+    outbox_status: str | None = None
+    outbox_attempts: int = 0
+    outbox_published_at: str | None = None
+    outbox_last_error: str | None = None
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
@@ -63,6 +200,19 @@ def admin_list_jobs(
         stmt = stmt.where(GenerationJob.status == status_filter)
     stmt = stmt.limit(500)
     jobs = db.scalars(stmt).all()
+    charge_map = {
+        charge.job_id: charge
+        for charge in db.scalars(select(JobCharge).where(JobCharge.job_id.in_([job.id for job in jobs]))).all()
+    } if jobs else {}
+    outbox_map: dict[str, OutboxEvent] = {}
+    if jobs:
+        events = db.scalars(
+            select(OutboxEvent)
+            .where(OutboxEvent.aggregate_id.in_([job.id for job in jobs]))
+            .order_by(desc(OutboxEvent.created_at))
+        ).all()
+        for event in events:
+            outbox_map.setdefault(event.aggregate_id, event)
     result = []
     for job in jobs:
         username = None
@@ -70,6 +220,8 @@ def admin_list_jobs(
             user = db.get(User, job.user_id)
             if user:
                 username = user.username
+        charge = charge_map.get(job.id)
+        outbox = outbox_map.get(job.id)
         result.append(AdminJobItem(
             job_id=job.id,
             status=job.status.value,
@@ -83,6 +235,17 @@ def admin_list_jobs(
             provider_job_meta=job.provider_job_meta,
             image_url=job.public_url,
             reference_image_filename=job.reference_image_filename,
+            model_label=job.model_label_snapshot,
+            provider_name=job.provider_name_snapshot,
+            credit_cost=charge.amount if charge else job.credit_cost_snapshot,
+            billing_status=charge.status.value if charge else "not_charged",
+            refunded_at=charge.refunded_at.isoformat() if charge and charge.refunded_at else None,
+            execution_claimed=bool(job.execution_token),
+            lease_expires_at=job.lease_expires_at.isoformat() if job.lease_expires_at else None,
+            outbox_status=outbox.status.value if outbox else None,
+            outbox_attempts=outbox.attempts if outbox else 0,
+            outbox_published_at=outbox.published_at.isoformat() if outbox and outbox.published_at else None,
+            outbox_last_error=outbox.last_error if outbox else None,
             created_at=job.created_at.isoformat() if job.created_at else "",
             started_at=job.started_at.isoformat() if job.started_at else None,
             finished_at=job.finished_at.isoformat() if job.finished_at else None,
@@ -115,7 +278,16 @@ def admin_delete_job(
     job = db.get(GenerationJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在。")
-    storage = _delete_job_artifacts(job, None)
+    if getattr(job, "status", None) in (JobStatus.QUEUED, JobStatus.PROCESSING):
+        mark_generation_failed(
+            db,
+            job_id=job.id,
+            message="管理员删除了尚未完成的任务，灵感丝线已自动退回。",
+        )
+        job = db.get(GenerationJob, job_id)
+        if not job:
+            return
+    _delete_job_artifacts(job, None)
     for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
         db.delete(like)
     db.delete(job)
@@ -145,6 +317,16 @@ def admin_batch_delete_jobs(
         if not job:
             failed.append(job_id)
             continue
+        if job.status in (JobStatus.QUEUED, JobStatus.PROCESSING):
+            mark_generation_failed(
+                db,
+                job_id=job.id,
+                message="管理员批量删除了尚未完成的任务，灵感丝线已自动退回。",
+            )
+            job = db.get(GenerationJob, job_id)
+            if not job:
+                failed.append(job_id)
+                continue
         storage = _delete_job_artifacts(job, storage)
         for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
             db.delete(like)
@@ -239,6 +421,22 @@ def admin_delete_user(
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在。")
+    has_financial_history = any(
+        (
+            db.scalar(select(CreditTransaction.id).where(CreditTransaction.user_id == user.id).limit(1)),
+            db.scalar(select(JobCharge.id).where(JobCharge.user_id == user.id).limit(1)),
+            db.scalar(
+                select(RedemptionCode.id)
+                .where(
+                    (RedemptionCode.created_by == user.id)
+                    | (RedemptionCode.used_by == user.id)
+                )
+                .limit(1)
+            ),
+        )
+    )
+    if has_financial_history:
+        raise HTTPException(status_code=409, detail="该用户已有账务记录，为保证流水完整性不能直接删除。")
     for like in db.scalars(select(GalleryLike).where(GalleryLike.user_id == user.id)).all():
         db.delete(like)
     db.delete(user)
@@ -318,7 +516,7 @@ class CreateModelRequest(BaseModel):
     supports_reference_image: bool = True
     supported_sizes: list[str] = []
     sort_order: int = 0
-    credit_cost: int = 1
+    credit_cost: int = Field(default=1, ge=1)
 
 
 class UpdateModelRequest(BaseModel):
@@ -328,7 +526,7 @@ class UpdateModelRequest(BaseModel):
     supports_reference_image: bool | None = None
     supported_sizes: list[str] | None = None
     sort_order: int | None = None
-    credit_cost: int | None = None
+    credit_cost: int | None = Field(default=None, ge=1)
 
 
 def _model_response(m: ModelConfig) -> ModelResponse:
@@ -507,6 +705,11 @@ class AdminCreditTransactionItem(BaseModel):
     id: str
     user_id: str
     username: str | None = None
+    transaction_type: str
+    job_id: str | None = None
+    model_label: str | None = None
+    billing_status: str | None = None
+    related_transaction_id: str | None = None
     amount: int
     balance_after: int
     reason: str
@@ -568,22 +771,17 @@ def admin_adjust_credits(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
 ) -> dict:
-    user = db.get(User, user_id)
-    if not user:
+    try:
+        applied_amount, balance = adjust_user_credits(
+            db,
+            user_id=user_id,
+            requested_amount=body.amount,
+            reason=body.reason or "admin:adjust",
+        )
+    except LookupError:
         raise HTTPException(status_code=404, detail="用户不存在。")
-    user.credits = (user.credits or 0) + body.amount
-    if user.credits < 0:
-        user.credits = 0
-    txn = CreditTransaction(
-        user_id=user.id,
-        amount=body.amount,
-        balance_after=user.credits,
-        reason=body.reason or "admin:adjust",
-    )
-    db.add(txn)
     db.commit()
-    db.refresh(user)
-    return {"credits": user.credits}
+    return {"credits": balance, "requested_amount": body.amount, "applied_amount": applied_amount}
 
 
 @admin_router.get("/admin/transactions", response_model=list[AdminCreditTransactionItem])
@@ -604,12 +802,22 @@ def admin_list_transactions(
     user_ids = list({t.user_id for t in txns})
     users = db.scalars(select(User).where(User.id.in_(user_ids))).all() if user_ids else []
     username_map = {u.id: u.username for u in users}
+    job_ids = [transaction.job_id for transaction in txns if transaction.job_id]
+    charge_map = {
+        charge.job_id: charge
+        for charge in db.scalars(select(JobCharge).where(JobCharge.job_id.in_(job_ids))).all()
+    } if job_ids else {}
 
     return [
         AdminCreditTransactionItem(
             id=t.id,
             user_id=t.user_id,
             username=username_map.get(t.user_id),
+            transaction_type=t.transaction_type.value,
+            job_id=t.job_id,
+            model_label=charge_map[t.job_id].model_label if t.job_id in charge_map else (t.details or {}).get("model_label"),
+            billing_status=charge_map[t.job_id].status.value if t.job_id in charge_map else None,
+            related_transaction_id=t.related_transaction_id,
             amount=t.amount,
             balance_after=t.balance_after,
             reason=t.reason,

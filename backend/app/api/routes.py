@@ -1,24 +1,32 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from typing import Annotated
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
 from redis import Redis
 from sqlalchemy import desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.core.auth import get_current_user_optional, require_current_user
 from app.core.config import Settings, get_settings
-from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
-from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.job_charge import JobCharge
+from app.models.model_config import ModelConfig
+from app.models.outbox_event import OutboxEvent
 from app.models.reference_image import ReferenceImage
+from app.models.upstream_provider import UpstreamProvider
 from app.models.user import User
 from app.schemas.job import (
     CreateJobRequest,
@@ -31,25 +39,27 @@ from app.schemas.job import (
     TogglePublicRequest,
 )
 from app.services.model_service import load_models_from_db
+from app.services.billing import InsufficientCreditsError, reserve_job_credits
+from app.services.job_lifecycle import mark_generation_failed
+from app.services.health import collect_core_health
 from app.services.rate_limit import GenerationRateLimiter
 from app.services.reference_images import ReferenceImagePayload, ReferenceImageValidationError, validate_reference_image
 from app.services.redis_client import get_redis
 from app.services.storage import MinioStorageService, StorageError
-from app.services.tasks import generate_image_task
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 ACTIVE_JOBS_LIMIT = 20
 LIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.PROCESSING)
-STALE_JOB_MESSAGE = "生成任务长时间没有响应，可能已在服务重启或 worker 中断后丢失，请重新生成。"
+IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _load_models(db: Session, settings: Settings) -> list[dict[str, str | bool | list[str]]]:
+def _load_models(db: Session, settings: Settings) -> list[dict[str, str | bool | int | list[str]]]:
     try:
         return load_models_from_db(db)
     except Exception:
@@ -82,6 +92,7 @@ def get_public_meta(
 @router.post("/jobs", response_model=CreateJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_job(
     request: Request,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
@@ -90,6 +101,35 @@ async def create_job(
     parsed_payload = await _parse_create_job_payload(request)
     payload = parsed_payload.request
     prompt = payload.prompt.strip()
+    if idempotency_key is not None and not IDEMPOTENCY_KEY_PATTERN.fullmatch(idempotency_key):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Idempotency-Key 只能包含字母、数字、点、下划线、冒号或连字符，且最长 128 字符。",
+        )
+    effective_idempotency_key = idempotency_key or str(uuid4())
+    request_fingerprint = _job_request_fingerprint(parsed_payload, prompt)
+
+    if idempotency_key is not None:
+        existing_job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.user_id == current_user.id,
+                GenerationJob.idempotency_key == effective_idempotency_key,
+            )
+        )
+        if existing_job:
+            if existing_job.request_fingerprint != request_fingerprint:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="该 Idempotency-Key 已用于不同的生成参数。",
+                )
+            return _build_create_job_response(
+                db=db,
+                job=existing_job,
+                balance=db.scalar(select(User.credits).where(User.id == current_user.id)) or 0,
+                rate_limit_remaining=settings.generate_rate_limit_count,
+                settings=settings,
+            )
+
     if not prompt:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="提示词不能为空。")
     if len(prompt) > settings.prompt_max_length:
@@ -127,33 +167,10 @@ async def create_job(
             detail="当前模型不支持该尺寸，请切换尺寸或模型。",
         )
 
-    limiter = GenerationRateLimiter(
-        redis_client=redis_client,
-        limit=settings.generate_rate_limit_count,
-        window_seconds=settings.generate_rate_limit_window_seconds,
-    )
-    rate_identity = f"user:{current_user.id}"
-    rate_limit_result = limiter.check(rate_identity)
-    if not rate_limit_result.allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="当前 IP 请求过于频繁，请 1 分钟后再试。",
-        )
-
-    credit_cost = model_config.get("credit_cost", 1)
-    if isinstance(credit_cost, int) and credit_cost > 0:
-        db.refresh(current_user)
-        if (current_user.credits or 0) < credit_cost:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail={
-                    "message": "灵感丝线不足，请前往个人中心兑换。",
-                    "required": credit_cost,
-                    "balance": current_user.credits or 0,
-                },
-            )
-        current_user.credits -= credit_cost
-        db.flush()
+    raw_credit_cost = model_config.get("credit_cost", 1)
+    credit_cost = raw_credit_cost if isinstance(raw_credit_cost, int) and raw_credit_cost > 0 else 0
+    model_row = db.get(ModelConfig, payload.model)
+    provider_row = db.get(UpstreamProvider, model_row.provider_id) if model_row else None
 
     job = GenerationJob(
         prompt=prompt,
@@ -162,21 +179,35 @@ async def create_job(
         aspect_ratio=payload.aspect_ratio or "auto",
         status=JobStatus.QUEUED,
         user_id=current_user.id,
+        model_label_snapshot=str(model_config.get("label") or payload.model),
+        provider_id_snapshot=provider_row.id if provider_row else None,
+        provider_name_snapshot=provider_row.name if provider_row else None,
+        credit_cost_snapshot=credit_cost,
+        idempotency_key=effective_idempotency_key,
+        request_fingerprint=request_fingerprint,
     )
     db.add(job)
+    copied_reference_key: str | None = None
     try:
+        # Flush the idempotency row before any side effects. Concurrent replays
+        # block on the unique key and never consume rate-limit quota or copy an
+        # object twice.
         db.flush()
-        if isinstance(credit_cost, int) and credit_cost > 0:
-            txn = CreditTransaction(
-                user_id=current_user.id,
-                amount=-credit_cost,
-                balance_after=current_user.credits,
-                reason=f"job:{job.id}",
+        limiter = GenerationRateLimiter(
+            redis_client=redis_client,
+            limit=settings.generate_rate_limit_count,
+            window_seconds=settings.generate_rate_limit_window_seconds,
+        )
+        rate_limit_result = limiter.check(f"user:{current_user.id}")
+        if not rate_limit_result.allowed:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="生成请求过于频繁，请稍后再试。",
             )
-            db.add(txn)
         if parsed_payload.reference_image:
             try:
-                object_key = MinioStorageService().upload_reference_image(
+                copied_reference_key = MinioStorageService().upload_reference_image(
                     job_id=job.id,
                     image_bytes=parsed_payload.reference_image.image_bytes,
                     content_type=parsed_payload.reference_image.content_type,
@@ -188,12 +219,12 @@ async def create_job(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="参考图保存失败，请稍后重试。",
                 ) from None
-            job.reference_image_key = object_key
+            job.reference_image_key = copied_reference_key
             job.reference_image_content_type = parsed_payload.reference_image.content_type
             job.reference_image_filename = parsed_payload.reference_image.filename
         elif staged_reference_image:
             try:
-                object_key = MinioStorageService().copy_reference_image_to_job(
+                copied_reference_key = MinioStorageService().copy_reference_image_to_job(
                     staged_reference_image.object_key,
                     job_id=job.id,
                     filename=staged_reference_image.filename,
@@ -205,33 +236,114 @@ async def create_job(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="参考图保存失败，请稍后重试。",
                 ) from None
-            job.reference_image_key = object_key
+            job.reference_image_key = copied_reference_key
             job.reference_image_content_type = staged_reference_image.content_type
             job.reference_image_filename = staged_reference_image.filename
             staged_reference_image.used_count = (staged_reference_image.used_count or 0) + 1
             staged_reference_image.last_used_at = utcnow()
+        _, balance_after = reserve_job_credits(
+            db,
+            job=job,
+            user_id=current_user.id,
+            amount=credit_cost,
+            model_label=job.model_label_snapshot or job.model,
+            provider_name=job.provider_name_snapshot,
+        )
+        db.add(
+            OutboxEvent(
+                event_type="generation.job.created",
+                aggregate_id=job.id,
+                payload={"job_id": job.id},
+            )
+        )
         db.commit()
-        db.refresh(job)
+    except IntegrityError:
+        db.rollback()
+        if copied_reference_key:
+            MinioStorageService().delete_reference_image(copied_reference_key)
+        existing_job = db.scalar(
+            select(GenerationJob).where(
+                GenerationJob.user_id == current_user.id,
+                GenerationJob.idempotency_key == effective_idempotency_key,
+            )
+        )
+        if existing_job and existing_job.request_fingerprint == request_fingerprint:
+            return _build_create_job_response(
+                db=db,
+                job=existing_job,
+                balance=db.scalar(select(User.credits).where(User.id == current_user.id)) or 0,
+                rate_limit_remaining=settings.generate_rate_limit_count,
+                settings=settings,
+            )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该请求已被其他操作占用。") from None
+    except InsufficientCreditsError as exc:
+        db.rollback()
+        if copied_reference_key:
+            MinioStorageService().delete_reference_image(copied_reference_key)
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "message": "灵感丝线不足，请前往个人中心兑换。",
+                "required": exc.required,
+                "balance": exc.balance,
+            },
+        ) from None
     except HTTPException:
+        if copied_reference_key:
+            MinioStorageService().delete_reference_image(copied_reference_key)
         raise
     except Exception:
         db.rollback()
+        if copied_reference_key:
+            MinioStorageService().delete_reference_image(copied_reference_key)
         raise
 
-    try:
-        generate_image_task.delay(job.id)
-    except Exception:
-        logger.error("Failed to enqueue generation job.")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="任务队列暂时不可用，请稍后重试。",
-        ) from None
+    return _build_create_job_response(
+        db=db,
+        job=job,
+        balance=balance_after,
+        rate_limit_remaining=rate_limit_result.remaining,
+        settings=settings,
+    )
 
+
+def _job_request_fingerprint(parsed_payload: ParsedCreateJobPayload, prompt: str) -> str:
+    payload = parsed_payload.request
+    reference_value = payload.reference_image_id
+    if parsed_payload.reference_image:
+        reference_value = hashlib.sha256(parsed_payload.reference_image.image_bytes).hexdigest()
+    canonical = json.dumps(
+        {
+            "prompt": prompt,
+            "model": payload.model,
+            "size": payload.size,
+            "aspect_ratio": payload.aspect_ratio or "auto",
+            "reference": reference_value,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _build_create_job_response(
+    *,
+    db: Session,
+    job: GenerationJob,
+    balance: int,
+    rate_limit_remaining: int,
+    settings: Settings,
+) -> CreateJobResponse:
+    charge = db.scalar(select(JobCharge).where(JobCharge.job_id == job.id))
     return CreateJobResponse(
         job_id=job.id,
         status=job.status.value,
         poll_url=f"{settings.api_v1_prefix}/jobs/{job.id}",
-        rate_limit_remaining=rate_limit_result.remaining,
+        rate_limit_remaining=rate_limit_remaining,
+        credit_cost=charge.amount if charge else job.credit_cost_snapshot,
+        balance_after=balance,
+        billing_status=charge.status.value if charge else "not_charged",
     )
 
 
@@ -274,9 +386,7 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
 @router.get("/jobs/active", response_model=list[JobDetailResponse])
 def list_active_jobs(
     db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
     current_user: User = Depends(require_current_user),
-    now: datetime = Depends(utcnow),
 ) -> list[JobDetailResponse]:
     stmt = (
         select(GenerationJob)
@@ -286,57 +396,23 @@ def list_active_jobs(
         .limit(ACTIVE_JOBS_LIMIT)
     )
     jobs = db.scalars(stmt).all()
-    _settle_stale_live_jobs(db=db, jobs=jobs, settings=settings, now=now)
-    return [_build_job_detail_response(job) for job in jobs if _is_live_job(job)]
+    return [_build_job_detail_response(db, job) for job in jobs]
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
 def get_job(
     job_id: str,
     db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    now: datetime = Depends(utcnow),
+    current_user: User = Depends(require_current_user),
 ) -> JobDetailResponse:
     job = db.get(GenerationJob, job_id)
-    if not job:
+    if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
-    _settle_stale_live_jobs(db=db, jobs=[job], settings=settings, now=now)
-    return _build_job_detail_response(job)
+    return _build_job_detail_response(db, job)
 
 
-def _settle_stale_live_jobs(
-    *,
-    db: Session,
-    jobs: list[GenerationJob],
-    settings: Settings,
-    now: datetime,
-) -> None:
-    if settings.generation_job_stale_seconds <= 0:
-        return
-    stale_cutoff = _as_utc(now) - timedelta(seconds=settings.generation_job_stale_seconds)
-    changed = False
-    for job in jobs:
-        anchor = job.started_at or job.created_at
-        if _is_live_job(job) and anchor and _as_utc(anchor) <= stale_cutoff:
-            job.status = JobStatus.FAILED
-            job.error_message = STALE_JOB_MESSAGE
-            job.finished_at = now
-            changed = True
-    if changed:
-        db.commit()
-
-
-def _is_live_job(job: GenerationJob) -> bool:
-    return job.status in LIVE_JOB_STATUSES
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _build_job_detail_response(job: GenerationJob) -> JobDetailResponse:
+def _build_job_detail_response(db: Session, job: GenerationJob) -> JobDetailResponse:
+    charge = db.scalar(select(JobCharge).where(JobCharge.job_id == job.id))
     return JobDetailResponse(
         job_id=job.id,
         status=job.status.value,
@@ -344,9 +420,14 @@ def _build_job_detail_response(job: GenerationJob) -> JobDetailResponse:
         prompt=job.prompt,
         revised_prompt=job.revised_prompt,
         model=job.model,
+        model_label=job.model_label_snapshot,
+        provider_name=job.provider_name_snapshot,
         size=job.size,
         aspect_ratio=job.aspect_ratio,
         error_message=job.error_message,
+        credit_cost=charge.amount if charge else job.credit_cost_snapshot,
+        billing_status=charge.status.value if charge else "not_charged",
+        refunded_at=charge.refunded_at if charge else None,
         created_at=job.created_at,
         finished_at=job.finished_at,
     )
@@ -361,6 +442,15 @@ def delete_job(
     job = db.get(GenerationJob, job_id)
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
+    if job.status in LIVE_JOB_STATUSES:
+        mark_generation_failed(
+            db,
+            job_id=job.id,
+            message="用户删除了尚未完成的任务，灵感丝线已自动退回。",
+        )
+        job = db.get(GenerationJob, job_id)
+        if not job:
+            return
     if job.object_key:
         try:
             MinioStorageService().delete_object(job.object_key)
@@ -653,16 +743,30 @@ def _build_gallery_items(
     ]
 
 
+@router.get("/health/live", response_model=HealthResponse)
+def health_live() -> HealthResponse:
+    return HealthResponse(status="ok")
+
+
+@router.get("/health/ready", response_model=HealthResponse)
+def health_ready(
+    response: Response,
+    db: Session = Depends(get_db),
+    redis_client: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+) -> HealthResponse:
+    components = collect_core_health(db=db, redis_client=redis_client, settings=settings)
+    if any(component.get("status") != "ok" for component in components.values()):
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return HealthResponse(status="degraded", components=components)
+    return HealthResponse(status="ok", components=components)
+
+
 @router.get("/healthz", response_model=HealthResponse)
 def healthz(
     response: Response,
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
 ) -> HealthResponse:
-    try:
-        db.execute(select(1))
-        redis_client.ping()
-    except Exception:
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return HealthResponse(status="degraded")
-    return HealthResponse(status="ok")
+    return health_ready(response=response, db=db, redis_client=redis_client, settings=settings)

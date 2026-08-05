@@ -18,6 +18,7 @@ import {
   NTag,
   useMessage,
   type DataTableColumns,
+  type DataTableRowKey,
   type FormInst,
   type FormRules,
 } from 'naive-ui'
@@ -44,6 +45,7 @@ const transactions = ref<AdminTransaction[]>([])
 const codesLoading = ref(false)
 const usersLoading = ref(false)
 const transactionsLoading = ref(false)
+const selectedCodeKeys = ref<DataTableRowKey[]>([])
 
 const codesFilter = ref<'all' | 'unused' | 'used'>('all')
 const generateFormRef = ref<FormInst | null>(null)
@@ -101,6 +103,7 @@ async function loadUsers() {
 
 async function loadCodes() {
   codesLoading.value = true
+  selectedCodeKeys.value = []
   try {
     codes.value = await adminFetchCodes(codesFilter.value)
   } catch (error) {
@@ -164,6 +167,19 @@ async function copyCode(code: string) {
   }
 }
 
+async function copySelectedCodes() {
+  if (selectedCodeKeys.value.length === 0) return
+  const selected = new Set(selectedCodeKeys.value.map(String))
+  const text = codes.value.filter((item) => selected.has(item.id)).map((item) => item.code).join('\n')
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success(`已复制 ${selectedCodeKeys.value.length} 个兑换码。`)
+  } catch {
+    message.error('复制失败，请手动选择兑换码。')
+  }
+}
+
 async function adjustCredits() {
   try {
     await adjustFormRef.value?.validate()
@@ -181,7 +197,11 @@ async function adjustCredits() {
     adjustForm.amount = 0
     adjustForm.reason = ''
     await loadTransactions()
-    message.success(`余额调整成功，当前为 ${result.credits} 丝。`)
+    if (result.applied_amount !== result.requested_amount) {
+      message.warning(`请求调整 ${result.requested_amount} 丝，实际应用 ${result.applied_amount} 丝；余额最低保持为 0。`)
+    } else {
+      message.success(`余额调整 ${result.applied_amount > 0 ? '+' : ''}${result.applied_amount} 丝，当前为 ${result.credits} 丝。`)
+    }
   } catch (error) {
     handleError(error, '余额调整失败。')
   } finally {
@@ -210,6 +230,7 @@ async function refreshAll() {
 }
 
 const codeColumns: DataTableColumns<RedemptionCodeItem> = [
+  { type: 'selection', fixed: 'left' },
   {
     title: '兑换码', key: 'code', minWidth: 230,
     render: (row) => h('div', { class: 'code-cell' }, [
@@ -235,6 +256,22 @@ const codeColumns: DataTableColumns<RedemptionCodeItem> = [
   { title: '创建时间', key: 'created_at', minWidth: 170, render: (row) => formatDate(row.created_at) },
 ]
 
+function transactionTypeLabel(type: string) {
+  return ({
+    opening_balance: '期初余额',
+    redeem: '兑换入账',
+    job_reserve: '任务预扣',
+    job_refund: '失败退款',
+    admin_adjust: '管理员调账',
+    reconciliation: '自动对账',
+  } as Record<string, string>)[type] ?? type
+}
+
+function billingStatusLabel(status: string | null) {
+  if (!status) return '-'
+  return ({ reserved: '已预扣', settled: '已结算', refunded: '已退款' } as Record<string, string>)[status] ?? status
+}
+
 const transactionColumns: DataTableColumns<AdminTransaction> = [
   { title: '时间', key: 'created_at', minWidth: 170, render: (row) => formatDate(row.created_at) },
   { title: '用户', key: 'username', minWidth: 120, render: (row) => row.username || row.user_id.slice(0, 8) },
@@ -243,7 +280,14 @@ const transactionColumns: DataTableColumns<AdminTransaction> = [
     render: (row) => h('strong', { class: row.amount > 0 ? 'amount-positive' : 'amount-negative' }, `${row.amount > 0 ? '+' : ''}${row.amount}`),
   },
   { title: '余额', key: 'balance_after', width: 90 },
-  { title: '原因', key: 'reason', minWidth: 220, ellipsis: { tooltip: true } },
+  {
+    title: '类型', key: 'transaction_type', minWidth: 120,
+    render: (row) => h(NTag, { size: 'small', bordered: false }, { default: () => transactionTypeLabel(row.transaction_type) }),
+  },
+  { title: '模型', key: 'model_label', minWidth: 150, render: (row) => row.model_label || '-' },
+  { title: '账务状态', key: 'billing_status', width: 105, render: (row) => billingStatusLabel(row.billing_status) },
+  { title: '任务', key: 'job_id', width: 100, render: (row) => row.job_id ? row.job_id.slice(0, 8) : '-' },
+  { title: '说明', key: 'reason', minWidth: 210, ellipsis: { tooltip: true } },
 ]
 
 onMounted(() => {
@@ -288,7 +332,25 @@ onMounted(() => {
 
       <NSpin :show="codesLoading">
         <NEmpty v-if="!codesLoading && codes.length === 0" description="当前筛选下没有兑换码" class="card-empty" />
-        <NDataTable v-else :columns="codeColumns" :data="codes" :row-key="(row: RedemptionCodeItem) => row.id" size="small" :single-line="false" :scroll-x="850" :max-height="420" />
+        <template v-else>
+          <div class="code-selection-toolbar">
+            <span>已选择 {{ selectedCodeKeys.length }} / {{ codes.length }} 个</span>
+            <NButton size="small" :disabled="selectedCodeKeys.length === 0" @click="copySelectedCodes">
+              <template #icon><Copy :size="14" /></template>
+              复制已选（{{ selectedCodeKeys.length }}）
+            </NButton>
+          </div>
+          <NDataTable
+            v-model:checked-row-keys="selectedCodeKeys"
+            :columns="codeColumns"
+            :data="codes"
+            :row-key="(row: RedemptionCodeItem) => row.id"
+            size="small"
+            :single-line="false"
+            :scroll-x="900"
+            :max-height="420"
+          />
+        </template>
       </NSpin>
     </NCard>
 
@@ -311,7 +373,7 @@ onMounted(() => {
       </template>
       <NSpin :show="transactionsLoading">
         <NEmpty v-if="!transactionsLoading && transactions.length === 0" description="当前页没有消费记录" class="card-empty" />
-        <NDataTable v-else :columns="transactionColumns" :data="transactions" :row-key="(row: AdminTransaction) => row.id" size="small" :single-line="false" :scroll-x="760" />
+        <NDataTable v-else :columns="transactionColumns" :data="transactions" :row-key="(row: AdminTransaction) => row.id" size="small" :single-line="false" :scroll-x="1250" />
       </NSpin>
       <NPagination
         v-if="transactions.length > 0 || transactionPage > 1"
@@ -333,6 +395,7 @@ onMounted(() => {
 .form-action { margin-bottom: 24px; }
 .generated-result { margin-bottom: 16px; }
 .generated-result-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; }
+.code-selection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-muted); font-size: 12px; }
 .code-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .code-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-empty { padding: 48px 0; }

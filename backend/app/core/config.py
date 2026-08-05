@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +34,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": False,
         "supported_sizes": [],
+        "credit_cost": 1,
     },
     {
         "id": "gpt-image-2-b",
@@ -42,6 +42,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": [],
+        "credit_cost": 1,
     },
     {
         "id": "grok-4.1-image",
@@ -49,6 +50,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": GROK_SUPPORTED_SIZES,
+        "credit_cost": 1,
     },
     {
         "id": "grok-imagine-image",
@@ -56,6 +58,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": GROK_SUPPORTED_SIZES,
+        "credit_cost": 1,
     },
     {
         "id": "doubao-seedream-5-0-260128",
@@ -63,6 +66,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": [],
+        "credit_cost": 1,
     },
 ]
 
@@ -137,13 +141,19 @@ class Settings(BaseSettings):
     generate_rate_limit_window_seconds: int = 60
     polling_interval_ms: int = 2000
     generation_job_stale_seconds: int = 2700
+    generation_queue_stale_seconds: int = 900
+    outbox_poll_seconds: float = 2.0
+    outbox_batch_size: int = 100
+    reconciliation_interval_seconds: int = 300
+    watchdog_interval_seconds: int = 30
+    dispatcher_heartbeat_ttl_seconds: int = 30
 
     public_models_json: str | None = None
     example_prompts_json: str | None = None
     allowed_origins_json: str | None = None
 
     @property
-    def public_models(self) -> list[dict[str, str | bool | list[str]]]:
+    def public_models(self) -> list[dict[str, str | bool | int | list[str]]]:
         if self.public_models_json:
             data = json.loads(self.public_models_json)
             return [
@@ -161,6 +171,7 @@ class Settings(BaseSettings):
                         str(size)
                         for size in item.get("supported_sizes", MODEL_SUPPORTED_SIZES.get(item["id"], []))
                     ],
+                    "credit_cost": max(1, int(item.get("credit_cost", 1))),
                 }
                 for item in data
             ]

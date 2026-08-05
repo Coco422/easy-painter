@@ -77,6 +77,15 @@ function statusTagType(status: string): 'default' | 'info' | 'success' | 'error'
   return 'default'
 }
 
+function billingStatusLabel(status: string) {
+  return ({ not_charged: '未扣费', reserved: '已预扣', settled: '已结算', refunded: '已退款' } as Record<string, string>)[status] ?? status
+}
+
+function outboxStatusLabel(status: string | null) {
+  if (!status) return '无记录'
+  return ({ pending: '待投递', published: '已投递', discarded: '已丢弃' } as Record<string, string>)[status] ?? status
+}
+
 async function loadJobs() {
   loading.value = true
   try {
@@ -150,7 +159,9 @@ const columns: DataTableColumns<AdminJobItem> = [
     render: (row) => h(NTag, { size: 'small', type: statusTagType(row.status), bordered: false }, { default: () => statusLabel(row.status) }),
   },
   { title: '提示词', key: 'prompt', minWidth: 260, ellipsis: { tooltip: true } },
-  { title: '模型', key: 'model', minWidth: 150, ellipsis: { tooltip: true } },
+  { title: '模型', key: 'model', minWidth: 170, ellipsis: { tooltip: true }, render: (row) => row.model_label || row.model },
+  { title: '消费', key: 'credit_cost', width: 85, render: (row) => `${row.credit_cost} 丝` },
+  { title: '账务', key: 'billing_status', width: 95, render: (row) => billingStatusLabel(row.billing_status) },
   { title: '用户', key: 'username', width: 110, render: (row) => row.username || '-' },
   { title: '耗时', key: 'duration', width: 90, render: (row) => formatDuration(row.started_at, row.finished_at) },
   { title: '创建时间', key: 'created_at', minWidth: 170, render: (row) => formatDate(row.created_at) },
@@ -197,7 +208,7 @@ onMounted(loadJobs)
         :row-key="(row: AdminJobItem) => row.job_id"
         size="small"
         :single-line="false"
-        :scroll-x="1250"
+        :scroll-x="1450"
         :max-height="680"
       />
     </NSpin>
@@ -207,7 +218,12 @@ onMounted(loadJobs)
         <NDescriptions label-placement="left" :column="1" bordered size="small">
           <NDescriptionsItem label="任务 ID"><code>{{ selectedJob.job_id }}</code></NDescriptionsItem>
           <NDescriptionsItem label="状态"><NTag :type="statusTagType(selectedJob.status)" size="small" :bordered="false">{{ statusLabel(selectedJob.status) }}</NTag></NDescriptionsItem>
-          <NDescriptionsItem label="模型">{{ selectedJob.model }}</NDescriptionsItem>
+          <NDescriptionsItem label="模型">{{ selectedJob.model_label || selectedJob.model }}</NDescriptionsItem>
+          <NDescriptionsItem label="模型 ID"><code>{{ selectedJob.model }}</code></NDescriptionsItem>
+          <NDescriptionsItem label="渠道快照">{{ selectedJob.provider_name || '-' }}</NDescriptionsItem>
+          <NDescriptionsItem label="单次价格">{{ selectedJob.credit_cost }} 丝</NDescriptionsItem>
+          <NDescriptionsItem label="账务状态">{{ billingStatusLabel(selectedJob.billing_status) }}</NDescriptionsItem>
+          <NDescriptionsItem label="退款时间">{{ formatDate(selectedJob.refunded_at) }}</NDescriptionsItem>
           <NDescriptionsItem label="尺寸">{{ selectedJob.size }}</NDescriptionsItem>
           <NDescriptionsItem label="宽高比">{{ selectedJob.aspect_ratio }}</NDescriptionsItem>
           <NDescriptionsItem label="用户">{{ selectedJob.username || '-' }}</NDescriptionsItem>
@@ -216,11 +232,17 @@ onMounted(loadJobs)
           <NDescriptionsItem label="开始时间">{{ formatDate(selectedJob.started_at) }}</NDescriptionsItem>
           <NDescriptionsItem label="完成时间">{{ formatDate(selectedJob.finished_at) }}</NDescriptionsItem>
           <NDescriptionsItem label="耗时">{{ formatDuration(selectedJob.started_at, selectedJob.finished_at) }}</NDescriptionsItem>
+          <NDescriptionsItem label="执行领取">{{ selectedJob.execution_claimed ? 'Worker 已领取' : '未被领取 / 已释放' }}</NDescriptionsItem>
+          <NDescriptionsItem label="执行租约">{{ formatDate(selectedJob.lease_expires_at) }}</NDescriptionsItem>
+          <NDescriptionsItem label="Outbox">{{ outboxStatusLabel(selectedJob.outbox_status) }}</NDescriptionsItem>
+          <NDescriptionsItem label="投递尝试">{{ selectedJob.outbox_attempts }}</NDescriptionsItem>
+          <NDescriptionsItem label="投递时间">{{ formatDate(selectedJob.outbox_published_at) }}</NDescriptionsItem>
         </NDescriptions>
 
         <div class="detail-block"><h3>提示词</h3><p>{{ selectedJob.prompt }}</p></div>
         <div v-if="selectedJob.revised_prompt" class="detail-block"><h3>修订提示词</h3><p>{{ selectedJob.revised_prompt }}</p></div>
         <div v-if="selectedJob.error_message" class="detail-block error"><h3>错误信息</h3><p>{{ selectedJob.error_message }}</p></div>
+        <div v-if="selectedJob.outbox_last_error" class="detail-block error"><h3>Outbox 最近错误</h3><p>{{ selectedJob.outbox_last_error }}</p></div>
         <div v-if="selectedJob.provider_job_meta" class="detail-block"><h3>上游元数据</h3><pre>{{ formatMeta(selectedJob.provider_job_meta) }}</pre></div>
         <div v-if="selectedJob.image_url" class="detail-block"><h3>生成结果</h3><NImage :src="selectedJob.image_url" object-fit="contain" /></div>
       </NDrawerContent>

@@ -16,7 +16,7 @@ from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
 from app.models.credit_transaction import CreditTransaction
-from app.models.redemption_code import RedemptionCode
+from app.models.job_charge import JobCharge
 from app.models.user import User
 from app.schemas.auth import (
     BindEmailCodeRequest,
@@ -36,6 +36,7 @@ from app.services.email_codes import (
     verify_email_code,
 )
 from app.services.mailer import EmailDeliveryError, SmtpEmailSender
+from app.services.billing import redeem_credits
 from app.services.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
@@ -206,6 +207,12 @@ class RedeemResponse(BaseModel):
 
 
 class CreditTransactionItem(BaseModel):
+    id: str
+    transaction_type: str
+    job_id: str | None = None
+    model_label: str | None = None
+    billing_status: str | None = None
+    related_transaction_id: str | None = None
     amount: int
     balance_after: int
     reason: str
@@ -224,29 +231,14 @@ def redeem_code(
     db: Session = Depends(get_db),
 ) -> RedeemResponse:
     code_str = body.code.strip().upper()
-    code = db.scalar(
-        select(RedemptionCode).where(RedemptionCode.code == code_str)
-    )
-    if not code:
+    try:
+        added, balance = redeem_credits(db, user_id=current_user.id, code_text=code_str)
+    except LookupError:
         raise HTTPException(status_code=404, detail="兑换码不存在。")
-    if code.used_by is not None:
+    except ValueError:
         raise HTTPException(status_code=409, detail="该兑换码已被使用。")
-
-    added = code.credits
-    code.used_by = current_user.id
-    code.used_at = datetime.utcnow()
-    current_user.credits = (current_user.credits or 0) + added
-
-    txn = CreditTransaction(
-        user_id=current_user.id,
-        amount=added,
-        balance_after=current_user.credits,
-        reason=f"redeem:{code_str}",
-    )
-    db.add(txn)
     db.commit()
-    db.refresh(current_user)
-    return RedeemResponse(credits=current_user.credits, added=added)
+    return RedeemResponse(credits=balance, added=added)
 
 
 @user_router.get("/users/me/credits", response_model=CreditHistoryResponse)
@@ -269,9 +261,20 @@ def get_credit_history(
         .offset(offset)
         .limit(page_size)
     ).all()
+    job_ids = [item.job_id for item in items if item.job_id]
+    charge_map = {
+        charge.job_id: charge
+        for charge in db.scalars(select(JobCharge).where(JobCharge.job_id.in_(job_ids))).all()
+    } if job_ids else {}
     return CreditHistoryResponse(
         items=[
             CreditTransactionItem(
+                id=t.id,
+                transaction_type=t.transaction_type.value,
+                job_id=t.job_id,
+                model_label=(charge_map[t.job_id].model_label if t.job_id in charge_map else (t.details or {}).get("model_label")),
+                billing_status=charge_map[t.job_id].status.value if t.job_id in charge_map else None,
+                related_transaction_id=t.related_transaction_id,
                 amount=t.amount,
                 balance_after=t.balance_after,
                 reason=t.reason,

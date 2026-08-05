@@ -1,15 +1,16 @@
-from sqlalchemy import inspect, select, text
+from sqlalchemy import select
 
 from app.core.auth import hash_password
-from app.core.config import Settings, get_settings
-from app.db.base import Base
-from app.db.session import SessionLocal, engine
+from app.core.config import get_settings
+from app.db.session import SessionLocal
 from app.models.announcement import Announcement
 from app.models.credit_transaction import CreditTransaction
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
 from app.models.inspiration import Inspiration
+from app.models.job_charge import JobCharge
 from app.models.model_config import ModelConfig
+from app.models.outbox_event import OutboxEvent
 from app.models.redemption_code import RedemptionCode
 from app.models.reference_image import ReferenceImage
 from app.models.upstream_provider import UpstreamProvider
@@ -27,80 +28,10 @@ def init_db() -> None:
     _ = UpstreamProvider
     _ = ModelConfig
     _ = Inspiration
-    Base.metadata.create_all(bind=engine)
-    _ensure_generation_job_columns()
-    _ensure_user_columns()
-    _ensure_model_config_columns()
+    _ = JobCharge
+    _ = OutboxEvent
     _ensure_default_user()
     _seed_providers_and_models()
-
-
-def _ensure_generation_job_columns() -> None:
-    inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("generation_jobs")}
-    missing_columns = {
-        "size": "ALTER TABLE generation_jobs ADD COLUMN size VARCHAR(32) DEFAULT 'auto'",
-        "aspect_ratio": "ALTER TABLE generation_jobs ADD COLUMN aspect_ratio VARCHAR(16) DEFAULT 'auto'",
-        "reference_image_key": "ALTER TABLE generation_jobs ADD COLUMN reference_image_key VARCHAR(512)",
-        "reference_image_content_type": "ALTER TABLE generation_jobs ADD COLUMN reference_image_content_type VARCHAR(128)",
-        "reference_image_filename": "ALTER TABLE generation_jobs ADD COLUMN reference_image_filename VARCHAR(255)",
-        "user_id": "ALTER TABLE generation_jobs ADD COLUMN user_id VARCHAR(36)",
-        "is_public": "ALTER TABLE generation_jobs ADD COLUMN is_public BOOLEAN DEFAULT FALSE",
-        "is_favorite": "ALTER TABLE generation_jobs ADD COLUMN is_favorite BOOLEAN DEFAULT FALSE",
-        "is_prompt_public": "ALTER TABLE generation_jobs ADD COLUMN is_prompt_public BOOLEAN DEFAULT TRUE",
-        "tags": "ALTER TABLE generation_jobs ADD COLUMN tags JSON",
-    }
-
-    with engine.begin() as connection:
-        for column, ddl in missing_columns.items():
-            if column not in columns:
-                connection.execute(text(ddl))
-        connection.execute(
-            text(
-                """
-                UPDATE generation_jobs
-                SET size = CASE aspect_ratio
-                    WHEN '1:1' THEN '1024x1024'
-                    WHEN '3:4' THEN '1024x1536'
-                    WHEN '9:16' THEN '1024x1792'
-                    WHEN '4:3' THEN '1536x1024'
-                    WHEN '16:9' THEN '1792x1024'
-                    ELSE size
-                END
-                WHERE size = 'auto' AND aspect_ratio IS NOT NULL AND aspect_ratio != 'auto'
-                """
-            )
-        )
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_user_id ON generation_jobs (user_id)"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_is_public ON generation_jobs (is_public)"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_generation_jobs_is_favorite ON generation_jobs (is_favorite)"))
-        # Migrate legacy anonymous jobs (no owner) into the public gallery
-        connection.execute(
-            text("UPDATE generation_jobs SET is_public = TRUE WHERE user_id IS NULL AND (is_public IS NULL OR is_public = FALSE)")
-        )
-
-
-def _ensure_user_columns() -> None:
-    inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("users")}
-    with engine.begin() as connection:
-        if "email" not in columns:
-            connection.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(320)"))
-        if "credits" not in columns:
-            connection.execute(text("ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 0"))
-            connection.execute(text("UPDATE users SET credits = 0 WHERE credits IS NULL"))
-        connection.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email) WHERE email IS NOT NULL")
-        )
-
-
-def _ensure_model_config_columns() -> None:
-    inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("model_configs")}
-    with engine.begin() as connection:
-        if "credit_cost" not in columns:
-            connection.execute(text("ALTER TABLE model_configs ADD COLUMN credit_cost INTEGER DEFAULT 1"))
-            connection.execute(text("UPDATE model_configs SET credit_cost = 1 WHERE credit_cost IS NULL"))
 
 
 def _ensure_default_user() -> None:
@@ -161,6 +92,7 @@ def _seed_providers_and_models() -> None:
                 supports_reference_image=bool(model_dict.get("supports_reference_image", True)),
                 supported_sizes=list(model_dict.get("supported_sizes", [])),
                 sort_order=index,
+                credit_cost=max(1, int(model_dict.get("credit_cost", 1))),
             )
             db.add(model)
 

@@ -39,6 +39,8 @@ jobs:
             dockerfile: backend/Dockerfile
           - image: nginx
             dockerfile: deploy/nginx/Dockerfile
+          - image: migrations
+            dockerfile: backend/db/Dockerfile
 
     steps:
       - name: Check out repository

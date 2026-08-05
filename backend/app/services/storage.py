@@ -166,6 +166,12 @@ class MinioStorageService:
         except S3Error:
             pass
 
+    def check_ready(self) -> bool:
+        try:
+            return self.client.bucket_exists(self.bucket) and self.client.bucket_exists(self.reference_bucket)
+        except S3Error as exc:
+            raise StorageError("Object storage is unavailable.") from exc
+
     @staticmethod
     def _guess_extension(content_type: str) -> str:
         if "png" in content_type:

@@ -83,11 +83,6 @@ class FakeRateLimiter:
         return type("Result", (), {"allowed": True, "remaining": 9})()
 
 
-class FakeTask:
-    def delay(self, job_id):
-        pass
-
-
 def make_upload(filename="sample.png", content_type="image/png", image_bytes=PNG_BYTES):
     return UploadFile(
         file=BytesIO(image_bytes),
@@ -339,7 +334,6 @@ async def test_create_job_with_reference_image_id_copies_staging_image(monkeypat
     monkeypatch.setattr(routes, "MinioStorageService", lambda: storage)
     monkeypatch.setattr(routes, "load_models_from_db", lambda db: [MODEL_DICT])
     monkeypatch.setattr(routes, "GenerationRateLimiter", FakeRateLimiter)
-    monkeypatch.setattr(routes, "generate_image_task", FakeTask())
 
     request = make_json_request(
         b'{"prompt":"\xe7\x94\xbb\xe4\xb8\x80\xe6\x9c\xb5\xe8\x8a\xb1","model":"gpt-image-2-c","size":"1024x1024","reference_image_id":"img-1"}'
@@ -376,7 +370,6 @@ async def test_create_job_keeps_legacy_multipart_reference_upload(monkeypatch):
     monkeypatch.setattr(routes, "MinioStorageService", lambda: storage)
     monkeypatch.setattr(routes, "load_models_from_db", lambda db: [MODEL_DICT])
     monkeypatch.setattr(routes, "GenerationRateLimiter", FakeRateLimiter)
-    monkeypatch.setattr(routes, "generate_image_task", FakeTask())
 
     response = await routes.create_job(
         make_multipart_request(),

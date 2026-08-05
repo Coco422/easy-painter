@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -23,6 +23,9 @@ class JobStatus(str, Enum):
 
 class GenerationJob(Base):
     __tablename__ = "generation_jobs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_generation_job_user_idempotency"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     status: Mapped[JobStatus] = mapped_column(
@@ -33,6 +36,10 @@ class GenerationJob(Base):
     prompt: Mapped[str] = mapped_column(Text)
     revised_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(String(128))
+    model_label_snapshot: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    provider_id_snapshot: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    provider_name_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    credit_cost_snapshot: Mapped[int] = mapped_column(Integer, default=0)
     size: Mapped[str] = mapped_column(String(32), default="auto")
     aspect_ratio: Mapped[str] = mapped_column(String(16), default="auto")
     reference_image_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -43,6 +50,10 @@ class GenerationJob(Base):
     public_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_job_meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    execution_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

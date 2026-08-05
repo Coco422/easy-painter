@@ -2,51 +2,14 @@ from app.api import admin_routes
 from app.db import init_db
 
 
-def test_generation_job_user_id_index_is_created_before_connection_closes(monkeypatch):
-    class FakeInspector:
-        def get_columns(self, table_name):
-            assert table_name == "generation_jobs"
-            return [{"name": "id"}, {"name": "size"}, {"name": "aspect_ratio"}]
+def test_init_db_only_runs_seed_steps(monkeypatch):
+    calls = []
+    monkeypatch.setattr(init_db, "_ensure_default_user", lambda: calls.append("user"))
+    monkeypatch.setattr(init_db, "_seed_providers_and_models", lambda: calls.append("models"))
 
-    class FakeConnection:
-        def __init__(self):
-            self.closed = False
-            self.statements = []
+    init_db.init_db()
 
-        def execute(self, statement):
-            assert not self.closed
-            self.statements.append(str(statement))
-
-    class FakeBegin:
-        def __init__(self, connection):
-            self.connection = connection
-
-        def __enter__(self):
-            return self.connection
-
-        def __exit__(self, exc_type, exc, tb):
-            self.connection.closed = True
-            return False
-
-    class FakeEngine:
-        def __init__(self):
-            self.connection = FakeConnection()
-
-        def begin(self):
-            return FakeBegin(self.connection)
-
-    fake_engine = FakeEngine()
-    monkeypatch.setattr(init_db, "engine", fake_engine)
-    monkeypatch.setattr(init_db, "inspect", lambda engine: FakeInspector())
-
-    init_db._ensure_generation_job_columns()
-
-    assert any(
-        "CREATE INDEX IF NOT EXISTS ix_generation_jobs_user_id" in item
-        for item in fake_engine.connection.statements
-    )
-    assert any("ADD COLUMN is_public BOOLEAN DEFAULT FALSE" in item for item in fake_engine.connection.statements)
-    assert any("ADD COLUMN is_favorite BOOLEAN DEFAULT FALSE" in item for item in fake_engine.connection.statements)
+    assert calls == ["user", "models"]
 
 
 def test_admin_delete_job_removes_reference_image_from_reference_bucket(monkeypatch):

@@ -14,14 +14,15 @@ import {
   type FormRules,
   type GlobalThemeOverrides,
 } from 'naive-ui'
-import { Cpu, ListTodo, LogOut, Megaphone, Menu, Server, Users, Wallet } from 'lucide-vue-next'
+import { Cpu, Gauge, ListTodo, LogOut, Megaphone, Menu, Server, Users, Wallet } from 'lucide-vue-next'
 
 import { adminLogout, adminVerify, authState } from '@/lib/auth'
 import { themeState } from '@/lib/theme'
 
-type SectionKey = 'providers' | 'models' | 'users' | 'jobs' | 'billing' | 'announcements'
+type SectionKey = 'overview' | 'providers' | 'models' | 'users' | 'jobs' | 'billing' | 'announcements'
 
 const sectionComponents: Record<SectionKey, Component> = {
+  overview: defineAsyncComponent(() => import('./sections/AdminOverview.vue')),
   providers: defineAsyncComponent(() => import('./sections/AdminProviders.vue')),
   models: defineAsyncComponent(() => import('./sections/AdminModels.vue')),
   users: defineAsyncComponent(() => import('./sections/AdminUsers.vue')),
@@ -31,6 +32,7 @@ const sectionComponents: Record<SectionKey, Component> = {
 }
 
 const navItems = [
+  { key: 'overview' as const, label: '总览', icon: Gauge },
   { key: 'providers' as const, label: '上游管理', icon: Server },
   { key: 'models' as const, label: '模型管理', icon: Cpu },
   { key: 'users' as const, label: '用户管理', icon: Users },
@@ -39,7 +41,7 @@ const navItems = [
   { key: 'announcements' as const, label: '通知管理', icon: Megaphone },
 ]
 
-const activeSection = ref<SectionKey>('providers')
+const activeSection = ref<SectionKey>('overview')
 const sidebarOpen = ref(false)
 const authenticated = computed(() => Boolean(authState.adminToken))
 const activeComponent = computed(() => sectionComponents[activeSection.value])

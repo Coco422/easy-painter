@@ -91,6 +91,9 @@ class CreateJobResponse(BaseModel):
     status: str
     poll_url: str
     rate_limit_remaining: int
+    credit_cost: int = 0
+    balance_after: int = 0
+    billing_status: str = "not_charged"
 
 
 class JobStatusResponse(BaseModel):
@@ -105,9 +108,14 @@ class JobDetailResponse(BaseModel):
     prompt: str
     revised_prompt: str | None = None
     model: str
+    model_label: str | None = None
+    provider_name: str | None = None
     size: str
     aspect_ratio: str | None = None
     error_message: str | None = None
+    credit_cost: int = 0
+    billing_status: str = "not_charged"
+    refunded_at: datetime | None = None
     created_at: datetime
     finished_at: datetime | None = None
 
@@ -153,3 +161,4 @@ class GalleryPageResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    components: dict[str, dict[str, Any]] | None = None

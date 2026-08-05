@@ -130,6 +130,7 @@ function handleBindEmailInput() {
 }
 
 async function handleRequestBindCode() {
+  if (bindSending.value || bindSaving.value || bindCountdown.value > 0) return
   if (!bindEmailValid.value) {
     bindFeedback.value = '请输入有效的邮箱地址。'
     bindSuccess.value = false
@@ -208,11 +209,20 @@ async function copyGalleryLink() {
   }
 }
 
-function formatReason(reason: string): string {
-  if (reason.startsWith('redeem:')) return `兑换码 ${reason.slice(7)}`
-  if (reason.startsWith('job:')) return '生成图片'
-  if (reason === 'admin:adjust') return '管理员调整'
-  return reason
+function transactionTypeLabel(transactionType: string): string {
+  return ({
+    opening_balance: '期初余额',
+    redeem: '兑换入账',
+    job_reserve: '生成预扣',
+    job_refund: '失败退款',
+    admin_adjust: '管理员调账',
+    reconciliation: '自动对账',
+  } as Record<string, string>)[transactionType] ?? transactionType
+}
+
+function billingStatusLabel(status: string | null): string {
+  if (!status) return '-'
+  return ({ reserved: '已预扣', settled: '已结算', refunded: '已退款' } as Record<string, string>)[status] ?? status
 }
 
 function formatTime(iso: string): string {
@@ -276,10 +286,36 @@ onBeforeUnmount(stopBindCountdown)
           <span>显示名称</span>
           <input v-model="displayName" type="text" class="field-input" maxlength="128" placeholder="留空则使用用户名" />
         </label>
+        <label class="field-checkbox">
+          <input v-model="isPublic" type="checkbox" />
+          <span>公开画廊（其他用户可以查看你的作品）</span>
+        </label>
+        <p class="field-hint">
+          开启后，你将拥有一个专属的作品集页面。你可以在作品详情中将图片「发布」到公开画廊，
+          已发布的作品会展示在你的公开主页上，任何人均可通过链接访问（无需登录）。
+        </p>
+        <div v-if="isPublic && galleryUrl" class="gallery-link-row">
+          <code class="gallery-link-url">{{ galleryUrl }}</code>
+          <button class="ghost-button" @click="copyGalleryLink">
+            {{ galleryCopied ? '已复制' : '复制链接' }}
+          </button>
+          <button class="ghost-button" @click="router.push(`/gallery/${authState.user?.username}`)">
+            前往画廊
+          </button>
+        </div>
+        <div class="profile-actions">
+          <button class="secondary-button" :disabled="profileSaving" @click="handleSaveProfile">
+            {{ profileSaving ? '保存中...' : '保存' }}
+          </button>
+          <span v-if="profileFeedback" class="profile-feedback">{{ profileFeedback }}</span>
+        </div>
+      </section>
+
+      <section class="profile-card email-card">
         <div class="email-binding-panel" :class="{ verified: Boolean(authState.user?.email) }">
           <div class="email-binding-heading">
             <div>
-              <span class="email-binding-label">验证邮箱</span>
+              <span class="email-binding-label">账号邮箱</span>
               <strong>{{ authState.user?.email ? '邮箱已绑定' : '绑定邮箱以保护账号' }}</strong>
             </div>
             <span class="email-status-tag">{{ authState.user?.email ? '已验证' : '未绑定' }}</span>
@@ -345,29 +381,6 @@ onBeforeUnmount(stopBindCountdown)
             {{ bindFeedback }}
           </p>
         </div>
-        <label class="field-checkbox">
-          <input v-model="isPublic" type="checkbox" />
-          <span>公开画廊（其他用户可以查看你的作品）</span>
-        </label>
-        <p class="field-hint">
-          开启后，你将拥有一个专属的作品集页面。你可以在作品详情中将图片「发布」到公开画廊，
-          已发布的作品会展示在你的公开主页上，任何人均可通过链接访问（无需登录）。
-        </p>
-        <div v-if="isPublic && galleryUrl" class="gallery-link-row">
-          <code class="gallery-link-url">{{ galleryUrl }}</code>
-          <button class="ghost-button" @click="copyGalleryLink">
-            {{ galleryCopied ? '已复制' : '复制链接' }}
-          </button>
-          <button class="ghost-button" @click="router.push(`/gallery/${authState.user?.username}`)">
-            前往画廊
-          </button>
-        </div>
-        <div class="profile-actions">
-          <button class="secondary-button" :disabled="profileSaving" @click="handleSaveProfile">
-            {{ profileSaving ? '保存中...' : '保存' }}
-          </button>
-          <span v-if="profileFeedback" class="profile-feedback">{{ profileFeedback }}</span>
-        </div>
       </section>
 
     </div>
@@ -380,14 +393,21 @@ onBeforeUnmount(stopBindCountdown)
           <tr>
             <th>时间</th>
             <th>类型</th>
+            <th>模型 / 账务</th>
             <th>变动</th>
             <th>余额</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="txn in transactions" :key="txn.created_at + txn.reason">
+          <tr v-for="txn in transactions" :key="txn.id">
             <td>{{ formatTime(txn.created_at) }}</td>
-            <td>{{ formatReason(txn.reason) }}</td>
+            <td><strong class="txn-type">{{ transactionTypeLabel(txn.transaction_type) }}</strong></td>
+            <td>
+              <span class="txn-model">{{ txn.model_label || '-' }}</span>
+              <small v-if="txn.billing_status" class="txn-billing-status" :class="`is-${txn.billing_status}`">
+                {{ billingStatusLabel(txn.billing_status) }}
+              </small>
+            </td>
             <td :class="txn.amount > 0 ? 'txn-positive' : 'txn-negative'">
               {{ txn.amount > 0 ? '+' : '' }}{{ txn.amount }}
             </td>

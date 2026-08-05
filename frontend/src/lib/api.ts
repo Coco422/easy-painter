@@ -1,6 +1,8 @@
 import { getAdminAuthHeader, getAuthHeader } from './auth'
 import type {
+  AdminHealth,
   AdminJobItem,
+  AdminOverview,
   AnnouncementItem,
   BatchCreateInspirationsResponse,
   CreateJobRequest,
@@ -90,7 +92,7 @@ export function fetchAnnouncements() {
   return apiRequest<AnnouncementItem[]>('/api/v1/announcements')
 }
 
-export function createJob(payload: CreateJobRequest) {
+export function createJob(payload: CreateJobRequest, idempotencyKey: string) {
   const body: Record<string, unknown> = {
     prompt: payload.prompt,
     model: payload.model,
@@ -101,6 +103,7 @@ export function createJob(payload: CreateJobRequest) {
   }
   return apiRequest<CreateJobResponse>('/api/v1/jobs', {
     method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(body),
   })
 }
@@ -422,10 +425,18 @@ export function adminFetchCodes(statusFilter: 'all' | 'unused' | 'used' = 'all')
 }
 
 export function adminAdjustCredits(userId: string, data: { amount: number; reason?: string }) {
-  return adminApiRequest<{ credits: number }>(`/api/v1/admin/users/${userId}/credits`, {
+  return adminApiRequest<{ credits: number; requested_amount: number; applied_amount: number }>(`/api/v1/admin/users/${userId}/credits`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
+}
+
+export function adminFetchOverview(window: '24h' | '7d' | '30d' = '24h') {
+  return adminApiRequest<AdminOverview>(`/api/v1/admin/overview?window=${window}`)
+}
+
+export function adminFetchHealth() {
+  return adminApiRequest<AdminHealth>('/api/v1/admin/health')
 }
 
 export function adminFetchTransactions(userId?: string, page = 1) {

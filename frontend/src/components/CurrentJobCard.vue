@@ -105,6 +105,12 @@ const displayedLoadingText = computed(() => {
 })
 const imageLayout = computed(() => resolveImageLayout(props.job?.size, props.job?.aspect_ratio))
 const displayedImageAspectRatio = computed(() => actualImageAspectRatio.value ?? imageLayout.value.aspectRatio)
+const billingLabel = computed(() => ({
+  not_charged: '未扣费',
+  reserved: '已预扣',
+  settled: '已结算',
+  refunded: '已全额退款',
+}[props.job?.billing_status ?? 'not_charged'] ?? props.job?.billing_status))
 
 function statusText(status: JobDetailResponse['status']) {
   switch (status) {
@@ -255,8 +261,17 @@ onBeforeUnmount(() => {
         <span v-if="isPolling" class="status-dot" />
       </div>
       <p class="job-prompt">{{ job.prompt }}</p>
+      <div class="job-billing-meta">
+        <span>{{ job.model_label || job.model }}</span>
+        <span v-if="job.provider_name">{{ job.provider_name }}</span>
+        <span>{{ job.credit_cost }} 丝 / 张</span>
+        <strong :class="`billing-${job.billing_status}`">{{ billingLabel }}</strong>
+      </div>
       <p v-if="isLiveStatus(job.status) && job.error_message" class="job-hint">{{ job.error_message }}</p>
       <p v-if="job.status === 'failed'" class="job-error">{{ job.error_message || '任务已失败，请重试或结束。' }}</p>
+      <p v-if="job.status === 'failed' && job.billing_status === 'refunded'" class="job-refund-note">
+        本任务未交付图片，{{ job.credit_cost }} 丝已全额退回余额。
+      </p>
       <div v-if="job.status === 'failed'" class="current-job-actions">
         <button type="button" class="secondary-button" @click="emit('retry', job)">重新生成</button>
         <button type="button" class="ghost-button" @click="emit('dismiss', job.job_id)">结束</button>

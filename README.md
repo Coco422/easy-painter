@@ -6,8 +6,9 @@
 
 - `frontend/`: Vue 3 + Vite + TypeScript 单页应用
 - `backend/`: FastAPI + Celery + SQLAlchemy + Redis + MinIO
+- `backend/db/`: Flyway forward-only SQL migrations 与独立 migrations 镜像
 - `uv`: Python 依赖管理
-- `docker-compose.yml`: `nginx`、`api`、`worker`、`redis`、`postgres`、`minio`、`minio-init`
+- `docker-compose.yml`: `migrate`、`api`、`worker`、`dispatcher`、`nginx`、`redis`、`postgres`、`minio`、`minio-init`
 
 ## 目录结构
 
@@ -53,7 +54,7 @@ cp .env.example .env
 模型下拉列表、参考图能力和尺寸限制由 `PUBLIC_MODELS_JSON` 控制；如果生产环境要开放新模型，需要同步更新服务器上的 `.env`。
 部分绘图模型生成时间可能达到 30 到 600 秒，生产环境的 `UPSTREAM_TIMEOUT_SECONDS` 应保持在 700 左右。
 提示词输入不在前端截断，后端通过 `PROMPT_MAX_LENGTH` 做硬限制，默认 4000 字符。
-`GENERATION_JOB_STALE_SECONDS` 用于把服务重启或 worker 中断后遗留的任务收敛为失败，默认 2700 秒。
+`GENERATION_JOB_STALE_SECONDS` 与 `GENERATION_QUEUE_STALE_SECONDS` 分别控制执行中、排队中任务的 watchdog 超时。Dispatcher 每 2 秒投递 transactional outbox，并周期执行卡单退款和账务对账；这些间隔可通过 `OUTBOX_*`、`WATCHDOG_INTERVAL_SECONDS` 与 `RECONCILIATION_INTERVAL_SECONDS` 调整。
 
 ### SMTP、注册、忘记密码与邮箱绑定
 
@@ -108,13 +109,28 @@ docker --version
 - Node.js / npm
 - Docker / Docker Compose
 
+### 数据库迁移与账务可靠性
+
+数据库结构只由 Flyway 管理，API 启动时不会执行 `create_all` 或临时 `ALTER TABLE`。空库会顺序执行全部迁移；已有但没有 Flyway history 的旧库会以 v1 baseline 标记，再升级到账务、幂等与 outbox schema。
+
+```bash
+# 显式执行迁移；失败时 API、Worker 和 Dispatcher 不应启动
+make migrate
+```
+
+- `generation_jobs`、预扣、负流水与 outbox 在同一数据库事务内创建。
+- 新版前端为每张生成任务发送稳定 `Idempotency-Key`；网络重试不会重复扣费。
+- 任务只有成功交付图片才结算，入队超时、上游失败、存储失败或执行超时均全额退款。
+- `credit_transactions` 在 PostgreSQL 中为 append-only；Dispatcher 会以不可变流水重算并修复余额缓存。
+- Flyway 迁移仅向前执行。生产升级前应同时备份 PostgreSQL 与 MinIO，回滚依赖备份恢复。
+
 ### 3. 启动依赖服务和 Celery
 
 ```bash
 make deps
 ```
 
-这个命令会以前台方式启动 `postgres`、`redis`、`minio`、`minio-init`、`worker`，便于调试日志；退出命令时会自动把这些容器关掉。
+这个命令会以前台方式启动 `postgres`、`redis`、`minio`、`minio-init`、`migrate`、`worker` 和 `dispatcher`，便于调试日志；退出命令时会自动把这些容器关掉。迁移失败时 Worker 与 Dispatcher 不会继续启动。
 
 ### 4. 启动后端 API
 
@@ -149,10 +165,11 @@ make deploy
 
 ## 服务器部署（GHCR）
 
-`main` 分支更新前后端或 Nginx 文件时，GitHub Actions 会构建两个 `linux/amd64` 镜像并推送到 GHCR：
+`main` 分支更新前后端、迁移或 Nginx 文件时，GitHub Actions 会构建三个 `linux/amd64` 镜像并推送到 GHCR：
 
 - `ghcr.io/coco422/easy-painter-backend`
 - `ghcr.io/coco422/easy-painter-nginx`
+- `ghcr.io/coco422/easy-painter-migrations`
 
 服务器不需要 Git 仓库、Node.js 或 Python 构建环境，只需保留：
 
@@ -219,6 +236,8 @@ docker buildx build --platform linux/amd64 -f deploy/nginx/Dockerfile -t your-re
 - `GET /api/v1/reference-images/{id}/file`（登录后读取私有参考图）
 - `DELETE /api/v1/reference-images/{id}`（登录后删除参考图）
 - `GET /api/v1/jobs/{job_id}`
+- `GET /api/v1/health/live`
+- `GET /api/v1/health/ready`
 - `GET /api/v1/gallery`
 - `GET /api/v1/healthz`
 
@@ -228,6 +247,8 @@ Admin 通知接口保持独立管理员令牌认证：
 - `POST /api/v1/admin/announcements`
 - `PUT /api/v1/admin/announcements/{id}`
 - `DELETE /api/v1/admin/announcements/{id}`
+- `GET /api/v1/admin/overview?window=24h`
+- `GET /api/v1/admin/health`
 
 ## 安全说明
 

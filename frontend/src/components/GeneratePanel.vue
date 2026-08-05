@@ -15,6 +15,7 @@ const props = defineProps<{
   models: PublicModel[]
   maxLength: number
   submitting: boolean
+  credits: number | null
 }>()
 
 const emit = defineEmits<{
@@ -66,6 +67,11 @@ const chipThumbUrl = computed(() => pendingPreviewUrl.value ?? (selected.value ?
 const chipName = computed(() => (uploading.value ? pendingFilename.value : selected.value?.filename) ?? '')
 const selectedSizeOption = computed(() => sizeOptions.find((option) => option.value === props.selectedSize) ?? sizeOptions[0])
 const selectedSizeLayout = computed(() => resolveImageLayout(selectedSizeOption.value.value))
+const selectedModelConfig = computed(() => props.models.find((model) => model.id === props.selectedModel))
+const unitCost = computed(() => selectedModelConfig.value?.credit_cost ?? 0)
+const estimatedCost = computed(() => unitCost.value * props.selectedBatchCount)
+const estimatedBalance = computed(() => props.credits === null ? null : props.credits - estimatedCost.value)
+const insufficientCredits = computed(() => estimatedBalance.value !== null && estimatedBalance.value < 0)
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleSizePickerKeydown)
@@ -145,12 +151,8 @@ function modelSupportsCurrentInput(model: PublicModel) {
   return model.enabled && (!selected.value || model.supports_reference_image !== false)
 }
 
-function selectedModelConfig() {
-  return props.models.find((model) => model.id === props.selectedModel)
-}
-
 function sizeSupportedBySelectedModel(size: ImageSize) {
-  const model = selectedModelConfig()
+  const model = selectedModelConfig.value
   return !model?.supported_sizes.length || model.supported_sizes.includes(size)
 }
 
@@ -303,9 +305,24 @@ watch(sizePickerOpen, (open) => {
         </span>
       </label>
 
-      <button class="primary-button" :disabled="submitting" @click="handleSubmit">
+      <button class="primary-button" :disabled="submitting || !selectedModel" @click="handleSubmit">
         {{ submitting ? '正在提交...' : '开始创作' }}
       </button>
+
+      <div class="billing-estimate" :class="{ insufficient: insufficientCredits }" aria-live="polite">
+        <div>
+          <span>预计消耗</span>
+          <strong>{{ unitCost }} 丝 × {{ selectedBatchCount }} 张 = {{ estimatedCost }} 丝</strong>
+        </div>
+        <div>
+          <span>当前余额</span>
+          <strong v-if="credits !== null">{{ credits }} 丝</strong>
+          <strong v-else>登录后查看</strong>
+        </div>
+        <p v-if="insufficientCredits">预计还差 {{ Math.abs(estimatedBalance ?? 0) }} 丝；仍可提交，系统会按张独立处理，可能部分成功。</p>
+        <p v-else-if="estimatedBalance !== null">提交后预计剩余 {{ estimatedBalance }} 丝；批量任务按张独立扣费与退款。</p>
+        <p v-else>批量任务按张独立提交，允许部分成功。</p>
+      </div>
     </div>
 
     <Teleport to="body">
