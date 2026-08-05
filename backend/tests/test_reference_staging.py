@@ -182,6 +182,31 @@ async def test_upload_list_file_and_delete_flow(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_manual_delete_keeps_object_when_database_commit_fails(monkeypatch):
+    session_factory = make_session_factory()
+    db = session_factory()
+    user = make_user(db)
+    storage = FakeStorage()
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+
+    item = await reference_routes.upload_staged_reference_image(
+        file=make_upload(),
+        db=db,
+        current_user=user,
+    )
+    object_key = f"references/2026/08/04/staging/{item.id}.png"
+    monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("commit failed")))
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        reference_routes.delete_staged_reference_image(image_id=item.id, db=db, current_user=user)
+
+    assert db.get(ReferenceImage, item.id) is not None
+    assert object_key in storage.objects
+    assert storage.deleted == []
+    db.close()
+
+
+@pytest.mark.anyio
 async def test_upload_rejects_invalid_image(monkeypatch):
     session_factory = make_session_factory()
     db = session_factory()
@@ -276,6 +301,30 @@ async def test_upload_failure_does_not_evict_existing_images(monkeypatch):
     assert exc_info.value.status_code == 503
     assert db.scalar(select(func.count()).select_from(ReferenceImage)) == reference_routes.MAX_REFERENCE_IMAGES_PER_USER
     assert storage.deleted == []
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_capacity_transaction_failure_cleans_up_new_upload(monkeypatch):
+    session_factory = make_session_factory()
+    db = session_factory()
+    user = make_user(db)
+    storage = FakeStorage()
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+    original_execute = db.execute
+    monkeypatch.setattr(db, "execute", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("lock failed")))
+
+    with pytest.raises(RuntimeError, match="lock failed"):
+        await reference_routes.upload_staged_reference_image(
+            file=make_upload(),
+            db=db,
+            current_user=user,
+        )
+
+    monkeypatch.setattr(db, "execute", original_execute)
+    assert db.scalar(select(func.count()).select_from(ReferenceImage)) == 0
+    assert storage.objects == {}
+    assert len(storage.deleted) == 1
     db.close()
 
 

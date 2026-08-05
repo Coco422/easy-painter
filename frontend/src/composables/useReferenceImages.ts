@@ -9,6 +9,7 @@ import {
 import type { ReferenceImageItem } from '@/lib/types'
 
 // 模块级单例：GeneratePanel 与历史抽屉、CreatePage 共享同一份状态。
+const MAX_REFERENCE_HISTORY = 50
 const selected = ref<ReferenceImageItem | null>(null)
 const uploading = ref(false)
 const history = ref<ReferenceImageItem[]>([])
@@ -54,6 +55,13 @@ function releaseObjectUrls() {
   }
 }
 
+function releaseObjectUrl(id: string) {
+  const url = objectUrls.get(id)
+  if (!url) return
+  URL.revokeObjectURL(url)
+  objectUrls.delete(id)
+}
+
 async function uploadAndSelect(file: File) {
   if (uploading.value) {
     throw new Error('已有参考图正在上传，请稍候。')
@@ -71,7 +79,11 @@ async function uploadAndSelect(file: File) {
       pendingPreviewUrl.value = null
     }
     selected.value = item
-    history.value = [item, ...history.value.filter((entry) => entry.id !== item.id)]
+    const nextHistory = [item, ...history.value.filter((entry) => entry.id !== item.id)]
+    for (const evicted of nextHistory.slice(MAX_REFERENCE_HISTORY)) {
+      releaseObjectUrl(evicted.id)
+    }
+    history.value = nextHistory.slice(0, MAX_REFERENCE_HISTORY)
     return item
   } finally {
     if (pendingPreviewUrl.value) {
@@ -100,11 +112,7 @@ async function remove(item: ReferenceImageItem) {
     if (selected.value?.id === item.id) {
       selected.value = null
     }
-    const url = objectUrls.get(item.id)
-    if (url) {
-      URL.revokeObjectURL(url)
-      objectUrls.delete(item.id)
-    }
+    releaseObjectUrl(item.id)
   } finally {
     deletingIds.delete(item.id)
   }

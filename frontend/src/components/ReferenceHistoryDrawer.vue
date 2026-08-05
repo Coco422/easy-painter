@@ -87,13 +87,16 @@ async function handleRemove(item: ReferenceImageItem) {
           </button>
         </header>
         <div class="reference-drawer-body">
+          <p class="reference-drawer-hint">
+            最多保留 50 张，超出后自动永久删除最早上传的图片；创作框中的 × 只取消本次使用。
+          </p>
           <p v-if="loadError" class="reference-drawer-error">{{ loadError }}</p>
           <div v-if="historyLoading && !hasItems" class="reference-drawer-loading">
             <Loader2 :size="22" />
             <span>正在读取参考图历史…</span>
           </div>
           <p v-else-if="!hasItems" class="reference-drawer-empty">
-            还没有参考图，粘贴或拖入图片即可上传
+            还没有参考图，点击上传、粘贴或拖入图片后会保存在这里
           </p>
           <div v-else class="reference-drawer-grid">
             <div v-if="uploading" class="reference-drawer-item pending" aria-label="参考图上传中">

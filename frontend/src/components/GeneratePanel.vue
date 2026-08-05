@@ -35,7 +35,7 @@ const {
   releaseObjectUrls,
   uploadAndSelect,
   select,
-  remove,
+  clearSelected,
 } = useReferenceImages()
 
 const promptLength = computed(() => props.prompt.length)
@@ -136,15 +136,13 @@ function handleReferenceFileChange(event: Event) {
   }
 }
 
-async function handleRemoveSelected() {
-  const item = selected.value
-  if (!item) return
+function openReferencePicker() {
+  fileInput.value?.click()
+}
+
+function handleClearSelected() {
   referenceError.value = ''
-  try {
-    await remove(item)
-  } catch (error) {
-    referenceError.value = error instanceof Error ? error.message : '删除参考图失败，请稍后重试。'
-  }
+  clearSelected()
 }
 
 function modelSupportsCurrentInput(model: PublicModel) {
@@ -213,7 +211,7 @@ watch(sizePickerOpen, (open) => {
           <span v-else class="reference-chip-placeholder" aria-hidden="true"><ImagePlus :size="18" /></span>
           <span class="reference-chip-name">{{ chipName }}</span>
           <Loader2 v-if="uploading" :size="16" class="reference-chip-spinner" />
-          <button v-else type="button" title="移除参考图" aria-label="移除参考图" @click="handleRemoveSelected">
+          <button v-else type="button" title="取消使用参考图" aria-label="取消使用参考图" @click="handleClearSelected">
             <X :size="14" />
           </button>
         </div>
@@ -226,7 +224,7 @@ watch(sizePickerOpen, (open) => {
             title="上传参考图"
             aria-label="上传参考图"
             :disabled="uploading"
-            @click="fileInput?.click()"
+            @click="openReferencePicker"
           >
             <ImagePlus :size="18" />
           </button>

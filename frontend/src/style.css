@@ -457,6 +457,13 @@ a {
   padding: 16px;
 }
 
+.reference-drawer-hint {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .reference-drawer-loading,
 .reference-drawer-empty {
   display: flex;

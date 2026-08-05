@@ -63,21 +63,7 @@ async def upload_staged_reference_image(
             detail="参考图保存失败，请稍后重试。",
         ) from None
 
-    existing_count = db.scalar(
-        select(func.count()).select_from(ReferenceImage).where(ReferenceImage.user_id == current_user.id)
-    ) or 0
     oldest_images: list[ReferenceImage] = []
-    if existing_count >= MAX_REFERENCE_IMAGES_PER_USER:
-        excess = existing_count - MAX_REFERENCE_IMAGES_PER_USER + 1
-        oldest_images = list(
-            db.scalars(
-                select(ReferenceImage)
-                .where(ReferenceImage.user_id == current_user.id)
-                .order_by(asc(ReferenceImage.created_at))
-                .limit(excess)
-            ).all()
-        )
-
     image = ReferenceImage(
         id=image_id,
         user_id=current_user.id,
@@ -86,6 +72,21 @@ async def upload_staged_reference_image(
         filename=payload.filename,
     )
     try:
+        # 同一用户的上传必须串行计算容量，否则并发请求可能同时看到 49 张并最终写入 51 张。
+        db.execute(select(User.id).where(User.id == current_user.id).with_for_update()).scalar_one()
+        existing_count = db.scalar(
+            select(func.count()).select_from(ReferenceImage).where(ReferenceImage.user_id == current_user.id)
+        ) or 0
+        if existing_count >= MAX_REFERENCE_IMAGES_PER_USER:
+            excess = existing_count - MAX_REFERENCE_IMAGES_PER_USER + 1
+            oldest_images = list(
+                db.scalars(
+                    select(ReferenceImage)
+                    .where(ReferenceImage.user_id == current_user.id)
+                    .order_by(asc(ReferenceImage.created_at))
+                    .limit(excess)
+                ).all()
+            )
         db.add(image)
         for old_image in oldest_images:
             db.delete(old_image)
@@ -154,7 +155,11 @@ def delete_staged_reference_image(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片不存在。")
     db.delete(image)
     try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    try:
         MinioStorageService().delete_reference_image(image.object_key)
     except Exception:
         logger.warning("Failed to delete MinIO reference %s", image.object_key)
-    db.commit()
