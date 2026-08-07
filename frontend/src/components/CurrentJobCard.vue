@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { NImage, type ImageInst } from 'naive-ui'
 
 import RetryableImage from '@/components/RetryableImage.vue'
 import { resolveImageLayout } from '@/lib/image-layout'
@@ -67,6 +68,8 @@ const typedText = ref('')
 const activeMessageIndex = ref(0)
 const prefersReducedMotion = ref(false)
 const actualImageAspectRatio = ref<string | null>(null)
+const resultImageLoaded = ref(false)
+const imagePreviewRef = ref<ImageInst | null>(null)
 let clockTimer: number | undefined
 let typingTimer: number | undefined
 let messageTimer: number | undefined
@@ -141,7 +144,13 @@ function markResultImageLoaded(event: Event) {
   const image = event.currentTarget as HTMLImageElement
   if (image.naturalWidth > 0 && image.naturalHeight > 0) {
     actualImageAspectRatio.value = `${image.naturalWidth} / ${image.naturalHeight}`
+    resultImageLoaded.value = true
   }
+}
+
+function openImagePreview() {
+  if (!resultImageLoaded.value) return
+  imagePreviewRef.value?.showPreview()
 }
 
 function hashSeed(value: string) {
@@ -228,6 +237,7 @@ watch(
   () => `${props.job?.job_id ?? ''}:${props.job?.image_url ?? ''}`,
   () => {
     actualImageAspectRatio.value = null
+    resultImageLoaded.value = false
   },
 )
 
@@ -294,8 +304,15 @@ onBeforeUnmount(() => {
         :width="imageLayout.width"
         :height="imageLayout.height"
         class="current-job-result-image"
+        :class="{ 'is-previewable': resultImageLoaded }"
         alt="当前任务结果图"
+        :role="resultImageLoaded ? 'button' : undefined"
+        :tabindex="resultImageLoaded ? 0 : undefined"
+        :aria-label="resultImageLoaded ? '预览当前任务结果图' : undefined"
         @load="markResultImageLoaded"
+        @click="openImagePreview"
+        @keydown.enter.prevent="openImagePreview"
+        @keydown.space.prevent="openImagePreview"
       >
         <template #status="{ loaded, failed, retrying, retryCount, maxRetries, retry }">
           <div
@@ -351,5 +368,14 @@ onBeforeUnmount(() => {
         <span>{{ placeholderText(job) }}</span>
       </div>
     </div>
+
+    <NImage
+      v-if="job.image_url"
+      ref="imagePreviewRef"
+      :src="job.image_url"
+      alt=""
+      class="current-job-preview-source"
+      aria-hidden="true"
+    />
   </section>
 </template>

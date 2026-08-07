@@ -1144,6 +1144,19 @@ a {
   opacity: 1;
 }
 
+.current-job-result-image.is-previewable {
+  cursor: zoom-in;
+}
+
+.current-job-result-image.is-previewable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+}
+
+.current-job-preview-source {
+  display: none;
+}
+
 .gallery-card img, .modal-image {
   display: block;
   width: 100%;
