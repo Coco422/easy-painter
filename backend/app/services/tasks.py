@@ -18,6 +18,7 @@ from app.services.job_lifecycle import (
     update_retry_message,
 )
 from app.services.model_service import load_provider_by_id, load_provider_for_model
+from app.services.media_lifecycle import enqueue_deletion
 from app.services.storage import MinioStorageService, StorageError
 from app.services.upstream import ReferenceImageForUpstream, UpstreamImageClient, UpstreamServiceError
 
@@ -115,7 +116,17 @@ def generate_image_task(self, job_id: str) -> None:
                 object_key=stored.object_key,
                 public_url=stored.public_url,
             ):
-                storage.delete_object(stored.object_key)
+                try:
+                    storage.delete_object(stored.object_key)
+                except StorageError:
+                    enqueue_deletion(
+                        db,
+                        bucket_type="media",
+                        object_key=stored.object_key,
+                        resource_type="orphan_generation_result",
+                        resource_id=job.id,
+                    )
+                    db.commit()
                 stored_object_key = None
                 logger.warning("Discarded late result for already settled job %s.", job.id)
                 return
@@ -167,11 +178,13 @@ def generate_image_task(self, job_id: str) -> None:
         except Exception:
             logger.exception("Unexpected generation task failure for job %s.", job.id)
             db.rollback()
+            orphan_object_key: str | None = None
             if storage and stored_object_key:
                 try:
                     storage.delete_object(stored_object_key)
-                except Exception:
+                except StorageError:
                     logger.exception("Failed to clean generated object %s after task failure.", stored_object_key)
+                    orphan_object_key = stored_object_key
                 stored_object_key = None
             mark_generation_failed(
                 db,
@@ -179,6 +192,15 @@ def generate_image_task(self, job_id: str) -> None:
                 execution_token=execution_token,
                 message="生成任务执行失败，请稍后重试。",
             )
+            if orphan_object_key:
+                enqueue_deletion(
+                    db,
+                    bucket_type="media",
+                    object_key=orphan_object_key,
+                    resource_type="orphan_generation_result",
+                    resource_id=job.id,
+                )
+                db.commit()
     finally:
         db.close()
 

@@ -1,28 +1,22 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.gallery_like import GalleryLike
-from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
-from app.models.user import User
+from app.models.media import MediaState
 from app.schemas.inspiration import InspirationFeedResponse, InspirationItemResponse
+from app.services.storage import MinioStorageService, StorageError
 
 logger = logging.getLogger(__name__)
 inspiration_router = APIRouter()
-
-
-def _batch_usernames(db: Session, user_ids: list[str]) -> dict[str, str]:
-    if not user_ids:
-        return {}
-    users = db.scalars(select(User).where(User.id.in_(user_ids))).all()
-    return {u.id: u.username for u in users}
 
 
 def _inspiration_to_response(item: Inspiration) -> InspirationItemResponse:
@@ -46,7 +40,7 @@ def _inspiration_to_response(item: Inspiration) -> InspirationItemResponse:
         title=item.title,
         description=item.description,
         prompt=item.prompt,
-        image_url=item.image_url,
+        image_url=f"/api/v1/inspirations/{item.id}/file" if item.image_object_key else item.image_url,
         source=item.source,
         source_url=item.source_url,
         author_name=item.author_name,
@@ -56,29 +50,6 @@ def _inspiration_to_response(item: Inspiration) -> InspirationItemResponse:
         is_featured=item.is_featured or False,
         like_count=item.like_count or 0,
         created_at=item.created_at,
-    )
-
-
-def _gallery_job_to_response(
-    job: GenerationJob, username: str | None, like_count: int = 0
-) -> InspirationItemResponse:
-    title = job.prompt[:80] + ("..." if len(job.prompt) > 80 else "")
-    prompt_text = "" if job.is_prompt_public is False else job.prompt
-    return InspirationItemResponse(
-        id=f"gallery:{job.id}",
-        title=title,
-        description=None,
-        prompt=prompt_text,
-        image_url=job.public_url or "",
-        source="gallery",
-        source_url=None,
-        author_name=username,
-        author_url=None,
-        language="zh",
-        categories=job.tags if isinstance(job.tags, list) else None,
-        is_featured=False,
-        like_count=like_count,
-        created_at=job.finished_at or job.created_at,
     )
 
 
@@ -94,91 +65,80 @@ def list_inspirations(
 ) -> InspirationFeedResponse:
     items: list[InspirationItemResponse] = []
 
-    # 1. Query external inspirations (unless source=gallery or category filter is set)
-    if source != "gallery" and not category:
-        stmt = select(Inspiration)
+    stmt = select(Inspiration).where(Inspiration.deleted_at.is_(None), Inspiration.media_state == MediaState.AVAILABLE)
 
-        if q:
-            like_pattern = f"%{q}%"
-            stmt = stmt.where(
-                Inspiration.title.ilike(like_pattern)
-                | Inspiration.prompt.ilike(like_pattern)
-                | Inspiration.description.ilike(like_pattern)
-            )
-        if source and source != "all":
+    if q:
+        like_pattern = f"%{q}%"
+        stmt = stmt.where(Inspiration.title.ilike(like_pattern) | Inspiration.prompt.ilike(like_pattern) | Inspiration.description.ilike(like_pattern))
+    if source and source != "all":
+        if source == "imported":
+            stmt = stmt.where(Inspiration.source != "community-curated")
+        else:
             stmt = stmt.where(Inspiration.source == source)
 
-        if sort == "featured":
-            stmt = stmt.order_by(desc(Inspiration.is_featured), desc(Inspiration.created_at))
-        else:
-            stmt = stmt.order_by(desc(Inspiration.created_at))
-
-        inspiration_rows = db.scalars(stmt).all()
-        items.extend(_inspiration_to_response(row) for row in inspiration_rows)
-
-    # 2. Query public gallery jobs
-    # Skip gallery only when filtering by a specific external source
-    include_gallery = source in (None, "", "all", "gallery")
-    if include_gallery:
-        gallery_stmt = (
-            select(GenerationJob)
-            .join(User, GenerationJob.user_id == User.id)
-            .where(GenerationJob.status == JobStatus.SUCCEEDED)
-            .where(GenerationJob.is_public.is_(True))
-            .where(GenerationJob.public_url.isnot(None))
-            .where(User.is_public.is_(True))
-        )
-
-        if q:
-            like_pattern = f"%{q}%"
-            gallery_stmt = gallery_stmt.where(GenerationJob.prompt.ilike(like_pattern))
-
-        gallery_stmt = gallery_stmt.order_by(desc(GenerationJob.finished_at)).limit(500)
-        jobs = db.scalars(gallery_stmt).all()
-
-        # Filter by category (tags) in Python since tags is a JSON array
-        if category:
-            jobs = [
-                j for j in jobs
-                if isinstance(j.tags, list) and category in j.tags
-            ]
-
-        job_ids = [j.id for j in jobs]
-        user_ids = list({j.user_id for j in jobs if j.user_id})
-        usernames = _batch_usernames(db, user_ids)
-
-        # Batch query like counts
-        like_counts: dict[str, int] = {}
-        if job_ids:
-            rows = db.execute(
-                select(GalleryLike.job_id, func.count())
-                .where(GalleryLike.job_id.in_(job_ids))
-                .group_by(GalleryLike.job_id)
-            ).all()
-            like_counts = {job_id: count for job_id, count in rows}
-
-        items.extend(
-            _gallery_job_to_response(
-                job,
-                usernames.get(job.user_id) if job.user_id else None,
-                like_count=like_counts.get(job.id, 0),
-            )
-            for job in jobs
-        )
-
-    # 3. Sort combined results
     if sort == "featured":
-        items.sort(key=lambda x: (not x.is_featured, x.created_at), reverse=False)
+        stmt = stmt.order_by(desc(Inspiration.is_featured), desc(Inspiration.created_at))
     else:
-        items.sort(key=lambda x: x.created_at, reverse=True)
+        stmt = stmt.order_by(desc(Inspiration.created_at))
 
-    # 4. Apply offset/limit to the combined list
-    total = len(items)
-    page_items = items[offset : offset + limit]
+    if category:
+        inspiration_rows = db.scalars(stmt.limit(5000)).all()
+        inspiration_rows = [row for row in inspiration_rows if isinstance(row.categories, list) and category in row.categories]
+        total = len(inspiration_rows)
+        inspiration_rows = inspiration_rows[offset : offset + limit]
+    else:
+        total = int(db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0)
+        inspiration_rows = db.scalars(stmt.offset(offset).limit(limit)).all()
+    items.extend(_inspiration_to_response(row) for row in inspiration_rows)
 
     return InspirationFeedResponse(
-        items=page_items,
+        items=items,
         total=total,
         offset=offset,
         limit=limit,
+    )
+
+
+@inspiration_router.get("/inspirations/categories", response_model=list[str])
+def list_inspiration_categories(
+    db: Session = Depends(get_db),
+    limit: int = Query(20, ge=1, le=100),
+) -> list[str]:
+    category_lists = db.scalars(
+        select(Inspiration.categories).where(
+            Inspiration.deleted_at.is_(None),
+            Inspiration.media_state == MediaState.AVAILABLE,
+            Inspiration.categories.is_not(None),
+        ).limit(5000)
+    ).all()
+    counts: Counter[str] = Counter()
+    for categories in category_lists:
+        if not isinstance(categories, list):
+            continue
+        counts.update(
+            category.strip()
+            for category in categories
+            if isinstance(category, str) and category.strip()
+        )
+    return [category for category, _ in counts.most_common(limit)]
+
+
+@inspiration_router.get("/inspirations/{inspiration_id}/file")
+def stream_inspiration_file(inspiration_id: str, db: Session = Depends(get_db)):
+    item = db.get(Inspiration, inspiration_id)
+    if not item or item.deleted_at is not None or item.media_state != MediaState.AVAILABLE or not item.image_object_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图片不存在。")
+    storage = MinioStorageService()
+    try:
+        opened = storage.open_object(item.image_object_key)
+    except StorageError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="图片读取失败。",
+            headers={"Cache-Control": "no-store"},
+        ) from None
+    return StreamingResponse(
+        storage.iter_response(opened),
+        media_type=item.media_content_type or "image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff"},
     )

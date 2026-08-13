@@ -34,7 +34,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": False,
         "supported_sizes": [],
-        "credit_cost": 1,
+        "credit_cost": 2,
     },
     {
         "id": "gpt-image-2-b",
@@ -42,7 +42,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": [],
-        "credit_cost": 1,
+        "credit_cost": 2,
     },
     {
         "id": "grok-4.1-image",
@@ -50,7 +50,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": GROK_SUPPORTED_SIZES,
-        "credit_cost": 1,
+        "credit_cost": 2,
     },
     {
         "id": "grok-imagine-image",
@@ -58,7 +58,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": GROK_SUPPORTED_SIZES,
-        "credit_cost": 1,
+        "credit_cost": 2,
     },
     {
         "id": "doubao-seedream-5-0-260128",
@@ -66,7 +66,7 @@ DEFAULT_PUBLIC_MODELS = [
         "enabled": True,
         "supports_reference_image": True,
         "supported_sizes": [],
-        "credit_cost": 1,
+        "credit_cost": 2,
     },
 ]
 
@@ -147,6 +147,10 @@ class Settings(BaseSettings):
     reconciliation_interval_seconds: int = 300
     watchdog_interval_seconds: int = 30
     dispatcher_heartbeat_ttl_seconds: int = 30
+    media_token_ttl_seconds: int = 3600
+    media_cleanup_enabled: bool = False
+    media_cleanup_interval_seconds: int = 60
+    media_cleanup_batch_size: int = 100
 
     public_models_json: str | None = None
     example_prompts_json: str | None = None
@@ -171,7 +175,7 @@ class Settings(BaseSettings):
                         str(size)
                         for size in item.get("supported_sizes", MODEL_SUPPORTED_SIZES.get(item["id"], []))
                     ],
-                    "credit_cost": max(1, int(item.get("credit_cost", 1))),
+                    "credit_cost": max(1, int(item.get("credit_cost", 2))),
                 }
                 for item in data
             ]

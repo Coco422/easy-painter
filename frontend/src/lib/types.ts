@@ -6,7 +6,26 @@ export interface PublicModel {
   enabled: boolean
   supports_reference_image: boolean
   supported_sizes: string[]
+  base_credit_cost: number
   credit_cost: number
+}
+
+export interface UserGroupSummary {
+  code: string
+  name: string
+  billing_multiplier_bps: number
+  generated_retention_hours: number
+  reference_retention_hours: number
+  max_reference_images: number
+}
+
+export interface UserGroup extends UserGroupSummary {
+  description: string
+  is_enabled: boolean
+  is_default: boolean
+  user_count: number
+  created_at: string
+  updated_at: string
 }
 
 export interface PublicMetaResponse {
@@ -17,6 +36,7 @@ export interface PublicMetaResponse {
   polling_interval_ms: number
   example_prompts: string[]
   models: PublicModel[]
+  viewer_group?: UserGroupSummary | null
 }
 
 export interface CreateJobRequest {
@@ -33,6 +53,8 @@ export interface ReferenceImageItem {
   used_count: number
   created_at: string
   last_used_at: string | null
+  media_state?: string
+  media_expires_at?: string | null
 }
 
 export interface CreateJobResponse {
@@ -41,6 +63,10 @@ export interface CreateJobResponse {
   poll_url: string
   rate_limit_remaining: number
   credit_cost: number
+  base_credit_cost: number | null
+  billing_multiplier_bps: number | null
+  group_code: string | null
+  group_name: string | null
   balance_after: number
   billing_status: string
 }
@@ -58,10 +84,16 @@ export interface JobDetailResponse {
   aspect_ratio?: ImageAspectRatio | null
   error_message: string | null
   credit_cost: number
+  base_credit_cost?: number | null
+  billing_multiplier_bps?: number | null
+  group_code?: string | null
+  group_name?: string | null
   billing_status: string
   refunded_at: string | null
   created_at: string
   finished_at: string | null
+  media_state?: string
+  media_expires_at?: string | null
 }
 
 export interface GalleryItem {
@@ -80,6 +112,11 @@ export interface GalleryItem {
   tags?: string[] | null
   like_count?: number
   liked_by_me?: boolean
+  group_code?: string | null
+  group_name?: string | null
+  billing_multiplier_bps?: number
+  media_state?: string
+  media_expires_at?: string | null
 }
 
 export type ImageAspectRatio = 'auto' | '1:1' | '3:4' | '9:16' | '4:3' | '16:9'
@@ -114,6 +151,7 @@ export interface UserInfo {
   display_name: string
   is_public: boolean
   credits: number
+  group?: UserGroupSummary | null
   created_at: string
 }
 
@@ -279,6 +317,17 @@ export interface AdminInspirationItem extends InspirationItem {
   image_object_key: string | null
   external_id: string | null
   updated_at: string
+}
+
+export interface AdminInspirationCandidate {
+  job_id: string
+  prompt: string
+  revised_prompt: string | null
+  image_url: string | null
+  username: string | null
+  display_name: string | null
+  tags: string[] | null
+  finished_at: string | null
 }
 
 export interface BatchCreateInspirationsResponse {

@@ -54,7 +54,7 @@ onMounted(() => {
         <strong>这是公开页面</strong>
         <p>无需登录即可访问和查看作品；只有画廊总开关已开启、且用户主动发布的内容会显示在这里。</p>
       </section>
-      <GalleryGrid :items="gallery" @select="selectedItem = $event" />
+      <GalleryGrid :items="gallery" @select="selectedItem = $event" @refresh="loadGallery" />
     </template>
 
     <PromptModal :item="selectedItem" @close="selectedItem = null" />

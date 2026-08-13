@@ -12,3 +12,4 @@ class ReferenceImageItem(BaseModel):
     used_count: int
     created_at: datetime
     last_used_at: datetime | None = None
+    media_expires_at: datetime | None = None

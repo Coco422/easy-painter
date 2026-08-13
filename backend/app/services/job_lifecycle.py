@@ -6,8 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.media import MediaState
 from app.models.outbox_event import OutboxEvent, OutboxEventStatus
 from app.services.billing import refund_job_charge, settle_job_charge
+from app.services.media_lifecycle import enqueue_terminal_reference_cleanup
 from app.services.upstream import GeneratedImageResult
 
 
@@ -64,13 +66,21 @@ def mark_generation_succeeded(
     job.status = JobStatus.SUCCEEDED
     job.revised_prompt = result.revised_prompt
     job.object_key = object_key
-    job.public_url = public_url
+    # Browser links are short-lived API capabilities generated on demand.  The
+    # legacy column remains only for a forward-compatible rollout.
+    job.public_url = None
+    job.media_state = MediaState.AVAILABLE
+    job.media_size_bytes = len(result.image_bytes)
+    job.media_content_type = result.content_type
     job.provider_job_meta = result.provider_meta
     job.finished_at = finished_at
+    if job.generated_retention_hours_snapshot:
+        job.media_expires_at = finished_at + timedelta(hours=job.generated_retention_hours_snapshot)
     job.error_message = None
     job.execution_token = None
     job.lease_expires_at = None
     settle_job_charge(db, job_id=job.id, now=finished_at)
+    enqueue_terminal_reference_cleanup(db, job)
     try:
         db.commit()
     except Exception:
@@ -102,6 +112,7 @@ def mark_generation_failed(
     job.execution_token = None
     job.lease_expires_at = None
     refund_job_charge(db, job_id=job.id, reason=message, now=failed_at)
+    enqueue_terminal_reference_cleanup(db, job)
     for event in db.scalars(
         select(OutboxEvent).where(
             OutboxEvent.aggregate_id == job.id,

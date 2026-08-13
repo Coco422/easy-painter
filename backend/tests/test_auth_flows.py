@@ -14,6 +14,7 @@ from app.core.auth import hash_password, verify_password
 from app.core.config import Settings
 from app.db.base import Base
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.media import MediaState
 from app.models.user import User
 from app.schemas.auth import (
     AdminUpdateUserRequest,
@@ -601,7 +602,8 @@ def test_public_gallery_requires_user_master_switch_and_published_job():
         status=JobStatus.SUCCEEDED,
         user_id=visible_user.id,
         is_public=True,
-        public_url="/media/visible.jpg",
+        object_key="generated/visible.jpg",
+        media_state=MediaState.AVAILABLE,
         finished_at=now,
     )
     hidden_job = GenerationJob(
@@ -610,7 +612,8 @@ def test_public_gallery_requires_user_master_switch_and_published_job():
         status=JobStatus.SUCCEEDED,
         user_id=hidden_user.id,
         is_public=True,
-        public_url="/media/hidden.jpg",
+        object_key="generated/hidden.jpg",
+        media_state=MediaState.AVAILABLE,
         finished_at=now,
     )
     legacy_anonymous_job = GenerationJob(
@@ -619,7 +622,8 @@ def test_public_gallery_requires_user_master_switch_and_published_job():
         status=JobStatus.SUCCEEDED,
         user_id=None,
         is_public=True,
-        public_url="/media/legacy-anonymous.jpg",
+        object_key="generated/legacy-anonymous.jpg",
+        media_state=MediaState.AVAILABLE,
         finished_at=now,
     )
     db.add_all([visible_job, hidden_job, legacy_anonymous_job])
@@ -643,7 +647,9 @@ def test_public_gallery_requires_user_master_switch_and_published_job():
         category=None,
         sort="recent",
     )
-    assert [item.id for item in inspiration_items.items] == [f"gallery:{visible_job.id}"]
+    # The community feed is now a permanent curated/imported collection;
+    # ordinary public-gallery jobs remain available only in the gallery.
+    assert inspiration_items.items == []
 
     with pytest.raises(HTTPException) as exc_info:
         routes.get_user_gallery(username="hidden", db=db, offset=0, limit=20)

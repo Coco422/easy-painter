@@ -9,12 +9,16 @@ from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
 from app.models.inspiration import Inspiration
 from app.models.job_charge import JobCharge
+from app.models.media import MediaDeletionTask
 from app.models.model_config import ModelConfig
 from app.models.outbox_event import OutboxEvent
 from app.models.redemption_code import RedemptionCode
 from app.models.reference_image import ReferenceImage
 from app.models.upstream_provider import UpstreamProvider
 from app.models.user import User
+from app.models.user_group import UserGroup
+from app.models.user_group import STANDARD_GROUP_CODE
+from app.services.group_policy import get_default_group
 
 
 def init_db() -> None:
@@ -29,7 +33,9 @@ def init_db() -> None:
     _ = ModelConfig
     _ = Inspiration
     _ = JobCharge
+    _ = MediaDeletionTask
     _ = OutboxEvent
+    _ = UserGroup
     _ensure_default_user()
     _seed_providers_and_models()
 
@@ -43,11 +49,13 @@ def _ensure_default_user() -> None:
         existing = db.scalar(select(User).limit(1))
         if existing:
             return
+        default_group = get_default_group(db)
         user = User(
             username=settings.default_username,
             email=settings.default_email.strip().lower() or None,
             password_hash=hash_password(settings.default_password),
             display_name=settings.default_username,
+            group_code=default_group.code if default_group else STANDARD_GROUP_CODE,
         )
         db.add(user)
         db.commit()
@@ -92,7 +100,7 @@ def _seed_providers_and_models() -> None:
                 supports_reference_image=bool(model_dict.get("supports_reference_image", True)),
                 supported_sizes=list(model_dict.get("supported_sizes", [])),
                 sort_order=index,
-                credit_cost=max(1, int(model_dict.get("credit_cost", 1))),
+                credit_cost=max(1, int(model_dict.get("credit_cost", 2))),
             )
             db.add(model)
 

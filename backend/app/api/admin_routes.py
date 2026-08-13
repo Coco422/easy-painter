@@ -21,6 +21,7 @@ from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
 from app.models.job_charge import JobCharge, JobChargeStatus
+from app.models.media import MediaState
 from app.models.model_config import ModelConfig
 from app.models.outbox_event import OutboxEvent
 from app.models.redemption_code import RedemptionCode
@@ -33,14 +34,35 @@ from app.schemas.inspiration import (
     BatchCreateInspirationsResponse,
     CreateInspirationResponse,
 )
-from app.services.storage import MinioStorageService
+from app.services.storage import MinioStorageService, StorageError
 from app.services.billing import adjust_user_credits
 from app.services.job_lifecycle import mark_generation_failed
+from app.services.media_lifecycle import enqueue_deletion
 from app.services.health import collect_admin_health
 from app.services.redis_client import get_redis
+from app.services.reference_images import ReferenceImageValidationError, validate_reference_image
+from app.services.group_policy import resolve_user_policy
+from app.api.user_group_routes import default_group_code, get_assignable_group
+from app.api.media_routes import job_media_url
 
 logger = logging.getLogger(__name__)
 admin_router = APIRouter()
+
+
+def _admin_user_response(user: User, db: Session) -> UserResponse:
+    _, policy = resolve_user_policy(db, user)
+    return UserResponse(
+        id=user.id, username=user.username, email=user.email, display_name=user.display_name,
+        is_public=user.is_public, credits=user.credits,
+        group={
+            "code": policy.code, "name": policy.name,
+            "billing_multiplier_bps": policy.billing_multiplier_bps,
+            "generated_retention_hours": policy.generated_retention_hours,
+            "reference_retention_hours": policy.reference_retention_hours,
+            "max_reference_images": policy.max_reference_images,
+        },
+        created_at=user.created_at,
+    )
 
 
 class AdminMetricItem(BaseModel):
@@ -233,7 +255,11 @@ def admin_list_jobs(
             username=username,
             error_message=job.error_message,
             provider_job_meta=job.provider_job_meta,
-            image_url=job.public_url,
+            image_url=(
+                job_media_url(job_id=job.id, user_id=job.user_id)
+                if job.object_key and job.media_state == MediaState.AVAILABLE and job.deleted_at is None
+                else None
+            ),
             reference_image_filename=job.reference_image_filename,
             model_label=job.model_label_snapshot,
             provider_name=job.provider_name_snapshot,
@@ -253,20 +279,27 @@ def admin_list_jobs(
     return result
 
 
-def _delete_job_artifacts(job: GenerationJob, storage: MinioStorageService | None) -> MinioStorageService:
-    if job.object_key:
-        try:
-            storage = storage or MinioStorageService()
-            storage.delete_object(job.object_key)
-        except Exception:
-            logger.warning("Failed to delete MinIO object %s", job.object_key)
+def _mark_job_deleted(db: Session, job: GenerationJob) -> None:
+    job.deleted_at = datetime.now(timezone.utc)
+    job.is_public = False
+    if job.object_key and job.media_state == MediaState.AVAILABLE:
+        job.media_state = MediaState.DELETE_PENDING
+        enqueue_deletion(
+            db,
+            bucket_type="media",
+            object_key=job.object_key,
+            resource_type="generation_job",
+            resource_id=job.id,
+        )
     if job.reference_image_key:
-        try:
-            storage = storage or MinioStorageService()
-            storage.delete_reference_image(job.reference_image_key)
-        except Exception:
-            logger.warning("Failed to delete MinIO reference %s", job.reference_image_key)
-    return storage
+        enqueue_deletion(
+            db,
+            bucket_type="reference",
+            object_key=job.reference_image_key,
+            resource_type="job_reference",
+            resource_id=job.id,
+        )
+        job.reference_image_key = None
 
 
 @admin_router.delete("/admin/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -287,10 +320,7 @@ def admin_delete_job(
         job = db.get(GenerationJob, job_id)
         if not job:
             return
-    _delete_job_artifacts(job, None)
-    for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
-        db.delete(like)
-    db.delete(job)
+    _mark_job_deleted(db, job)
     db.commit()
 
 
@@ -311,7 +341,6 @@ def admin_batch_delete_jobs(
 ) -> BatchDeleteResponse:
     deleted = 0
     failed: list[str] = []
-    storage: MinioStorageService | None = None
     for job_id in body.job_ids:
         job = db.get(GenerationJob, job_id)
         if not job:
@@ -327,10 +356,7 @@ def admin_batch_delete_jobs(
             if not job:
                 failed.append(job_id)
                 continue
-        storage = _delete_job_artifacts(job, storage)
-        for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
-            db.delete(like)
-        db.delete(job)
+        _mark_job_deleted(db, job)
         deleted += 1
     if deleted > 0:
         db.commit()
@@ -343,13 +369,7 @@ def admin_list_users(
     _: dict = Depends(require_admin),
 ) -> list[UserResponse]:
     users = db.scalars(select(User).order_by(User.created_at)).all()
-    return [
-        UserResponse(
-            id=u.id, username=u.username, email=u.email, display_name=u.display_name,
-            is_public=u.is_public, credits=u.credits, created_at=u.created_at,
-        )
-        for u in users
-    ]
+    return [_admin_user_response(user, db) for user in users]
 
 
 @admin_router.post("/admin/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -364,19 +384,19 @@ def admin_create_user(
     normalized_email = str(body.email).strip().lower() if body.email else None
     if normalized_email and db.scalar(select(User).where(func.lower(User.email) == normalized_email)):
         raise HTTPException(status_code=409, detail="该邮箱已被使用。")
+    assigned_group_code = body.group_code or default_group_code(db)
+    get_assignable_group(db, assigned_group_code)
     user = User(
         username=body.username,
         email=normalized_email,
         password_hash=hash_password(body.password),
         display_name=body.display_name or body.username,
+        group_code=assigned_group_code,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    return UserResponse(
-        id=user.id, username=user.username, email=user.email, display_name=user.display_name,
-        is_public=user.is_public, credits=user.credits, created_at=user.created_at,
-    )
+    return _admin_user_response(user, db)
 
 
 @admin_router.put("/admin/users/{user_id}", response_model=UserResponse)
@@ -386,7 +406,7 @@ def admin_update_user(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
 ) -> UserResponse:
-    user = db.get(User, user_id)
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update())
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在。")
     if body.password is not None:
@@ -404,12 +424,12 @@ def admin_update_user(
         user.display_name = body.display_name
     if body.is_public is not None:
         user.is_public = body.is_public
+    if body.group_code is not None and body.group_code != user.group_code:
+        get_assignable_group(db, body.group_code)
+        user.group_code = body.group_code
     db.commit()
     db.refresh(user)
-    return UserResponse(
-        id=user.id, username=user.username, email=user.email, display_name=user.display_name,
-        is_public=user.is_public, credits=user.credits, created_at=user.created_at,
-    )
+    return _admin_user_response(user, db)
 
 
 @admin_router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -505,7 +525,7 @@ class ModelResponse(BaseModel):
     supports_reference_image: bool
     supported_sizes: list[str]
     sort_order: int
-    credit_cost: int = 1
+    credit_cost: int = 2
 
 
 class CreateModelRequest(BaseModel):
@@ -516,7 +536,7 @@ class CreateModelRequest(BaseModel):
     supports_reference_image: bool = True
     supported_sizes: list[str] = []
     sort_order: int = 0
-    credit_cost: int = Field(default=1, ge=1)
+    credit_cost: int = Field(default=2, ge=1)
 
 
 class UpdateModelRequest(BaseModel):
@@ -534,7 +554,7 @@ def _model_response(m: ModelConfig) -> ModelResponse:
         id=m.id, provider_id=m.provider_id, label=m.label,
         enabled=m.enabled, supports_reference_image=m.supports_reference_image,
         supported_sizes=list(m.supported_sizes) if m.supported_sizes else [],
-        sort_order=m.sort_order, credit_cost=m.credit_cost or 1,
+        sort_order=m.sort_order, credit_cost=m.credit_cost if m.credit_cost is not None else 2,
     )
 
 
@@ -837,7 +857,11 @@ def admin_list_inspirations(
     limit: int = Query(50, ge=1, le=200),
     source: str | None = Query(None),
 ) -> list[AdminInspirationItem]:
-    stmt = select(Inspiration).order_by(desc(Inspiration.created_at))
+    stmt = (
+        select(Inspiration)
+        .where(Inspiration.deleted_at.is_(None), Inspiration.media_state == MediaState.AVAILABLE)
+        .order_by(desc(Inspiration.created_at))
+    )
     if source:
         stmt = stmt.where(Inspiration.source == source)
     stmt = stmt.offset(offset).limit(limit)
@@ -848,7 +872,7 @@ def admin_list_inspirations(
             title=item.title,
             description=item.description,
             prompt=item.prompt,
-            image_url=item.image_url,
+            image_url=f"/api/v1/inspirations/{item.id}/file" if item.image_object_key else item.image_url,
             image_object_key=item.image_object_key,
             external_id=item.external_id,
             source=item.source,
@@ -921,6 +945,16 @@ async def admin_create_inspiration(
         if image_bytes:
             content_type = getattr(upload, "content_type", "image/jpeg") or "image/jpeg"
             try:
+                validated_image = validate_reference_image(
+                    filename=getattr(upload, "filename", None),
+                    content_type=content_type,
+                    image_bytes=image_bytes,
+                )
+            except ReferenceImageValidationError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            image_bytes = validated_image.image_bytes
+            content_type = validated_image.content_type
+            try:
                 stored = MinioStorageService().upload_inspiration_image(
                     image_id=inspiration_id,
                     image_bytes=image_bytes,
@@ -932,11 +966,8 @@ async def admin_create_inspiration(
                 logger.warning("Failed to upload inspiration image: %s", exc)
                 raise HTTPException(status_code=503, detail="图片上传失败。") from exc
 
-    # Also accept image_url directly (for pre-uploaded images)
     if not image_url:
-        image_url = str(form.get("image_url", ""))
-    if not image_url:
-        raise HTTPException(status_code=422, detail="需要提供图片（image 文件或 image_url）。")
+        raise HTTPException(status_code=422, detail="永久社区内容必须上传图片文件。")
 
     inspiration = Inspiration(
         id=inspiration_id,
@@ -953,9 +984,31 @@ async def admin_create_inspiration(
         language=language,
         categories=categories,
         is_featured=is_featured,
+        media_state=MediaState.AVAILABLE,
+        media_size_bytes=len(image_bytes),
+        media_content_type=content_type,
     )
     db.add(inspiration)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        try:
+            MinioStorageService().delete_object(image_object_key)
+        except StorageError:
+            try:
+                enqueue_deletion(
+                    db,
+                    bucket_type="media",
+                    object_key=image_object_key,
+                    resource_type="orphan_inspiration_upload",
+                    resource_id=inspiration_id,
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("Failed to track orphaned imported object %s", image_object_key)
+        raise
     db.refresh(inspiration)
 
     return CreateInspirationResponse(id=inspiration.id, image_url=inspiration.image_url)
@@ -967,47 +1020,10 @@ def admin_batch_create_inspirations(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
 ) -> BatchCreateInspirationsResponse:
-    created = 0
-    skipped = 0
-    errors: list[str] = []
-
-    for i, item in enumerate(body.items):
-        try:
-            # Dedup check
-            if item.external_id:
-                existing = db.scalar(
-                    select(Inspiration).where(
-                        Inspiration.source == item.source,
-                        Inspiration.external_id == item.external_id,
-                    )
-                )
-                if existing:
-                    skipped += 1
-                    continue
-
-            inspiration = Inspiration(
-                title=item.title,
-                description=item.description,
-                prompt=item.prompt,
-                image_url=item.image_url,
-                external_id=item.external_id,
-                source=item.source,
-                source_url=item.source_url,
-                author_name=item.author_name,
-                author_url=item.author_url,
-                language=item.language or "zh",
-                categories=item.categories,
-                is_featured=item.is_featured or False,
-            )
-            db.add(inspiration)
-            created += 1
-        except Exception as exc:
-            errors.append(f"Item {i}: {exc}")
-
-    if created > 0:
-        db.commit()
-
-    return BatchCreateInspirationsResponse(created=created, skipped=skipped, errors=errors)
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="永久社区内容不再接受仅外链批量导入，请逐项上传图片或先运行外链迁移工具。",
+    )
 
 
 @admin_router.delete("/admin/inspirations/{inspiration_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1019,10 +1035,18 @@ def admin_delete_inspiration(
     inspiration = db.get(Inspiration, inspiration_id)
     if not inspiration:
         raise HTTPException(status_code=404, detail="灵感不存在。")
+    if inspiration.deleted_at is not None:
+        return
+    inspiration.deleted_at = datetime.now(timezone.utc)
     if inspiration.image_object_key:
-        try:
-            MinioStorageService().delete_object(inspiration.image_object_key)
-        except Exception:
-            logger.warning("Failed to delete MinIO object %s", inspiration.image_object_key)
-    db.delete(inspiration)
+        inspiration.media_state = MediaState.DELETE_PENDING
+        enqueue_deletion(
+            db,
+            bucket_type="media",
+            object_key=inspiration.image_object_key,
+            resource_type="inspiration",
+            resource_id=inspiration.id,
+        )
+    else:
+        inspiration.media_state = MediaState.DELETED
     db.commit()

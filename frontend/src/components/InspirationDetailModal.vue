@@ -64,7 +64,8 @@ async function downloadImage() {
 }
 
 function formatSource(source: string) {
-  if (source === 'gallery') return '社区作品'
+  if (source === 'community-curated') return '管理员精选'
+  if (source === 'admin-imported') return '管理员导入'
   return source
 }
 </script>
@@ -74,7 +75,7 @@ function formatSource(source: string) {
     <div class="modal-panel">
       <div class="modal-toolbar">
         <div class="modal-toolbar-left">
-          <span class="inspiration-source-badge" :class="{ 'source-gallery': item.source === 'gallery' }">
+          <span class="inspiration-source-badge" :class="{ 'source-gallery': item.source === 'community-curated' }">
             {{ formatSource(item.source) }}
           </span>
           <a
@@ -127,7 +128,7 @@ function formatSource(source: string) {
           </div>
           <p class="modal-prompt">{{ item.prompt }}</p>
         </template>
-        <template v-else-if="item.source === 'gallery'">
+        <template v-else-if="item.source === 'community-curated'">
           <p class="modal-prompt-hidden">提示词已隐藏</p>
         </template>
 

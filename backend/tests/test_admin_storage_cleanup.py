@@ -1,5 +1,7 @@
 from app.api import admin_routes
 from app.db import init_db
+from app.models.generation_job import JobStatus
+from app.models.media import MediaDeletionTask, MediaState
 
 
 def test_init_db_only_runs_seed_steps(monkeypatch):
@@ -12,52 +14,42 @@ def test_init_db_only_runs_seed_steps(monkeypatch):
     assert calls == ["user", "models"]
 
 
-def test_admin_delete_job_removes_reference_image_from_reference_bucket(monkeypatch):
+def test_admin_delete_job_queues_media_and_preserves_job():
     class FakeJob:
         id = "job-1"
         object_key = "generated/job.png"
         reference_image_key = "references/job/source.png"
-
-    class FakeScalars:
-        def all(self):
-            return []
+        status = JobStatus.SUCCEEDED
+        media_state = MediaState.AVAILABLE
+        deleted_at = None
+        is_public = True
 
     class FakeDb:
         def __init__(self):
-            self.deleted = None
             self.committed = False
+            self.added = []
 
         def get(self, model, job_id):
             assert job_id == "job-1"
             return FakeJob()
 
-        def delete(self, job):
-            self.deleted = job
+        def scalar(self, statement):
+            return None
 
-        def scalars(self, statement):
-            return FakeScalars()
+        def add(self, value):
+            self.added.append(value)
 
         def commit(self):
             self.committed = True
 
-    class FakeStorage:
-        def __init__(self):
-            self.deleted_objects = []
-            self.deleted_references = []
-
-        def delete_object(self, object_key):
-            self.deleted_objects.append(object_key)
-
-        def delete_reference_image(self, object_key):
-            self.deleted_references.append(object_key)
-
-    storage = FakeStorage()
-    monkeypatch.setattr(admin_routes, "MinioStorageService", lambda: storage)
     db = FakeDb()
 
     admin_routes.admin_delete_job("job-1", db=db, _={})
 
-    assert storage.deleted_objects == ["generated/job.png"]
-    assert storage.deleted_references == ["references/job/source.png"]
-    assert db.deleted is not None
+    assert len(db.added) == 2
+    assert all(isinstance(item, MediaDeletionTask) for item in db.added)
+    assert {item.object_key for item in db.added} == {
+        "generated/job.png",
+        "references/job/source.png",
+    }
     assert db.committed

@@ -44,6 +44,7 @@ const healthRows = computed<HealthRow[]>(() => {
     queue: 'Generation 队列',
     outbox: 'Transactional Outbox',
     smtp: 'SMTP',
+    media_cleanup: '媒体清理',
   }
   return Object.entries(health.value.components)
     .filter(([key]) => key !== 'providers')
@@ -62,6 +63,9 @@ function healthDetail(key: string, item: Record<string, unknown>) {
   if (key === 'queue') return `队列深度 ${item.depth ?? 0}`
   if (key === 'outbox') return `${item.pending ?? 0} 条待投递 · 最老等待 ${formatDuration(Number(item.oldest_wait_seconds ?? 0))}`
   if (key === 'smtp') return item.status === 'configured' ? '已配置发送通道' : '未配置，不影响图片生成'
+  if (key === 'media_cleanup') {
+    return `${item.pending ?? 0} 条待清理 · ${item.failed_retries ?? 0} 条重试 · 社区待迁移 ${item.community_assets_pending_migration ?? 0}`
+  }
   if (item.detail) return String(item.detail)
   return '正常'
 }

@@ -46,7 +46,7 @@ const columns = computed(() => {
           >
             <img :src="item.image_url" :alt="item.title" loading="lazy" />
             <div class="inspiration-card-overlay">
-              <span v-if="item.source === 'gallery'" class="inspiration-source-tag source-gallery">社区</span>
+              <span v-if="item.source === 'community-curated'" class="inspiration-source-tag source-gallery">管理员精选</span>
               <span v-else class="inspiration-source-tag source-external">灵感库</span>
               <div class="inspiration-card-info">
                 <div v-if="item.categories && item.categories.length > 0" class="inspiration-card-tags">

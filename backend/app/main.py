@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
 from sqlalchemy.orm import Session
 
-from app.api import admin_router, announcement_router, auth_router, inspiration_router, reference_router, router, user_router
+from app.api import admin_router, announcement_router, auth_router, community_admin_router, inspiration_router, media_router, reference_router, router, user_group_router, user_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.init_db import init_db
@@ -46,8 +46,11 @@ app.include_router(router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(user_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_router, prefix=settings.api_v1_prefix)
+app.include_router(community_admin_router, prefix=settings.api_v1_prefix)
+app.include_router(user_group_router, prefix=settings.api_v1_prefix)
 app.include_router(announcement_router, prefix=settings.api_v1_prefix)
 app.include_router(inspiration_router, prefix=settings.api_v1_prefix)
+app.include_router(media_router, prefix=settings.api_v1_prefix)
 app.include_router(reference_router, prefix=settings.api_v1_prefix)
 
 

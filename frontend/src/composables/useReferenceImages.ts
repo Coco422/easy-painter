@@ -9,7 +9,6 @@ import {
 import type { ReferenceImageItem } from '@/lib/types'
 
 // 模块级单例：GeneratePanel 与历史抽屉、CreatePage 共享同一份状态。
-const MAX_REFERENCE_HISTORY = 50
 const selected = ref<ReferenceImageItem | null>(null)
 const uploading = ref(false)
 const history = ref<ReferenceImageItem[]>([])
@@ -62,7 +61,7 @@ function releaseObjectUrl(id: string) {
   objectUrls.delete(id)
 }
 
-async function uploadAndSelect(file: File) {
+async function uploadAndSelect(file: File, confirmEvictOldest = false) {
   if (uploading.value) {
     throw new Error('已有参考图正在上传，请稍候。')
   }
@@ -70,7 +69,7 @@ async function uploadAndSelect(file: File) {
   pendingFilename.value = file.name
   pendingPreviewUrl.value = URL.createObjectURL(file)
   try {
-    const item = await uploadReferenceImage(file)
+    const item = await uploadReferenceImage(file, confirmEvictOldest)
     const previewUrl = pendingPreviewUrl.value
     if (previewUrl) {
       const previousUrl = objectUrls.get(item.id)
@@ -79,11 +78,7 @@ async function uploadAndSelect(file: File) {
       pendingPreviewUrl.value = null
     }
     selected.value = item
-    const nextHistory = [item, ...history.value.filter((entry) => entry.id !== item.id)]
-    for (const evicted of nextHistory.slice(MAX_REFERENCE_HISTORY)) {
-      releaseObjectUrl(evicted.id)
-    }
-    history.value = nextHistory.slice(0, MAX_REFERENCE_HISTORY)
+    history.value = [item, ...history.value.filter((entry) => entry.id !== item.id)]
     return item
   } finally {
     if (pendingPreviewUrl.value) {

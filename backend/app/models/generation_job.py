@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum as SqlEnum, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum as SqlEnum, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.media import MediaState
 
 
 def utcnow() -> datetime:
@@ -40,6 +41,11 @@ class GenerationJob(Base):
     provider_id_snapshot: Mapped[str | None] = mapped_column(String(36), nullable=True)
     provider_name_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
     credit_cost_snapshot: Mapped[int] = mapped_column(Integer, default=0)
+    group_code_snapshot: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    group_name_snapshot: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    base_credit_cost_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    billing_multiplier_bps_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    generated_retention_hours_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size: Mapped[str] = mapped_column(String(32), default="auto")
     aspect_ratio: Mapped[str] = mapped_column(String(16), default="auto")
     reference_image_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -48,6 +54,20 @@ class GenerationJob(Base):
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    media_state: Mapped[MediaState] = mapped_column(
+        SqlEnum(
+            MediaState,
+            native_enum=False,
+            values_callable=lambda enum: [item.value for item in enum],
+        ),
+        default=MediaState.NONE,
+        index=True,
+    )
+    media_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    media_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    media_content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    media_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_job_meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)

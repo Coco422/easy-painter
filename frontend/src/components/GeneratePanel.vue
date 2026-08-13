@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import ReferenceHistoryDrawer from '@/components/ReferenceHistoryDrawer.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
+import { ApiError } from '@/lib/api'
 import { resolveImageLayout } from '@/lib/image-layout'
 import type { BatchCount, ImageSize, PublicModel } from '@/lib/types'
 
@@ -69,6 +70,8 @@ const selectedSizeOption = computed(() => sizeOptions.find((option) => option.va
 const selectedSizeLayout = computed(() => resolveImageLayout(selectedSizeOption.value.value))
 const selectedModelConfig = computed(() => props.models.find((model) => model.id === props.selectedModel))
 const unitCost = computed(() => selectedModelConfig.value?.credit_cost ?? 0)
+const baseUnitCost = computed(() => selectedModelConfig.value?.base_credit_cost ?? unitCost.value)
+const hasDiscount = computed(() => baseUnitCost.value !== unitCost.value)
 const estimatedCost = computed(() => unitCost.value * props.selectedBatchCount)
 const estimatedBalance = computed(() => props.credits === null ? null : props.credits - estimatedCost.value)
 const insufficientCredits = computed(() => estimatedBalance.value !== null && estimatedBalance.value < 0)
@@ -91,6 +94,23 @@ async function handleUpload(file: File) {
   try {
     await uploadAndSelect(file)
   } catch (error) {
+    if (error instanceof ApiError && error.status === 409 && error.detail?.max_reference_images) {
+      const limit = error.detail.max_reference_images as number
+      const current = error.detail.current_count as number | undefined
+      const evict = error.detail.evict_count as number | undefined
+      const summary = current === undefined ? `参考图已达到 ${limit} 张上限。` : `当前已有 ${current}/${limit} 张参考图。`
+      if (window.confirm(`${summary}\n继续将自动淘汰最早上传的 ${evict ?? 1} 张参考图，此操作不可恢复。`)) {
+        try {
+          await uploadAndSelect(file, true)
+          return
+        } catch (retryError) {
+          referenceError.value = retryError instanceof Error ? retryError.message : '参考图上传失败，请稍后重试。'
+          return
+        }
+      }
+      referenceError.value = '已取消上传；你可以先在参考图历史中手动整理。'
+      return
+    }
     referenceError.value = error instanceof Error ? error.message : '参考图上传失败，请稍后重试。'
   }
 }
@@ -259,7 +279,7 @@ watch(sizePickerOpen, (open) => {
           @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="model in models" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
-            {{ model.label }}{{ selected && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张）
+            {{ model.label }}{{ selected && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张{{ model.base_credit_cost !== model.credit_cost ? `，原价 ${model.base_credit_cost} 丝` : '' }}）
           </option>
         </select>
       </label>
@@ -310,7 +330,7 @@ watch(sizePickerOpen, (open) => {
       <div class="billing-estimate" :class="{ insufficient: insufficientCredits }" aria-live="polite">
         <div>
           <span>预计消耗</span>
-          <strong>{{ unitCost }} 丝 × {{ selectedBatchCount }} 张 = {{ estimatedCost }} 丝</strong>
+          <strong>{{ unitCost }} 丝 × {{ selectedBatchCount }} 张 = {{ estimatedCost }} 丝<span v-if="hasDiscount">（原价 {{ baseUnitCost * selectedBatchCount }} 丝）</span></strong>
         </div>
         <div>
           <span>当前余额</span>

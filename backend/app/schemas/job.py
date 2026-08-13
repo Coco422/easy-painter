@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.user_group import UserGroupPolicyResponse
+
 
 ImageAspectRatio = Literal["auto", "1:1", "3:4", "9:16", "4:3", "16:9"]
 IMAGE_SIZE_PATTERN = re.compile(r"^(\d+)x(\d+)$")
@@ -25,7 +27,8 @@ class PublicModel(BaseModel):
     enabled: bool = True
     supports_reference_image: bool = True
     supported_sizes: list[str] = Field(default_factory=list)
-    credit_cost: int = 1
+    credit_cost: int = 2
+    base_credit_cost: int = 2
 
 
 class PublicMetaResponse(BaseModel):
@@ -36,6 +39,7 @@ class PublicMetaResponse(BaseModel):
     polling_interval_ms: int
     example_prompts: list[str]
     models: list[PublicModel]
+    viewer_group: UserGroupPolicyResponse | None = None
 
 
 class CreateJobRequest(BaseModel):
@@ -92,6 +96,10 @@ class CreateJobResponse(BaseModel):
     poll_url: str
     rate_limit_remaining: int
     credit_cost: int = 0
+    base_credit_cost: int | None = None
+    billing_multiplier_bps: int | None = None
+    group_code: str | None = None
+    group_name: str | None = None
     balance_after: int = 0
     billing_status: str = "not_charged"
 
@@ -114,10 +122,16 @@ class JobDetailResponse(BaseModel):
     aspect_ratio: str | None = None
     error_message: str | None = None
     credit_cost: int = 0
+    base_credit_cost: int | None = None
+    billing_multiplier_bps: int | None = None
+    group_code: str | None = None
+    group_name: str | None = None
     billing_status: str = "not_charged"
     refunded_at: datetime | None = None
     created_at: datetime
     finished_at: datetime | None = None
+    media_state: str = "none"
+    media_expires_at: datetime | None = None
 
 
 class TogglePublicRequest(BaseModel):
@@ -150,6 +164,7 @@ class GalleryItem(BaseModel):
     tags: list[str] | None = None
     like_count: int = 0
     liked_by_me: bool = False
+    media_expires_at: datetime | None = None
 
 
 class GalleryPageResponse(BaseModel):

@@ -54,6 +54,16 @@ function isLiveJob(job: JobDetailResponse) {
   return job.status === 'queued' || job.status === 'processing'
 }
 
+async function refreshJobMedia(job: JobDetailResponse) {
+  try {
+    const refreshed = await fetchJob(job.job_id)
+    const index = activeJobs.value.findIndex((item) => item.job_id === job.job_id)
+    if (index >= 0) activeJobs.value.splice(index, 1, refreshed)
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : '图片链接刷新失败。'
+  }
+}
+
 function supportsCurrentReferenceInput(model: PublicModel | undefined) {
   return Boolean(model?.enabled) && (!selectedReferenceImage.value || model?.supports_reference_image !== false)
 }
@@ -392,6 +402,7 @@ onMounted(() => {
       @retry="retryJob"
       @dismiss="removeActiveJob"
       @add-to-gallery="handleAddToGallery"
+      @refresh-media="refreshJobMedia"
     />
   </div>
 </template>

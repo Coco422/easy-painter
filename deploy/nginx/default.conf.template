@@ -24,19 +24,6 @@ server {
         proxy_read_timeout 300s;
     }
 
-    location /media/ {
-        set $media_upstream minio:9000;
-        rewrite ^/media/(.*)$ /${MINIO_BUCKET}/$1 break;
-        proxy_pass http://$media_upstream;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_buffering on;
-        # Only successful media responses should be immutable. Keeping this
-        # header off 4xx/5xx responses lets browsers retry transient MinIO errors.
-        add_header Cache-Control "public, max-age=2592000, immutable";
-    }
-
     location / {
         try_files $uri $uri/ /index.html;
     }

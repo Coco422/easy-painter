@@ -20,12 +20,14 @@ const emit = defineEmits<{
   toggleFavorite: [item: GalleryItem]
   togglePublic: [item: GalleryItem]
   toggleLike: [item: GalleryItem]
+  refresh: [item: GalleryItem]
 }>()
 
 const columnCount = ref(4)
 const failedImageIds = ref(new Set<string>())
 const actualImageAspectRatios = ref(new Map<string, string>())
 const imageRetryKeys = ref(new Map<string, number>())
+const refreshRequestedIds = new Set<string>()
 const GALLERY_IMAGE_RETRY_DELAYS_MS = [2000, 8000]
 
 function updateColumnCount() {
@@ -51,10 +53,15 @@ function markImageLoaded(jobId: string, event: Event) {
   const failed = new Set(failedImageIds.value)
   failed.delete(jobId)
   failedImageIds.value = failed
+  refreshRequestedIds.delete(jobId)
 }
 
-function markImageFailed(jobId: string) {
-  failedImageIds.value = new Set(failedImageIds.value).add(jobId)
+function markImageFailed(item: GalleryItem) {
+  if (!refreshRequestedIds.has(item.job_id)) {
+    refreshRequestedIds.add(item.job_id)
+    emit('refresh', item)
+  }
+  failedImageIds.value = new Set(failedImageIds.value).add(item.job_id)
 }
 
 function handleCardClick(item: GalleryItem) {
@@ -112,7 +119,7 @@ const columns = computed(() => {
             :height="resolveImageLayout(item.size, item.aspect_ratio).height"
             loading="lazy"
             @load="markImageLoaded(item.job_id, $event)"
-            @failed="markImageFailed(item.job_id)"
+            @failed="markImageFailed(item)"
           >
             <template #status="{ loaded, failed, retrying }">
               <span

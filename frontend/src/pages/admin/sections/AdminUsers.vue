@@ -9,6 +9,7 @@ import {
   NFormItem,
   NInput,
   NModal,
+  NSelect,
   NSpace,
   NSpin,
   NSwitch,
@@ -26,9 +27,10 @@ import {
   adminCreateUser,
   adminDeleteUser,
   adminFetchUsers,
+  adminFetchUserGroups,
   adminUpdateUser,
 } from '@/lib/api'
-import type { UserInfo } from '@/lib/types'
+import type { UserGroup, UserInfo } from '@/lib/types'
 
 const emit = defineEmits<{ 'auth-expired': [] }>()
 const message = useMessage()
@@ -39,9 +41,11 @@ const loading = ref(false)
 const creating = ref(false)
 const saving = ref(false)
 const searchQuery = ref('')
+const groupFilter = ref<string | null>(null)
+const groups = ref<UserGroup[]>([])
 
 const createFormRef = ref<FormInst | null>(null)
-const createForm = reactive({ username: '', email: '', password: '', display_name: '' })
+const createForm = reactive({ username: '', email: '', password: '', display_name: '', group_code: null as string | null })
 const createRules: FormRules = {
   username: { required: true, message: '请输入用户名', trigger: ['input', 'blur'] },
   password: { required: true, message: '请输入密码', trigger: ['input', 'blur'] },
@@ -49,19 +53,28 @@ const createRules: FormRules = {
 
 const editModalOpen = ref(false)
 const editFormRef = ref<FormInst | null>(null)
-const editForm = reactive({ id: '', username: '', email: '', display_name: '', password: '', is_public: false })
+const editForm = reactive({ id: '', username: '', email: '', display_name: '', password: '', is_public: false, group_code: null as string | null })
+
+const enabledGroupOptions = computed(() => groups.value.filter((group) => group.is_enabled).map((group) => ({ label: `${group.name}（${group.code}）`, value: group.code })))
+const allGroupOptions = computed(() => groups.value.map((group) => ({ label: `${group.name}（${group.code}）${group.is_enabled ? '' : ' · 已停用'}`, value: group.code })))
+const editGroupOptions = computed(() => groups.value
+  .filter((group) => group.is_enabled || group.code === editForm.group_code)
+  .map((group) => ({ label: `${group.name}（${group.code}）${group.is_enabled ? '' : ' · 当前组已停用'}`, value: group.code })))
 const editRules: FormRules = {
   display_name: { required: true, message: '请输入显示名称', trigger: ['input', 'blur'] },
 }
 
 const filteredUsers = computed(() => {
   const query = searchQuery.value.trim().toLocaleLowerCase()
-  if (!query) return users.value
-  return users.value.filter((user) =>
+  return users.value.filter((user) => {
+    const matchesGroup = !groupFilter.value || user.group?.code === groupFilter.value
+    const matchesQuery = !query || (
     user.username.toLocaleLowerCase().includes(query) ||
     user.display_name.toLocaleLowerCase().includes(query) ||
     (user.email?.toLocaleLowerCase().includes(query) ?? false)
-  )
+    )
+    return matchesGroup && matchesQuery
+  })
 })
 
 function handleError(error: unknown, fallback: string) {
@@ -88,6 +101,10 @@ async function loadUsers() {
   }
 }
 
+async function loadGroups() {
+  try { groups.value = await adminFetchUserGroups() } catch (error) { handleError(error, '用户组加载失败。') }
+}
+
 async function createUser() {
   try {
     await createFormRef.value?.validate()
@@ -101,12 +118,14 @@ async function createUser() {
       email: createForm.email || undefined,
       password: createForm.password,
       display_name: createForm.display_name || undefined,
+      group_code: createForm.group_code || undefined,
     })
     users.value.push(created)
     createForm.username = ''
     createForm.email = ''
     createForm.password = ''
     createForm.display_name = ''
+    createForm.group_code = null
     createFormRef.value?.restoreValidation()
     message.success(`用户 ${created.username} 已创建。`)
   } catch (error) {
@@ -123,6 +142,7 @@ function openEdit(user: UserInfo) {
   editForm.display_name = user.display_name
   editForm.password = ''
   editForm.is_public = user.is_public
+  editForm.group_code = user.group?.code ?? null
   editFormRef.value?.restoreValidation()
   editModalOpen.value = true
 }
@@ -139,6 +159,7 @@ async function saveUser() {
       email: editForm.email || null,
       display_name: editForm.display_name,
       is_public: editForm.is_public,
+      group_code: editForm.group_code || undefined,
       ...(editForm.password ? { password: editForm.password } : {}),
     })
     const index = users.value.findIndex((user) => user.id === updated.id)
@@ -175,6 +196,7 @@ const columns: DataTableColumns<UserInfo> = [
   { title: '用户名', key: 'username', minWidth: 130 },
   { title: '邮箱', key: 'email', minWidth: 200, render: (row) => row.email || '-' },
   { title: '显示名称', key: 'display_name', minWidth: 150 },
+  { title: '用户组', key: 'group', width: 120, render: (row) => row.group ? h(NTag, { size: 'small', bordered: false, type: 'info' }, { default: () => row.group?.name ?? row.group?.code }) : '-' },
   { title: '灵感丝线', key: 'credits', width: 100 },
   {
     title: '公开画廊', key: 'is_public', width: 100,
@@ -192,7 +214,7 @@ const columns: DataTableColumns<UserInfo> = [
   },
 ]
 
-onMounted(loadUsers)
+onMounted(() => { void loadUsers(); void loadGroups() })
 </script>
 
 <template>
@@ -212,6 +234,7 @@ onMounted(loadUsers)
         <NFormItem label="邮箱"><NInput v-model:value="createForm.email" maxlength="320" placeholder="可选" /></NFormItem>
         <NFormItem label="密码" path="password"><NInput v-model:value="createForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" /></NFormItem>
         <NFormItem label="显示名称"><NInput v-model:value="createForm.display_name" maxlength="128" placeholder="可选" /></NFormItem>
+        <NFormItem label="用户组"><NSelect v-model:value="createForm.group_code" clearable :options="enabledGroupOptions" placeholder="默认组" /></NFormItem>
         <NButton type="primary" :loading="creating" class="create-button" @click="createUser"><template #icon><UserPlus :size="16" /></template>创建用户</NButton>
       </NForm>
     </NCard>
@@ -220,12 +243,13 @@ onMounted(loadUsers)
       <NInput v-model:value="searchQuery" clearable placeholder="搜索用户名、邮箱或显示名称" class="search-input">
         <template #prefix><Search :size="15" /></template>
       </NInput>
+      <NSelect v-model:value="groupFilter" clearable :options="allGroupOptions" placeholder="全部用户组" class="group-filter" />
       <span>{{ filteredUsers.length }} / {{ users.length }} 位用户</span>
     </div>
 
     <NSpin :show="loading">
       <NEmpty v-if="!loading && filteredUsers.length === 0" :description="searchQuery ? '没有匹配的用户' : '还没有用户'" class="section-empty" />
-      <NDataTable v-else :columns="columns" :data="filteredUsers" :row-key="(row: UserInfo) => row.id" size="small" :single-line="false" :scroll-x="1080" />
+      <NDataTable v-else :columns="columns" :data="filteredUsers" :row-key="(row: UserInfo) => row.id" size="small" :single-line="false" :scroll-x="1200" />
     </NSpin>
 
     <NModal v-model:show="editModalOpen" preset="card" title="编辑用户" class="admin-form-modal" :mask-closable="!saving">
@@ -233,6 +257,7 @@ onMounted(loadUsers)
         <NFormItem label="用户名"><NInput :value="editForm.username" disabled /></NFormItem>
         <NFormItem label="邮箱"><NInput v-model:value="editForm.email" maxlength="320" placeholder="留空则不绑定邮箱" /></NFormItem>
         <NFormItem label="显示名称" path="display_name"><NInput v-model:value="editForm.display_name" maxlength="128" /></NFormItem>
+        <NFormItem label="用户组"><NSelect v-model:value="editForm.group_code" :options="editGroupOptions" placeholder="请选择启用的用户组" /><small class="form-hint">更改只影响后续任务与参考图上传；停用组的现有成员可保留原组。</small></NFormItem>
         <NFormItem label="重置密码"><NInput v-model:value="editForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" placeholder="超管可直接设置，留空则不修改" /></NFormItem>
         <NFormItem label="公开画廊"><NSwitch v-model:value="editForm.is_public" /></NFormItem>
       </NForm>
@@ -252,6 +277,8 @@ onMounted(loadUsers)
 .create-button { margin-bottom: 24px; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; }
 .search-input { width: min(360px, 100%); }
+.group-filter { width: 180px; }
+.form-hint { display: block; margin-top: 6px; color: var(--text-muted); font-size: 12px; }
 .section-empty { padding: 72px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }
 @media (max-width: 900px) { .create-user-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .create-button { align-self: center; } }
 @media (max-width: 620px) { .create-user-form { grid-template-columns: 1fr; } .create-button { margin-bottom: 10px; } .table-toolbar { align-items: flex-start; flex-direction: column; } }

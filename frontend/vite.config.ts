@@ -8,18 +8,7 @@ import { parseChangelog } from './src/lib/release'
 const projectRoot = fileURLToPath(new URL('..', import.meta.url))
 const appVersion = readFileSync(resolve(projectRoot, 'VERSION'), 'utf-8').trim()
 const appReleases = parseChangelog(readFileSync(resolve(projectRoot, 'CHANGELOG.md'), 'utf-8'))
-
-function readMinioBucket(): string {
-  try {
-    const envPath = resolve(projectRoot, '.env')
-    const content = readFileSync(envPath, 'utf-8')
-    const match = content.match(/^MINIO_BUCKET=(.+)$/m)
-    if (match) return match[1].trim()
-  } catch {}
-  return 'easy-painter-media'
-}
-
-const minioBucket = readMinioBucket()
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000'
 
 export default defineConfig({
   plugins: [vue()],
@@ -36,13 +25,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
-      },
-      '/media': {
-        target: 'http://127.0.0.1:9000',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/media/, `/${minioBucket}`),
       },
     },
   },

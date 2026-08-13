@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.user_group import STANDARD_GROUP_CODE
 
 
 def utcnow() -> datetime:
@@ -24,4 +25,10 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(128), default="")
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     credits: Mapped[int] = mapped_column(Integer, default=0)
+    group_code: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("user_groups.code"),
+        default=STANDARD_GROUP_CODE,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

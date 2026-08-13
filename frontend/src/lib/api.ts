@@ -1,6 +1,7 @@
 import { getAdminAuthHeader, getAuthHeader } from './auth'
 import type {
   AdminHealth,
+  AdminInspirationItem,
   AdminJobItem,
   AdminOverview,
   AnnouncementItem,
@@ -17,6 +18,7 @@ import type {
   RedemptionCodeItem,
   ReferenceImageItem,
   UpstreamProvider,
+  UserGroup,
   UserInfo,
 } from './types'
 
@@ -110,9 +112,10 @@ export function createJob(payload: CreateJobRequest, idempotencyKey: string) {
 
 // ---- Reference Image APIs ----
 
-export function uploadReferenceImage(file: File) {
+export function uploadReferenceImage(file: File, confirmEvictOldest = false) {
   const formData = new FormData()
   formData.append('file', file)
+  if (confirmEvictOldest) formData.append('confirm_evict_oldest', 'true')
   return apiRequest<ReferenceImageItem>('/api/v1/reference-images', {
     method: 'POST',
     body: formData,
@@ -282,18 +285,36 @@ export function adminFetchUsers() {
   return adminApiRequest<UserInfo[]>('/api/v1/admin/users')
 }
 
-export function adminCreateUser(data: { username: string; email?: string; password: string; display_name?: string }) {
+export function adminCreateUser(data: { username: string; email?: string; password: string; display_name?: string; group_code?: string }) {
   return adminApiRequest<UserInfo>('/api/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export function adminUpdateUser(userId: string, data: { email?: string | null; password?: string; display_name?: string; is_public?: boolean }) {
+export function adminUpdateUser(userId: string, data: { email?: string | null; password?: string; display_name?: string; is_public?: boolean; group_code?: string }) {
   return adminApiRequest<UserInfo>(`/api/v1/admin/users/${userId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   })
+}
+
+// ---- Admin User Group APIs ----
+
+export function adminFetchUserGroups() {
+  return adminApiRequest<UserGroup[]>('/api/v1/admin/user-groups')
+}
+
+export function adminCreateUserGroup(data: Omit<UserGroup, 'created_at' | 'updated_at' | 'user_count'>) {
+  return adminApiRequest<UserGroup>('/api/v1/admin/user-groups', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function adminUpdateUserGroup(code: string, data: Partial<Omit<UserGroup, 'code' | 'created_at' | 'updated_at' | 'user_count'>>) {
+  return adminApiRequest<UserGroup>(`/api/v1/admin/user-groups/${encodeURIComponent(code)}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export function adminDeleteUserGroup(code: string) {
+  return adminApiRequest<void>(`/api/v1/admin/user-groups/${encodeURIComponent(code)}`, { method: 'DELETE' })
 }
 
 export function adminDeleteUser(userId: string) {
@@ -467,16 +488,20 @@ export function fetchInspirations(params: {
   return apiRequest<InspirationFeedResponse>(`/api/v1/inspirations?${qs}`)
 }
 
+export function fetchInspirationCategories(limit = 20) {
+  return apiRequest<string[]>(`/api/v1/inspirations/categories?limit=${limit}`)
+}
+
 export function adminFetchInspirations(params: {
   offset?: number
   limit?: number
   source?: string
-} = {}): Promise<InspirationFeedResponse> {
+} = {}): Promise<AdminInspirationItem[]> {
   const qs = new URLSearchParams()
   if (params.offset) qs.set('offset', String(params.offset))
   if (params.limit) qs.set('limit', String(params.limit))
   if (params.source) qs.set('source', params.source)
-  return adminApiRequest<InspirationFeedResponse>(`/api/v1/admin/inspirations?${qs}`)
+  return adminApiRequest<AdminInspirationItem[]>(`/api/v1/admin/inspirations?${qs}`)
 }
 
 export function adminCreateInspiration(formData: FormData): Promise<{ id: string; image_url: string }> {
@@ -508,4 +533,19 @@ export function adminBatchCreateInspirations(items: Array<{
 
 export function adminDeleteInspiration(id: string): Promise<void> {
   return adminApiRequest(`/api/v1/admin/inspirations/${id}`, { method: 'DELETE' })
+}
+
+export function adminFetchInspirationCandidates(params: { offset?: number; limit?: number } = {}) {
+  const qs = new URLSearchParams()
+  if (params.offset) qs.set('offset', String(params.offset))
+  if (params.limit) qs.set('limit', String(params.limit))
+  return adminApiRequest<{ items: import('./types').AdminInspirationCandidate[]; total: number }>(`/api/v1/admin/inspirations/candidates?${qs}`)
+}
+
+export function adminCreateInspirationFromJob(jobId: string) {
+  return adminApiRequest<import('./types').AdminInspirationItem>(`/api/v1/admin/inspirations/from-job/${encodeURIComponent(jobId)}`, { method: 'POST' })
+}
+
+export function adminUpdateInspiration(id: string, data: Partial<import('./types').InspirationItem>) {
+  return adminApiRequest<import('./types').AdminInspirationItem>(`/api/v1/admin/inspirations/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) })
 }

@@ -9,13 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.inspiration import Inspiration
+from app.models.media import MediaDeletionStatus, MediaDeletionTask
 from app.models.outbox_event import OutboxEvent, OutboxEventStatus
 from app.services.storage import MinioStorageService
 from app.services.tasks import celery_app
 
 
 DISPATCHER_HEARTBEAT_KEY = "easy-painter:dispatcher:heartbeat"
-EXPECTED_FLYWAY_VERSION = "3"
+EXPECTED_FLYWAY_VERSION = "5"
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -129,6 +131,41 @@ def collect_admin_health(
     components["smtp"] = {
         "status": "configured" if settings.smtp_configured else "not_configured",
     }
+
+    try:
+        pending_deletions, oldest_deletion, failed_retries = db.execute(
+            select(
+                func.count(),
+                func.min(MediaDeletionTask.created_at),
+                func.sum(case((MediaDeletionTask.attempts > 0, 1), else_=0)),
+            ).where(MediaDeletionTask.status == MediaDeletionStatus.PENDING)
+        ).one()
+        legacy_community_assets = db.scalar(
+            select(func.count())
+            .select_from(Inspiration)
+            .where(Inspiration.deleted_at.is_(None), Inspiration.image_object_key.is_(None))
+        ) or 0
+        oldest_age = (
+            round((now - _as_utc(oldest_deletion)).total_seconds(), 1)
+            if oldest_deletion
+            else 0
+        )
+        components["media_cleanup"] = {
+            "status": (
+                "degraded"
+                if (failed_retries or 0) > 0 or oldest_age > 3600 or legacy_community_assets > 0
+                else "ok"
+            ),
+            "enabled": settings.media_cleanup_enabled,
+            "pending": int(pending_deletions or 0),
+            "oldest_created_at": oldest_deletion.isoformat() if oldest_deletion else None,
+            "oldest_wait_seconds": oldest_age,
+            "failed_retries": int(failed_retries or 0),
+            "community_assets_pending_migration": int(legacy_community_assets),
+        }
+    except Exception as exc:
+        db.rollback()
+        components["media_cleanup"] = {"status": "unavailable", "detail": type(exc).__name__}
 
     try:
         since = now - timedelta(hours=24)

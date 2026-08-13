@@ -4,9 +4,11 @@ from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
 from app.models.inspiration import Inspiration
 from app.models.job_charge import JobCharge, JobChargeStatus
+from app.models.media import MediaDeletionStatus, MediaDeletionTask, MediaState
 from app.models.outbox_event import OutboxEvent, OutboxEventStatus
 from app.models.redemption_code import RedemptionCode
 from app.models.reference_image import ReferenceImage
+from app.models.user_group import UserGroup
 
 __all__ = [
     "Announcement",
@@ -17,8 +19,12 @@ __all__ = [
     "Inspiration",
     "JobCharge",
     "JobChargeStatus",
+    "MediaDeletionStatus",
+    "MediaDeletionTask",
+    "MediaState",
     "OutboxEvent",
     "OutboxEventStatus",
     "RedemptionCode",
     "ReferenceImage",
+    "UserGroup",
 ]

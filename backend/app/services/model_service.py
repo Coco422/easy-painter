@@ -46,7 +46,7 @@ def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str] | 
             "enabled": m.enabled,
             "supports_reference_image": m.supports_reference_image,
             "supported_sizes": list(m.supported_sizes) if m.supported_sizes else [],
-            "credit_cost": m.credit_cost or 1,
+            "credit_cost": m.credit_cost if m.credit_cost is not None else 2,
         }
         for m in models
     ]

@@ -13,6 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
 from app.models.user import User
+from app.models.user_group import STANDARD_GROUP_CODE
 from app.schemas.auth import (
     AdminVerifyRequest,
     EmailCodePurpose,
@@ -35,6 +36,7 @@ from app.services.email_codes import (
 from app.services.mailer import EmailDeliveryError, SmtpEmailSender
 from app.services.rate_limit import GenerationRateLimiter
 from app.services.redis_client import get_redis
+from app.services.group_policy import get_default_group
 
 auth_router = APIRouter()
 
@@ -162,11 +164,13 @@ def register(
     ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="验证码无效或已过期。")
 
+    default_group = get_default_group(db)
     user = User(
         username=body.username,
         email=email,
         password_hash=hash_password(body.password),
         display_name=body.display_name.strip() or body.username,
+        group_code=default_group.code if default_group else STANDARD_GROUP_CODE,
     )
     db.add(user)
     try:

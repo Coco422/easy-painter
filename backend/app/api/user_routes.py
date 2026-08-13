@@ -38,12 +38,16 @@ from app.services.email_codes import (
 from app.services.mailer import EmailDeliveryError, SmtpEmailSender
 from app.services.billing import redeem_credits
 from app.services.redis_client import get_redis
+from app.services.group_policy import STANDARD_POLICY, resolve_user_policy
 
 logger = logging.getLogger(__name__)
 user_router = APIRouter()
 
 
-def _user_response(u: User) -> UserResponse:
+def _user_response(u: User, db: Session | None = None) -> UserResponse:
+    policy = STANDARD_POLICY
+    if db is not None:
+        _, policy = resolve_user_policy(db, u)
     return UserResponse(
         id=u.id,
         username=u.username,
@@ -51,13 +55,24 @@ def _user_response(u: User) -> UserResponse:
         display_name=u.display_name,
         is_public=u.is_public,
         credits=u.credits,
+        group={
+            "code": policy.code,
+            "name": policy.name,
+            "billing_multiplier_bps": policy.billing_multiplier_bps,
+            "generated_retention_hours": policy.generated_retention_hours,
+            "reference_retention_hours": policy.reference_retention_hours,
+            "max_reference_images": policy.max_reference_images,
+        },
         created_at=u.created_at,
     )
 
 
 @user_router.get("/users/me", response_model=UserResponse)
-def get_me(current_user: User = Depends(require_current_user)) -> UserResponse:
-    return _user_response(current_user)
+def get_me(
+    current_user: User = Depends(require_current_user),
+    db: Session = Depends(get_db),
+) -> UserResponse:
+    return _user_response(current_user, db)
 
 
 @user_router.put("/users/me", response_model=UserResponse)
@@ -72,7 +87,7 @@ def update_me(
         current_user.is_public = body.is_public
     db.commit()
     db.refresh(current_user)
-    return _user_response(current_user)
+    return _user_response(current_user, db)
 
 
 @user_router.post(

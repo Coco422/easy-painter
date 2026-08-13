@@ -280,6 +280,18 @@ onBeforeUnmount(stopBindCountdown)
       </section>
 
       <!-- Profile card -->
+      <section v-if="authState.user?.group" class="profile-card">
+        <p class="card-label">当前用户组</p>
+        <div class="group-policy-grid">
+          <strong>{{ authState.user.group.name }}</strong>
+          <span>结算倍率 {{ (authState.user.group.billing_multiplier_bps / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 }) }}×</span>
+          <span>生成图保留 {{ authState.user.group.generated_retention_hours }} 小时</span>
+          <span>参考图保留 {{ authState.user.group.reference_retention_hours }} 小时</span>
+          <span>参考图上限 {{ authState.user.group.max_reference_images }} 张</span>
+        </div>
+        <p class="field-hint">分组策略仅影响后续创作与上传，已生成内容的价格和保留期不会变更。</p>
+      </section>
+
       <section class="profile-card profile-edit-card">
         <p class="card-label">基本资料</p>
         <label class="field-label">
@@ -431,3 +443,9 @@ onBeforeUnmount(stopBindCountdown)
     </section>
   </div>
 </template>
+
+<style scoped>
+.group-policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; color: var(--text-secondary); font-size: 14px; }
+.group-policy-grid strong { color: var(--text-primary); font-size: 17px; grid-column: 1 / -1; }
+@media (max-width: 520px) { .group-policy-grid { grid-template-columns: 1fr; } }
+</style>

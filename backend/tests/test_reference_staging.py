@@ -249,8 +249,21 @@ async def test_upload_evicts_oldest_images_beyond_limit(monkeypatch):
         )
     db.commit()
 
+    with pytest.raises(HTTPException) as exc_info:
+        await reference_routes.upload_staged_reference_image(
+            file=make_upload(),
+            confirm_evict_oldest=False,
+            db=db,
+            current_user=user,
+        )
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["max_reference_images"] == 3
+    assert exc_info.value.detail["current_count"] == 3
+    assert exc_info.value.detail["evict_count"] == 1
+
     item = await reference_routes.upload_staged_reference_image(
         file=make_upload(),
+        confirm_evict_oldest=True,
         db=db,
         current_user=user,
     )
@@ -294,6 +307,7 @@ async def test_upload_failure_does_not_evict_existing_images(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         await reference_routes.upload_staged_reference_image(
             file=make_upload(),
+            confirm_evict_oldest=True,
             db=db,
             current_user=user,
         )
@@ -317,6 +331,7 @@ async def test_capacity_transaction_failure_cleans_up_new_upload(monkeypatch):
     with pytest.raises(RuntimeError, match="lock failed"):
         await reference_routes.upload_staged_reference_image(
             file=make_upload(),
+            confirm_evict_oldest=True,
             db=db,
             current_user=user,
         )
@@ -324,7 +339,9 @@ async def test_capacity_transaction_failure_cleans_up_new_upload(monkeypatch):
     monkeypatch.setattr(db, "execute", original_execute)
     assert db.scalar(select(func.count()).select_from(ReferenceImage)) == 0
     assert storage.objects == {}
-    assert len(storage.deleted) == 1
+    # Capacity is checked under the user lock before any upload begins.  A
+    # lock failure therefore cannot leave an object that needs compensation.
+    assert storage.deleted == []
     db.close()
 
 
@@ -353,6 +370,7 @@ async def test_database_failure_cleans_up_new_upload_without_evicting_oldest(mon
     with pytest.raises(RuntimeError, match="commit failed"):
         await reference_routes.upload_staged_reference_image(
             file=make_upload(),
+            confirm_evict_oldest=True,
             db=db,
             current_user=user,
         )

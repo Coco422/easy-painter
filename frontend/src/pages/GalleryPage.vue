@@ -158,6 +158,7 @@ onMounted(async () => {
       @delete="handleDeleteItem"
       @toggle-favorite="handleToggleFavorite"
       @toggle-public="handleTogglePublic"
+      @refresh="loadGallery(galleryPage)"
     />
     <div v-if="galleryTotal > galleryPageSize" class="gallery-pagination">
       <button class="ghost-button" :disabled="galleryPage <= 1" @click="loadGallery(galleryPage - 1)">上一页</button>

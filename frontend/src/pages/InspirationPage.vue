@@ -3,7 +3,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import InspirationDetailModal from '@/components/InspirationDetailModal.vue'
 import InspirationGrid from '@/components/InspirationGrid.vue'
-import { fetchInspirations, fetchPopularTags } from '@/lib/api'
+import { fetchInspirationCategories, fetchInspirations } from '@/lib/api'
 import type { InspirationItem } from '@/lib/types'
 
 const items = ref<InspirationItem[]>([])
@@ -100,7 +100,7 @@ onMounted(() => {
   )
   void loadMore()
   observeSentinel()
-  fetchPopularTags().then(tags => { communityTags.value = tags }).catch(() => {})
+  fetchInspirationCategories().then(tags => { communityTags.value = tags }).catch(() => {})
 })
 </script>
 
@@ -108,15 +108,15 @@ onMounted(() => {
   <section class="inspiration-page">
     <div class="inspiration-header">
       <h1 class="inspiration-title">社区灵感</h1>
-      <p class="inspiration-subtitle">探索来自社区和灵感库的创作提示词，一键复用</p>
+      <p class="inspiration-subtitle">探索管理员导入或精选收录的永久创作提示词，一键复用</p>
       <div class="source-explainer" aria-label="内容来源说明">
         <div>
-          <strong>社区</strong>
-          <span>来自本站用户主动公开发布的作品与提示词。</span>
+          <strong>管理员精选</strong>
+          <span>从公开作品中审核收录，独立保存，不受原作清理影响。</span>
         </div>
         <div>
-          <strong>灵感库</strong>
-          <span>整理自互联网公开来源的提示词和创作示例。</span>
+          <strong>导入灵感</strong>
+          <span>由管理员导入并保存至本站的提示词和创作示例。</span>
         </div>
       </div>
     </div>
@@ -140,14 +140,14 @@ onMounted(() => {
           >全部</button>
           <button
             class="source-pill"
-            :class="{ active: selectedSource === 'gallery' }"
-            @click="handleSourceChange('gallery')"
-          >社区</button>
+            :class="{ active: selectedSource === 'community-curated' }"
+            @click="handleSourceChange('community-curated')"
+          >精选</button>
           <button
             class="source-pill"
-            :class="{ active: selectedSource !== '' && selectedSource !== 'gallery' }"
-            @click="handleSourceChange('awesome-gpt-image-2')"
-          >灵感库</button>
+            :class="{ active: selectedSource === 'imported' }"
+            @click="handleSourceChange('imported')"
+          >导入</button>
         </div>
         <div class="sort-toggle">
           <button
@@ -164,7 +164,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="selectedSource === 'gallery' && communityTags.length > 0" class="category-filter">
+    <div v-if="communityTags.length > 0" class="category-filter">
       <button
         v-for="tag in communityTags.slice(0, 12)"
         :key="tag"

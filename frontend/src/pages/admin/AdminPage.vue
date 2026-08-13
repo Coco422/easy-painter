@@ -14,20 +14,22 @@ import {
   type FormRules,
   type GlobalThemeOverrides,
 } from 'naive-ui'
-import { Cpu, Gauge, ListTodo, LogOut, Megaphone, Menu, Server, Users, Wallet } from 'lucide-vue-next'
+import { Cpu, GalleryVerticalEnd, Gauge, Group, ListTodo, LogOut, Megaphone, Menu, Server, Users, Wallet } from 'lucide-vue-next'
 
 import { adminLogout, adminVerify, authState } from '@/lib/auth'
 import { themeState } from '@/lib/theme'
 
-type SectionKey = 'overview' | 'providers' | 'models' | 'users' | 'jobs' | 'billing' | 'announcements'
+type SectionKey = 'overview' | 'providers' | 'models' | 'users' | 'groups' | 'jobs' | 'billing' | 'inspirations' | 'announcements'
 
 const sectionComponents: Record<SectionKey, Component> = {
   overview: defineAsyncComponent(() => import('./sections/AdminOverview.vue')),
   providers: defineAsyncComponent(() => import('./sections/AdminProviders.vue')),
   models: defineAsyncComponent(() => import('./sections/AdminModels.vue')),
   users: defineAsyncComponent(() => import('./sections/AdminUsers.vue')),
+  groups: defineAsyncComponent(() => import('./sections/AdminUserGroups.vue')),
   jobs: defineAsyncComponent(() => import('./sections/AdminJobs.vue')),
   billing: defineAsyncComponent(() => import('./sections/AdminBilling.vue')),
+  inspirations: defineAsyncComponent(() => import('./sections/AdminInspirations.vue')),
   announcements: defineAsyncComponent(() => import('./sections/AdminAnnouncements.vue')),
 }
 
@@ -36,8 +38,10 @@ const navItems = [
   { key: 'providers' as const, label: '上游管理', icon: Server },
   { key: 'models' as const, label: '模型管理', icon: Cpu },
   { key: 'users' as const, label: '用户管理', icon: Users },
+  { key: 'groups' as const, label: '用户组', icon: Group },
   { key: 'jobs' as const, label: '任务管理', icon: ListTodo },
   { key: 'billing' as const, label: '计费管理', icon: Wallet },
+  { key: 'inspirations' as const, label: '社区内容', icon: GalleryVerticalEnd },
   { key: 'announcements' as const, label: '通知管理', icon: Megaphone },
 ]
 

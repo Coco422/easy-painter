@@ -6,6 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.models.user_group import STANDARD_GROUP_CODE
+from app.schemas.user_group import UserGroupPolicyResponse
+
 
 class EmailCodePurpose(str, Enum):
     REGISTER = "register"
@@ -64,6 +67,7 @@ class UserResponse(BaseModel):
     display_name: str
     is_public: bool
     credits: int = 0
+    group: UserGroupPolicyResponse | None = None
     created_at: datetime
 
 
@@ -81,6 +85,7 @@ class AdminCreateUserRequest(BaseModel):
     email: EmailStr | None = None
     password: str = Field(min_length=6, max_length=128)
     display_name: str = Field(default="", max_length=128)
+    group_code: str | None = Field(default=None, min_length=2, max_length=64)
 
 
 class AdminUpdateUserRequest(BaseModel):
@@ -88,3 +93,4 @@ class AdminUpdateUserRequest(BaseModel):
     password: str | None = Field(default=None, min_length=6, max_length=128)
     display_name: str | None = Field(default=None, max_length=128)
     is_public: bool | None = None
+    group_code: str | None = Field(default=None, min_length=2, max_length=64)

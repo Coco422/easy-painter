@@ -36,10 +36,13 @@ def reserve_job_credits(
     amount: int,
     model_label: str,
     provider_name: str | None,
+    group_code: str | None = None,
+    group_name: str | None = None,
+    base_credit_cost: int | None = None,
+    billing_multiplier_bps: int | None = None,
 ) -> tuple[JobCharge | None, int]:
-    if amount <= 0:
-        balance = db.scalar(select(User.credits).where(User.id == user_id)) or 0
-        return None, balance
+    if amount < 0:
+        raise ValueError("charge amount cannot be negative")
 
     balance = db.scalar(
         update(User)
@@ -65,6 +68,10 @@ def reserve_job_credits(
             "model_label": model_label,
             "provider_name": provider_name,
             "credit_cost": amount,
+            "group_code": group_code,
+            "group_name": group_name,
+            "base_credit_cost": base_credit_cost,
+            "billing_multiplier_bps": billing_multiplier_bps,
         },
     )
     charge = JobCharge(
@@ -75,6 +82,10 @@ def reserve_job_credits(
         reserve_transaction_id=transaction_id,
         model_label=model_label,
         provider_name=provider_name,
+        group_code_snapshot=group_code,
+        group_name_snapshot=group_name,
+        base_credit_cost_snapshot=base_credit_cost,
+        billing_multiplier_bps_snapshot=billing_multiplier_bps,
     )
     db.add_all([transaction, charge])
     return charge, balance
@@ -126,6 +137,11 @@ def refund_job_charge(
                 "model_label": charge.model_label,
                 "provider_name": charge.provider_name,
                 "refund_reason": reason,
+                "group_code": charge.group_code_snapshot,
+                "group_name": charge.group_name_snapshot,
+                "base_credit_cost": charge.base_credit_cost_snapshot,
+                "billing_multiplier_bps": charge.billing_multiplier_bps_snapshot,
+                "credit_cost": charge.amount,
             },
             created_at=refunded_at,
         )

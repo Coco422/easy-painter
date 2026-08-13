@@ -15,6 +15,7 @@ from app.models.outbox_event import OutboxEvent, OutboxEventStatus
 from app.services.billing import reconcile_job_billing, reconcile_user_balances
 from app.services.health import DISPATCHER_HEARTBEAT_KEY
 from app.services.job_lifecycle import mark_generation_failed
+from app.services.media_lifecycle import process_media_deletions, scan_expired_media
 from app.services.redis_client import redis_client
 from app.services.tasks import generate_image_task
 
@@ -154,6 +155,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _stop)
     last_watchdog = 0.0
     last_reconciliation = 0.0
+    last_media_cleanup = 0.0
     logger.info("Dispatcher started.")
     while not _stopping:
         loop_started = time.monotonic()
@@ -172,6 +174,16 @@ def main() -> None:
                 if any(reconciled.values()):
                     logger.warning("Billing reconciliation result=%s", reconciled)
                 last_reconciliation = loop_started
+            if settings.media_cleanup_enabled and loop_started - last_media_cleanup >= settings.media_cleanup_interval_seconds:
+                db = SessionLocal()
+                try:
+                    marked = scan_expired_media(db)
+                    deleted = process_media_deletions(db, limit=settings.media_cleanup_batch_size)
+                    if marked or any(deleted.values()):
+                        logger.info("Media cleanup marked=%s result=%s", marked, deleted)
+                finally:
+                    db.close()
+                last_media_cleanup = loop_started
         except Exception:
             logger.exception("Dispatcher loop failed.")
         elapsed = time.monotonic() - loop_started

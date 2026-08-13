@@ -23,6 +23,7 @@ from app.db.session import get_db
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.job_charge import JobCharge
+from app.models.media import MediaState
 from app.models.model_config import ModelConfig
 from app.models.outbox_event import OutboxEvent
 from app.models.reference_image import ReferenceImage
@@ -38,9 +39,20 @@ from app.schemas.job import (
     PublicMetaResponse,
     TogglePublicRequest,
 )
+from app.schemas.user_group import UserGroupPolicyResponse
 from app.services.model_service import load_models_from_db
 from app.services.billing import InsufficientCreditsError, reserve_job_credits
+from app.services.group_policy import (
+    STANDARD_POLICY,
+    UserGroupPolicy,
+    calculate_effective_credit_cost,
+    get_default_group,
+    policy_from_group,
+    resolve_user_policy,
+)
 from app.services.job_lifecycle import mark_generation_failed
+from app.services.media_lifecycle import enqueue_deletion
+from app.api.media_routes import job_media_url
 from app.services.health import collect_core_health
 from app.services.rate_limit import GenerationRateLimiter
 from app.services.reference_images import ReferenceImagePayload, ReferenceImageValidationError, validate_reference_image
@@ -59,12 +71,87 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _is_expired(value: datetime | None, *, now: datetime | None = None) -> bool:
+    if value is None:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value <= (now or utcnow())
+
+
+def _job_has_available_media(job: GenerationJob, *, now: datetime | None = None) -> bool:
+    return bool(
+        job.status == JobStatus.SUCCEEDED
+        and job.deleted_at is None
+        and job.media_state == MediaState.AVAILABLE
+        and job.object_key
+        and not _is_expired(job.media_expires_at, now=now)
+    )
+
+
+def _job_is_publicly_visible(job: GenerationJob, owner: User | None) -> bool:
+    return bool(_job_has_available_media(job) and job.is_public and (owner is None or owner.is_public))
+
+
+def _job_image_url(job: GenerationJob, viewer_user_id: str | None) -> str | None:
+    if not _job_has_available_media(job):
+        return None
+    capability_subject = None if job.is_public else viewer_user_id
+    if capability_subject is None and not job.is_public:
+        return None
+    return job_media_url(job_id=job.id, user_id=capability_subject)
+
+
+def _cleanup_or_track_reference(db: Session, object_key: str, *, resource_id: str) -> None:
+    try:
+        MinioStorageService().delete_reference_image(object_key)
+    except StorageError:
+        db.rollback()
+        enqueue_deletion(
+            db,
+            bucket_type="reference",
+            object_key=object_key,
+            resource_type="orphan_job_reference",
+            resource_id=resource_id,
+        )
+        db.commit()
+
+
 def _load_models(db: Session, settings: Settings) -> list[dict[str, str | bool | int | list[str]]]:
     try:
         return load_models_from_db(db)
     except Exception:
         logger.exception("Failed to load model configs from database; falling back to settings.")
     return settings.public_models
+
+
+def _models_for_policy(
+    models: list[dict[str, str | bool | int | list[str]]],
+    policy: UserGroupPolicy,
+) -> list[dict[str, str | bool | int | list[str]]]:
+    personalized: list[dict[str, str | bool | int | list[str]]] = []
+    for item in models:
+        model = dict(item)
+        raw_base_cost = model.get("credit_cost", 2)
+        base_cost = raw_base_cost if isinstance(raw_base_cost, int) and raw_base_cost >= 0 else 2
+        model["base_credit_cost"] = base_cost
+        model["credit_cost"] = calculate_effective_credit_cost(
+            base_cost,
+            policy.billing_multiplier_bps,
+        )
+        personalized.append(model)
+    return personalized
+
+
+def _policy_response(policy: UserGroupPolicy) -> UserGroupPolicyResponse:
+    return UserGroupPolicyResponse(
+        code=policy.code,
+        name=policy.name,
+        billing_multiplier_bps=policy.billing_multiplier_bps,
+        generated_retention_hours=policy.generated_retention_hours,
+        reference_retention_hours=policy.reference_retention_hours,
+        max_reference_images=policy.max_reference_images,
+    )
 
 
 @dataclass(slots=True)
@@ -77,7 +164,13 @@ class ParsedCreateJobPayload:
 def get_public_meta(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> PublicMetaResponse:
+    if current_user:
+        _, policy = resolve_user_policy(db, current_user)
+    else:
+        default_group = get_default_group(db)
+        policy = policy_from_group(default_group) if default_group else STANDARD_POLICY
     return PublicMetaResponse(
         site_name=settings.site_name,
         registration_enabled=settings.registration_enabled,
@@ -85,7 +178,8 @@ def get_public_meta(
         prompt_max_length=settings.prompt_max_length,
         polling_interval_ms=settings.polling_interval_ms,
         example_prompts=settings.example_prompts,
-        models=_load_models(db, settings),
+        models=_models_for_policy(_load_models(db, settings), policy),
+        viewer_group=_policy_response(policy),
     )
 
 
@@ -142,20 +236,7 @@ async def create_job(
     model_config = enabled_models.get(payload.model)
     if not model_config:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="当前模型不可用。")
-    staged_reference_image = None
-    if payload.reference_image_id:
-        staged_reference_image = db.scalar(
-            select(ReferenceImage).where(
-                ReferenceImage.id == payload.reference_image_id,
-                ReferenceImage.user_id == current_user.id,
-            )
-        )
-        if not staged_reference_image:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="参考图不存在或已删除。",
-            )
-    if (parsed_payload.reference_image or staged_reference_image) and not model_config.get("supports_reference_image", True):
+    if (parsed_payload.reference_image or payload.reference_image_id) and not model_config.get("supports_reference_image", True):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="当前模型不支持参考图，请切换到支持参考图的模型。",
@@ -167,8 +248,37 @@ async def create_job(
             detail="当前模型不支持该尺寸，请切换尺寸或模型。",
         )
 
-    raw_credit_cost = model_config.get("credit_cost", 1)
-    credit_cost = raw_credit_cost if isinstance(raw_credit_cost, int) and raw_credit_cost > 0 else 0
+    current_user, group_policy = resolve_user_policy(db, current_user, lock_user=True)
+    staged_reference_image = None
+    if (parsed_payload.reference_image or payload.reference_image_id) and group_policy.max_reference_images == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="当前用户组未开放参考图功能。",
+        )
+    if payload.reference_image_id:
+        staged_reference_image = db.scalar(
+            select(ReferenceImage).where(
+                ReferenceImage.id == payload.reference_image_id,
+                ReferenceImage.user_id == current_user.id,
+                ReferenceImage.media_state == MediaState.AVAILABLE,
+                or_(
+                    ReferenceImage.media_expires_at.is_(None),
+                    ReferenceImage.media_expires_at > utcnow(),
+                ),
+            )
+        )
+        if not staged_reference_image:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="参考图不存在或已删除。",
+            )
+
+    raw_credit_cost = model_config.get("credit_cost", 2)
+    base_credit_cost = raw_credit_cost if isinstance(raw_credit_cost, int) and raw_credit_cost >= 0 else 2
+    credit_cost = calculate_effective_credit_cost(
+        base_credit_cost,
+        group_policy.billing_multiplier_bps,
+    )
     model_row = db.get(ModelConfig, payload.model)
     provider_row = db.get(UpstreamProvider, model_row.provider_id) if model_row else None
 
@@ -183,6 +293,11 @@ async def create_job(
         provider_id_snapshot=provider_row.id if provider_row else None,
         provider_name_snapshot=provider_row.name if provider_row else None,
         credit_cost_snapshot=credit_cost,
+        group_code_snapshot=group_policy.code,
+        group_name_snapshot=group_policy.name,
+        base_credit_cost_snapshot=base_credit_cost,
+        billing_multiplier_bps_snapshot=group_policy.billing_multiplier_bps,
+        generated_retention_hours_snapshot=group_policy.generated_retention_hours,
         idempotency_key=effective_idempotency_key,
         request_fingerprint=request_fingerprint,
     )
@@ -248,6 +363,10 @@ async def create_job(
             amount=credit_cost,
             model_label=job.model_label_snapshot or job.model,
             provider_name=job.provider_name_snapshot,
+            group_code=group_policy.code,
+            group_name=group_policy.name,
+            base_credit_cost=base_credit_cost,
+            billing_multiplier_bps=group_policy.billing_multiplier_bps,
         )
         db.add(
             OutboxEvent(
@@ -260,7 +379,7 @@ async def create_job(
     except IntegrityError:
         db.rollback()
         if copied_reference_key:
-            MinioStorageService().delete_reference_image(copied_reference_key)
+            _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         existing_job = db.scalar(
             select(GenerationJob).where(
                 GenerationJob.user_id == current_user.id,
@@ -279,7 +398,7 @@ async def create_job(
     except InsufficientCreditsError as exc:
         db.rollback()
         if copied_reference_key:
-            MinioStorageService().delete_reference_image(copied_reference_key)
+            _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
@@ -290,12 +409,12 @@ async def create_job(
         ) from None
     except HTTPException:
         if copied_reference_key:
-            MinioStorageService().delete_reference_image(copied_reference_key)
+            _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         raise
     except Exception:
         db.rollback()
         if copied_reference_key:
-            MinioStorageService().delete_reference_image(copied_reference_key)
+            _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         raise
 
     return _build_create_job_response(
@@ -342,6 +461,10 @@ def _build_create_job_response(
         poll_url=f"{settings.api_v1_prefix}/jobs/{job.id}",
         rate_limit_remaining=rate_limit_remaining,
         credit_cost=charge.amount if charge else job.credit_cost_snapshot,
+        base_credit_cost=job.base_credit_cost_snapshot,
+        billing_multiplier_bps=job.billing_multiplier_bps_snapshot,
+        group_code=job.group_code_snapshot,
+        group_name=job.group_name_snapshot,
         balance_after=balance,
         billing_status=charge.status.value if charge else "not_charged",
     )
@@ -396,7 +519,7 @@ def list_active_jobs(
         .limit(ACTIVE_JOBS_LIMIT)
     )
     jobs = db.scalars(stmt).all()
-    return [_build_job_detail_response(db, job) for job in jobs]
+    return [_build_job_detail_response(db, job, viewer_user_id=current_user.id) for job in jobs]
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
@@ -408,15 +531,20 @@ def get_job(
     job = db.get(GenerationJob, job_id)
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
-    return _build_job_detail_response(db, job)
+    return _build_job_detail_response(db, job, viewer_user_id=current_user.id)
 
 
-def _build_job_detail_response(db: Session, job: GenerationJob) -> JobDetailResponse:
+def _build_job_detail_response(
+    db: Session,
+    job: GenerationJob,
+    *,
+    viewer_user_id: str | None = None,
+) -> JobDetailResponse:
     charge = db.scalar(select(JobCharge).where(JobCharge.job_id == job.id))
     return JobDetailResponse(
         job_id=job.id,
         status=job.status.value,
-        image_url=job.public_url,
+        image_url=_job_image_url(job, viewer_user_id),
         prompt=job.prompt,
         revised_prompt=job.revised_prompt,
         model=job.model,
@@ -426,10 +554,16 @@ def _build_job_detail_response(db: Session, job: GenerationJob) -> JobDetailResp
         aspect_ratio=job.aspect_ratio,
         error_message=job.error_message,
         credit_cost=charge.amount if charge else job.credit_cost_snapshot,
+        base_credit_cost=job.base_credit_cost_snapshot,
+        billing_multiplier_bps=job.billing_multiplier_bps_snapshot,
+        group_code=job.group_code_snapshot,
+        group_name=job.group_name_snapshot,
         billing_status=charge.status.value if charge else "not_charged",
         refunded_at=charge.refunded_at if charge else None,
         created_at=job.created_at,
         finished_at=job.finished_at,
+        media_state=job.media_state.value,
+        media_expires_at=job.media_expires_at,
     )
 
 
@@ -451,19 +585,17 @@ def delete_job(
         job = db.get(GenerationJob, job_id)
         if not job:
             return
-    if job.object_key:
-        try:
-            MinioStorageService().delete_object(job.object_key)
-        except Exception:
-            logger.warning("Failed to delete MinIO object %s", job.object_key)
-    if job.reference_image_key:
-        try:
-            MinioStorageService().delete_reference_image(job.reference_image_key)
-        except Exception:
-            logger.warning("Failed to delete MinIO reference %s", job.reference_image_key)
-    for like in db.scalars(select(GalleryLike).where(GalleryLike.job_id == job.id)).all():
-        db.delete(like)
-    db.delete(job)
+    job.deleted_at = utcnow()
+    job.is_public = False
+    if job.object_key and job.media_state == MediaState.AVAILABLE:
+        job.media_state = MediaState.DELETE_PENDING
+        enqueue_deletion(
+            db,
+            bucket_type="media",
+            object_key=job.object_key,
+            resource_type="generation_job",
+            resource_id=job.id,
+        )
     db.commit()
 
 
@@ -478,8 +610,11 @@ def toggle_job_public(
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
     if not job.is_public:
-        if job.status != JobStatus.SUCCEEDED:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只能公开已完成的作品。")
+        if not _job_has_available_media(job):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="只能公开仍在保留期内的已完成作品。",
+            )
         # Publishing: accept tags and prompt visibility setting
         job.is_public = True
         job.tags = body.tags
@@ -501,6 +636,9 @@ def get_popular_tags(
         .outerjoin(User, GenerationJob.user_id == User.id)
         .where(GenerationJob.is_public.is_(True))
         .where(or_(GenerationJob.user_id.is_(None), User.is_public.is_(True)))
+        .where(GenerationJob.deleted_at.is_(None))
+        .where(GenerationJob.media_state == MediaState.AVAILABLE)
+        .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
         .where(GenerationJob.tags.isnot(None))
         .limit(1000)
     ).all()
@@ -536,7 +674,8 @@ def like_gallery_item(
     current_user: User = Depends(require_current_user),
 ) -> dict[str, int]:
     job = db.get(GenerationJob, job_id)
-    if not job:
+    owner = db.get(User, job.user_id) if job and job.user_id else None
+    if not job or not _job_is_publicly_visible(job, owner):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品不存在。")
     existing = db.scalar(
         select(GalleryLike).where(
@@ -556,6 +695,10 @@ def unlike_gallery_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
 ) -> None:
+    job = db.get(GenerationJob, job_id)
+    owner = db.get(User, job.user_id) if job and job.user_id else None
+    if not job or not _job_is_publicly_visible(job, owner):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品不存在。")
     existing = db.scalar(
         select(GalleryLike).where(
             GalleryLike.job_id == job_id, GalleryLike.user_id == current_user.id
@@ -583,6 +726,9 @@ def get_gallery(
         select(GenerationJob)
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
         .where(GenerationJob.user_id == current_user.id)
+        .where(GenerationJob.deleted_at.is_(None))
+        .where(GenerationJob.media_state == MediaState.AVAILABLE)
+        .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
     )
     if q:
         base = base.where(GenerationJob.prompt.ilike(f"%{q}%"))
@@ -606,7 +752,7 @@ def get_gallery(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
+    jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
     items = _build_gallery_items(db, jobs, current_user.id)
     return GalleryPageResponse(items=items, total=total, page=page, page_size=page_size)
 
@@ -625,6 +771,9 @@ def get_public_gallery(
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
         .where(GenerationJob.is_public.is_(True))
         .where(or_(GenerationJob.user_id.is_(None), User.is_public.is_(True)))
+        .where(GenerationJob.deleted_at.is_(None))
+        .where(GenerationJob.media_state == MediaState.AVAILABLE)
+        .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
     )
     if sort == "liked":
         like_count_sub = (
@@ -637,7 +786,7 @@ def get_public_gallery(
     else:
         stmt = stmt.order_by(desc(GenerationJob.finished_at))
     stmt = stmt.offset(offset).limit(limit)
-    jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
+    jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
     return _build_gallery_items(db, jobs, current_user.id if current_user else None)
 
 
@@ -656,11 +805,14 @@ def get_user_gallery(
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
         .where(GenerationJob.user_id == user.id)
         .where(GenerationJob.is_public.is_(True))
+        .where(GenerationJob.deleted_at.is_(None))
+        .where(GenerationJob.media_state == MediaState.AVAILABLE)
+        .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
         .order_by(desc(GenerationJob.finished_at))
         .offset(offset)
         .limit(limit)
     )
-    jobs = [j for j in db.scalars(stmt).all() if j.public_url and j.finished_at]
+    jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
     return _build_gallery_items(db, jobs, None)
 
 
@@ -702,12 +854,14 @@ def _build_gallery_item(
     username: str | None,
     like_counts: dict[str, int],
     liked_job_ids: set[str],
+    viewer_user_id: str | None,
 ) -> GalleryItem:
+    can_view_prompt = bool(job.is_prompt_public or (viewer_user_id and viewer_user_id == job.user_id))
     return GalleryItem(
         job_id=job.id,
-        image_url=job.public_url or "",
-        prompt=job.prompt,
-        revised_prompt=job.revised_prompt,
+        image_url=_job_image_url(job, viewer_user_id) or "",
+        prompt=job.prompt if can_view_prompt else "",
+        revised_prompt=job.revised_prompt if can_view_prompt else None,
         model=job.model,
         size=job.size,
         aspect_ratio=job.aspect_ratio,
@@ -719,6 +873,7 @@ def _build_gallery_item(
         tags=job.tags,
         like_count=like_counts.get(job.id, 0),
         liked_by_me=job.id in liked_job_ids,
+        media_expires_at=job.media_expires_at,
     )
 
 
@@ -738,6 +893,7 @@ def _build_gallery_items(
             username=usernames.get(job.user_id) if job.user_id else None,
             like_counts=like_counts,
             liked_job_ids=liked_job_ids,
+            viewer_user_id=viewer_user_id,
         )
         for job in jobs
     ]

@@ -15,6 +15,7 @@ const emit = defineEmits<{
   retry: [job: JobDetailResponse]
   dismiss: [jobId: string]
   addToGallery: [job: JobDetailResponse]
+  refreshMedia: [job: JobDetailResponse]
 }>()
 
 const CLOCK_INTERVAL_MS = 1000
@@ -69,6 +70,7 @@ const activeMessageIndex = ref(0)
 const prefersReducedMotion = ref(false)
 const actualImageAspectRatio = ref<string | null>(null)
 const resultImageLoaded = ref(false)
+const mediaRefreshRequested = ref(false)
 const imagePreviewRef = ref<ImageInst | null>(null)
 let clockTimer: number | undefined
 let typingTimer: number | undefined
@@ -144,8 +146,15 @@ function markResultImageLoaded(event: Event) {
   const image = event.currentTarget as HTMLImageElement
   if (image.naturalWidth > 0 && image.naturalHeight > 0) {
     actualImageAspectRatio.value = `${image.naturalWidth} / ${image.naturalHeight}`
-    resultImageLoaded.value = true
   }
+  resultImageLoaded.value = true
+  mediaRefreshRequested.value = false
+}
+
+function requestMediaRefresh() {
+  if (!props.job || mediaRefreshRequested.value) return
+  mediaRefreshRequested.value = true
+  emit('refreshMedia', props.job)
 }
 
 function openImagePreview() {
@@ -310,6 +319,7 @@ onBeforeUnmount(() => {
         :tabindex="resultImageLoaded ? 0 : undefined"
         :aria-label="resultImageLoaded ? '预览当前任务结果图' : undefined"
         @load="markResultImageLoaded"
+        @failed="requestMediaRefresh"
         @click="openImagePreview"
         @keydown.enter.prevent="openImagePreview"
         @keydown.space.prevent="openImagePreview"

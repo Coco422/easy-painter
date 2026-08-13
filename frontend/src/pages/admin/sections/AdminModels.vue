@@ -55,7 +55,7 @@ const form = reactive({
   provider_id: '',
   enabled: true,
   supports_reference_image: true,
-  credit_cost: 1,
+  credit_cost: 2,
   supported_sizes: '',
 })
 
@@ -104,7 +104,7 @@ function resetForm() {
   form.provider_id = providers.value[0]?.id ?? ''
   form.enabled = true
   form.supports_reference_image = true
-  form.credit_cost = 1
+  form.credit_cost = 2
   form.supported_sizes = ''
   formRef.value?.restoreValidation()
 }

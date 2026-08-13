@@ -2,6 +2,7 @@
 import { ImagePlus, Loader2, X } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import { authState } from '@/lib/auth'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import type { ReferenceImageItem } from '@/lib/types'
 
@@ -29,6 +30,11 @@ const {
 
 const loadError = ref('')
 const hasItems = computed(() => uploading.value || history.value.length > 0)
+const referenceLimit = computed(() => authState.user?.group?.max_reference_images)
+
+function formatExpiry(value: string | null | undefined) {
+  return value ? `到期：${new Date(value).toLocaleString()}` : '长期保留'
+}
 
 watch(
   () => props.open,
@@ -88,7 +94,7 @@ async function handleRemove(item: ReferenceImageItem) {
         </header>
         <div class="reference-drawer-body">
           <p class="reference-drawer-hint">
-            最多保留 50 张，超出后自动永久删除最早上传的图片；创作框中的 × 只取消本次使用。
+            当前组最多保留 {{ referenceLimit ?? '—' }} 张；达到上限时上传会先征求确认，再淘汰最早的图片。创作框中的 × 只取消本次使用。
           </p>
           <p v-if="loadError" class="reference-drawer-error">{{ loadError }}</p>
           <div v-if="historyLoading && !hasItems" class="reference-drawer-loading">
@@ -118,6 +124,7 @@ async function handleRemove(item: ReferenceImageItem) {
               <img v-if="getObjectUrl(item.id)" :src="getObjectUrl(item.id)" :alt="item.filename" loading="lazy" />
               <span v-else class="reference-drawer-placeholder"><Loader2 :size="20" /></span>
               <span v-if="item.used_count > 0" class="reference-drawer-badge">用过 {{ item.used_count }} 次</span>
+              <span class="reference-drawer-expiry">{{ formatExpiry(item.media_expires_at) }}</span>
               <button
                 type="button"
                 class="reference-drawer-delete"
@@ -136,3 +143,7 @@ async function handleRemove(item: ReferenceImageItem) {
     </div>
   </Transition>
 </template>
+
+<style scoped>
+.reference-drawer-expiry { position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; color: #fff; font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, .85); }
+</style>
