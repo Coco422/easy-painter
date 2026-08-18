@@ -18,8 +18,10 @@
 ├── CHANGELOG.md
 ├── ROADMAP.md
 ├── backend
+├── docs/backup-and-disaster-recovery.md
 ├── deploy/nginx
 ├── frontend
+├── scripts/backup-production.sh
 ├── scripts/version.py
 ├── docker-compose.yml
 └── .env.example
@@ -123,6 +125,7 @@ make migrate
 - 任务只有成功交付图片才结算，入队超时、上游失败、存储失败或执行超时均全额退款。
 - `credit_transactions` 在 PostgreSQL 中为 append-only；Dispatcher 会以不可变流水重算并修复余额缓存。
 - Flyway 迁移仅向前执行。生产升级前应同时备份 PostgreSQL 与 MinIO，回滚依赖备份恢复。
+- 生产备份内容、快照校验和新环境恢复步骤见 [`docs/backup-and-disaster-recovery.md`](docs/backup-and-disaster-recovery.md)。
 
 ### 3. 启动依赖服务和 Celery
 

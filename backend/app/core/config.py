@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     upstream_base_url: str = ""
     upstream_api_key: str = ""
     upstream_timeout_seconds: int = 700
+    github_api_token: str = ""
 
     default_model: str = "gpt-image-2"
     upstream_default_size: str = "auto"

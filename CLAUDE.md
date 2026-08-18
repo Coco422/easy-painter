@@ -44,7 +44,12 @@ python3 scripts/version.py check vX.Y.Z
 
 # Preview the GitHub Release body sourced from CHANGELOG.md
 python3 scripts/version.py notes vX.Y.Z
+
+# Validate the production backup script
+bash -n scripts/backup-production.sh
 ```
+
+Production backup contents, snapshot validation, and disaster recovery procedures live in `docs/backup-and-disaster-recovery.md`. Infrastructure identities and access topology must remain outside the repository.
 
 ## Architecture
 

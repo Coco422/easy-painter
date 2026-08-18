@@ -4,7 +4,7 @@ export const APP_VERSION = __APP_VERSION__ || 'dev'
 export const APP_RELEASES: ReleaseInfo[] = __APP_RELEASES__ || []
 export const REPOSITORY_URL = 'https://github.com/Coco422/easy-painter'
 
-const LATEST_RELEASE_API_URL = 'https://api.github.com/repos/Coco422/easy-painter/releases/latest'
+const LATEST_RELEASE_API_URL = '/api/v1/meta/releases/latest'
 
 interface GitHubLatestReleaseResponse {
   tag_name?: unknown
@@ -13,6 +13,11 @@ interface GitHubLatestReleaseResponse {
   published_at?: unknown
   draft?: unknown
   prerelease?: unknown
+}
+
+interface LatestReleaseApiResponse {
+  status?: unknown
+  release?: unknown
 }
 
 export interface RemoteReleaseInfo extends ReleaseInfo {
@@ -27,17 +32,16 @@ export type LatestReleaseResult =
 export async function fetchLatestGitHubRelease(signal?: AbortSignal): Promise<LatestReleaseResult> {
   const response = await fetch(LATEST_RELEASE_API_URL, {
     signal,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
   })
 
-  if (response.status === 404) return { status: 'none' }
-  if (!response.ok) throw new Error(`GitHub release request failed with ${response.status}`)
+  if (!response.ok) throw new Error(`Release request failed with ${response.status}`)
 
-  const payload = await response.json() as GitHubLatestReleaseResponse
-  if (payload.draft === true || payload.prerelease === true) return { status: 'none' }
+  const result = await response.json() as LatestReleaseApiResponse
+  if (result.status === 'none') return { status: 'none' }
+  if (result.status !== 'found' || !result.release || typeof result.release !== 'object') {
+    throw new Error('Release response is invalid')
+  }
+  const payload = result.release as GitHubLatestReleaseResponse
 
   const version = typeof payload.tag_name === 'string' ? payload.tag_name.trim() : ''
   const url = typeof payload.html_url === 'string' ? payload.html_url : ''

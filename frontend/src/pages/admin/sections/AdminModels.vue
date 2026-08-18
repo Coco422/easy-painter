@@ -336,7 +336,7 @@ function getRowProps(row: ModelConfig) {
 
 const columns = computed<DataTableColumns<ModelConfig>>(() => [
   {
-    title: '排序', key: 'drag', width: 72, fixed: 'left',
+    title: '排序', key: 'drag', width: 68, fixed: 'left',
     render: (row, index) => h('div', { class: 'model-drag-cell' }, [
       h('button', {
         type: 'button',
@@ -347,8 +347,10 @@ const columns = computed<DataTableColumns<ModelConfig>>(() => [
         'aria-grabbed': row.id === draggedId.value,
         onPointerdown: (event: PointerEvent) => handlePointerDown(row, event),
         onKeydown: (event: KeyboardEvent) => handleSortKeydown(row, event),
-      }, [h(GripVertical, { size: 16, 'aria-hidden': true })]),
-      h('span', { class: 'model-position' }, String(index + 1)),
+      }, [
+        h(GripVertical, { size: 14, 'stroke-width': 1.8, 'aria-hidden': true }),
+        h('span', { class: 'model-position', 'aria-hidden': true }, String(index + 1).padStart(2, '0')),
+      ]),
     ]),
   },
   { title: '模型 ID', key: 'id', minWidth: 180, ellipsis: { tooltip: true }, className: 'mono-cell' },
@@ -432,18 +434,39 @@ onBeforeUnmount(clearDragState)
 <style scoped>
 .section-empty { padding: 72px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }
 .form-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
-.model-drag-cell, .model-status-cell { display: flex; align-items: center; gap: 7px; }
-.model-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: grab; touch-action: none; user-select: none; transition: color 160ms, border-color 160ms, background 160ms; }
-.model-drag-handle:hover:not(:disabled) { border-color: var(--border-accent); background: var(--accent-soft); color: var(--accent); }
-.model-drag-handle:active:not(:disabled) { cursor: grabbing; }
-.model-drag-handle:disabled { cursor: wait; opacity: .45; }
-.model-position { min-width: 14px; color: var(--text-muted); font: 600 11px/1 var(--font-mono); text-align: right; }
-.model-status-cell span { font-size: 12px; font-weight: 600; }
-.status-enabled { color: var(--success); }
-.status-disabled { color: var(--text-muted); }
+:deep(.model-drag-cell), :deep(.model-status-cell) { display: flex; align-items: center; gap: 7px; }
+:deep(.model-drag-handle) {
+  appearance: none;
+  display: inline-grid;
+  grid-template-columns: 14px 18px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 46px;
+  height: 28px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  color: var(--text-muted);
+  font-family: inherit;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: color 160ms, border-color 160ms, background 160ms, box-shadow 160ms;
+}
+:deep(.model-drag-handle svg) { opacity: .72; }
+:deep(.model-drag-handle:hover:not(:disabled)) { border-color: var(--border-accent); background: var(--accent-soft); color: var(--accent); }
+:deep(.model-drag-handle:focus-visible) { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); color: var(--accent); }
+:deep(.model-drag-handle:active:not(:disabled)), :deep(.model-drag-handle[aria-grabbed="true"]) { cursor: grabbing; border-color: var(--border-accent); background: var(--accent-soft); color: var(--accent); }
+:deep(.model-drag-handle:disabled) { cursor: wait; opacity: .42; }
+:deep(.model-position) { color: currentColor; font: 600 10px/1 var(--font-mono); letter-spacing: .02em; text-align: right; }
+:deep(.model-status-cell span) { font-size: 12px; font-weight: 600; }
+:deep(.status-enabled) { color: var(--success); }
+:deep(.status-disabled) { color: var(--text-muted); }
 :deep(.model-row-dragging td) { opacity: .5; background: var(--bg-hover); }
 :deep(.model-row-drop-before td) { box-shadow: inset 0 2px 0 var(--accent); }
 :deep(.model-row-drop-after td) { box-shadow: inset 0 -2px 0 var(--accent); }
 @media (max-width: 620px) { .form-grid-2 { grid-template-columns: 1fr; } }
-@media (prefers-reduced-motion: reduce) { .model-drag-handle { transition: none; } }
+@media (prefers-reduced-motion: reduce) { :deep(.model-drag-handle) { transition: none; } }
 </style>

@@ -57,6 +57,7 @@ from app.services.health import collect_core_health
 from app.services.rate_limit import GenerationRateLimiter
 from app.services.reference_images import ReferenceImagePayload, ReferenceImageValidationError, validate_reference_image
 from app.services.redis_client import get_redis
+from app.services.release_updates import ReleaseLookupError, fetch_latest_release
 from app.services.storage import MinioStorageService, StorageError
 
 
@@ -181,6 +182,24 @@ def get_public_meta(
         models=_models_for_policy(_load_models(db, settings), policy),
         viewer_group=_policy_response(policy),
     )
+
+
+@router.get("/meta/releases/latest")
+def get_latest_release(
+    response: Response,
+    redis_client: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    try:
+        result = fetch_latest_release(redis_client, settings)
+    except ReleaseLookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="暂时无法获取版本信息。",
+        ) from exc
+    response.headers["Cache-Control"] = "public, max-age=300, stale-if-error=3600"
+    response.headers["X-Release-Cache"] = result.cache_state
+    return result.payload
 
 
 @router.post("/jobs", response_model=CreateJobResponse, status_code=status.HTTP_202_ACCEPTED)
