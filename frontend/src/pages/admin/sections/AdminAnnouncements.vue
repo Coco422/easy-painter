@@ -9,6 +9,7 @@ import {
   NFormItem,
   NInput,
   NModal,
+  NPagination,
   NSelect,
   NSpace,
   NSpin,
@@ -40,6 +41,10 @@ const loading = ref(false)
 const creating = ref(false)
 const saving = ref(false)
 const changingId = ref('')
+const page = ref(1)
+const pageSize = ref(50)
+const total = ref(0)
+const pageSizes = [25, 50, 100]
 
 const levelOptions = [
   { label: '普通', value: 'info' },
@@ -100,7 +105,9 @@ function formatDate(value: string) {
 async function loadAnnouncements() {
   loading.value = true
   try {
-    announcements.value = await adminFetchAnnouncements()
+    const response = await adminFetchAnnouncements(page.value, pageSize.value)
+    announcements.value = response.items
+    total.value = response.total
   } catch (error) {
     handleError(error, '通知列表加载失败。')
   } finally {
@@ -124,8 +131,9 @@ async function createAnnouncement() {
   }
   creating.value = true
   try {
-    const created = await adminCreateAnnouncement({ ...createForm })
-    announcements.value.unshift(created)
+    await adminCreateAnnouncement({ ...createForm })
+    page.value = 1
+    await loadAnnouncements()
     createForm.title = ''
     createForm.content = ''
     createFormRef.value?.restoreValidation()
@@ -135,6 +143,17 @@ async function createAnnouncement() {
   } finally {
     creating.value = false
   }
+}
+
+function changePage(nextPage: number) {
+  page.value = nextPage
+  void loadAnnouncements()
+}
+
+function changePageSize(nextPageSize: number) {
+  pageSize.value = nextPageSize
+  page.value = 1
+  void loadAnnouncements()
 }
 
 function openEdit(row: AnnouncementItem) {
@@ -193,7 +212,11 @@ function deleteAnnouncement(row: AnnouncementItem) {
     async onPositiveClick() {
       try {
         await adminDeleteAnnouncement(row.id)
-        announcements.value = announcements.value.filter((item) => item.id !== row.id)
+        await loadAnnouncements()
+        if (announcements.value.length === 0 && page.value > 1) {
+          page.value -= 1
+          await loadAnnouncements()
+        }
         message.success('通知已删除。')
       } catch (error) {
         handleError(error, '通知删除失败。')
@@ -262,8 +285,12 @@ onMounted(loadAnnouncements)
 
     <NSpin :show="loading">
       <NEmpty v-if="!loading && announcements.length === 0" description="还没有系统通知" class="section-empty" />
-      <NDataTable v-else :columns="columns" :data="announcements" :row-key="(row: AnnouncementItem) => row.id" size="small" :single-line="false" :scroll-x="1180" />
+      <NDataTable v-else :columns="columns" :data="announcements" :row-key="(row: AnnouncementItem) => row.id" size="small" :single-line="false" :scroll-x="1180" :max-height="680" virtual-scroll />
     </NSpin>
+    <div v-if="total > 0" class="table-pagination">
+      <span>共 {{ total }} 条通知</span>
+      <NPagination :page="page" :page-size="pageSize" :item-count="total" :page-sizes="pageSizes" show-size-picker @update:page="changePage" @update:page-size="changePageSize" />
+    </div>
 
     <NModal v-model:show="editModalOpen" preset="card" title="编辑通知" class="admin-form-modal" :mask-closable="!saving">
       <NForm ref="editFormRef" :model="editForm" :rules="formRules" label-placement="top">
@@ -291,6 +318,7 @@ onMounted(loadAnnouncements)
 .announcement-form-grid { display: grid; grid-template-columns: minmax(220px, 1fr) 140px 190px 80px; gap: 0 12px; align-items: start; }
 .edit-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .section-empty { padding: 72px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }
+.table-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; color: var(--text-muted); font-size: 12px; }
 @media (max-width: 900px) { .announcement-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .announcement-form-grid, .edit-form-grid { grid-template-columns: 1fr; } }
 </style>

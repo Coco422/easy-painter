@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import {
   NButton,
   NDataTable,
@@ -9,6 +9,7 @@ import {
   NDrawerContent,
   NEmpty,
   NImage,
+  NPagination,
   NSelect,
   NSpace,
   NSpin,
@@ -18,7 +19,7 @@ import {
   type DataTableColumns,
   type DataTableRowKey,
 } from 'naive-ui'
-import { Eye, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Eye, Maximize2, RefreshCw, Trash2 } from 'lucide-vue-next'
 
 import { ApiError, adminBatchDeleteJobs, adminDeleteJob, adminFetchJobs } from '@/lib/api'
 import type { AdminJobItem } from '@/lib/types'
@@ -31,8 +32,13 @@ const jobs = ref<AdminJobItem[]>([])
 const loading = ref(false)
 const batchDeleting = ref(false)
 const statusFilter = ref('')
+const page = ref(1)
+const pageSize = ref(50)
+const total = ref(0)
 const selectedRowKeys = ref<DataTableRowKey[]>([])
 const selectedJob = ref<AdminJobItem | null>(null)
+const pageSizes = [25, 50, 100]
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 const statusOptions = [
   { label: '全部状态', value: '' },
@@ -89,13 +95,43 @@ function outboxStatusLabel(status: string | null) {
 async function loadJobs() {
   loading.value = true
   try {
-    jobs.value = await adminFetchJobs(statusFilter.value || undefined)
+    const response = await adminFetchJobs({
+      status: statusFilter.value || undefined,
+      page: page.value,
+      pageSize: pageSize.value,
+    })
+    jobs.value = response.items
+    total.value = response.total
     selectedRowKeys.value = []
   } catch (error) {
     handleError(error, '任务列表加载失败。')
   } finally {
     loading.value = false
   }
+}
+
+async function reloadAfterDeletion() {
+  await loadJobs()
+  if (jobs.value.length === 0 && page.value > 1) {
+    page.value -= 1
+    await loadJobs()
+  }
+}
+
+function changeStatus() {
+  page.value = 1
+  void loadJobs()
+}
+
+function changePage(nextPage: number) {
+  page.value = nextPage
+  void loadJobs()
+}
+
+function changePageSize(nextPageSize: number) {
+  pageSize.value = nextPageSize
+  page.value = 1
+  void loadJobs()
 }
 
 function viewJob(job: AdminJobItem) {
@@ -112,8 +148,7 @@ function deleteJob(job: AdminJobItem) {
     async onPositiveClick() {
       try {
         await adminDeleteJob(job.job_id)
-        jobs.value = jobs.value.filter((item) => item.job_id !== job.job_id)
-        selectedRowKeys.value = selectedRowKeys.value.filter((key) => key !== job.job_id)
+        await reloadAfterDeletion()
         if (selectedJob.value?.job_id === job.job_id) selectedJob.value = null
         message.success('任务已删除。')
       } catch (error) {
@@ -136,7 +171,7 @@ function deleteSelectedJobs() {
       batchDeleting.value = true
       try {
         const result = await adminBatchDeleteJobs(ids)
-        await loadJobs()
+        await reloadAfterDeletion()
         if (result.failed.length > 0) {
           message.warning(`已删除 ${result.deleted} 个任务，${result.failed.length} 个任务未能删除。`)
         } else {
@@ -191,7 +226,7 @@ onMounted(loadJobs)
     </header>
 
     <div class="table-toolbar">
-      <NSelect v-model:value="statusFilter" :options="statusOptions" class="status-select" @update:value="loadJobs" />
+      <NSelect v-model:value="statusFilter" :options="statusOptions" class="status-select" @update:value="changeStatus" />
       <NButton v-if="selectedRowKeys.length > 0" type="error" ghost :loading="batchDeleting" @click="deleteSelectedJobs">
         <template #icon><Trash2 :size="15" /></template>
         删除选中（{{ selectedRowKeys.length }}）
@@ -210,41 +245,85 @@ onMounted(loadJobs)
         :single-line="false"
         :scroll-x="1450"
         :max-height="680"
+        virtual-scroll
       />
     </NSpin>
 
-    <NDrawer :show="Boolean(selectedJob)" width="min(560px, 100vw)" placement="right" @update:show="(show) => { if (!show) selectedJob = null }">
-      <NDrawerContent v-if="selectedJob" title="任务详情" closable>
-        <NDescriptions label-placement="left" :column="1" bordered size="small">
-          <NDescriptionsItem label="任务 ID"><code>{{ selectedJob.job_id }}</code></NDescriptionsItem>
-          <NDescriptionsItem label="状态"><NTag :type="statusTagType(selectedJob.status)" size="small" :bordered="false">{{ statusLabel(selectedJob.status) }}</NTag></NDescriptionsItem>
-          <NDescriptionsItem label="模型">{{ selectedJob.model_label || selectedJob.model }}</NDescriptionsItem>
-          <NDescriptionsItem label="模型 ID"><code>{{ selectedJob.model }}</code></NDescriptionsItem>
-          <NDescriptionsItem label="渠道快照">{{ selectedJob.provider_name || '-' }}</NDescriptionsItem>
-          <NDescriptionsItem label="单次价格">{{ selectedJob.credit_cost }} 丝</NDescriptionsItem>
-          <NDescriptionsItem label="账务状态">{{ billingStatusLabel(selectedJob.billing_status) }}</NDescriptionsItem>
-          <NDescriptionsItem label="退款时间">{{ formatDate(selectedJob.refunded_at) }}</NDescriptionsItem>
-          <NDescriptionsItem label="尺寸">{{ selectedJob.size }}</NDescriptionsItem>
-          <NDescriptionsItem label="宽高比">{{ selectedJob.aspect_ratio }}</NDescriptionsItem>
-          <NDescriptionsItem label="用户">{{ selectedJob.username || '-' }}</NDescriptionsItem>
-          <NDescriptionsItem label="参考图">{{ selectedJob.reference_image_filename || '-' }}</NDescriptionsItem>
-          <NDescriptionsItem label="创建时间">{{ formatDate(selectedJob.created_at) }}</NDescriptionsItem>
-          <NDescriptionsItem label="开始时间">{{ formatDate(selectedJob.started_at) }}</NDescriptionsItem>
-          <NDescriptionsItem label="完成时间">{{ formatDate(selectedJob.finished_at) }}</NDescriptionsItem>
-          <NDescriptionsItem label="耗时">{{ formatDuration(selectedJob.started_at, selectedJob.finished_at) }}</NDescriptionsItem>
-          <NDescriptionsItem label="执行领取">{{ selectedJob.execution_claimed ? 'Worker 已领取' : '未被领取 / 已释放' }}</NDescriptionsItem>
-          <NDescriptionsItem label="执行租约">{{ formatDate(selectedJob.lease_expires_at) }}</NDescriptionsItem>
-          <NDescriptionsItem label="Outbox">{{ outboxStatusLabel(selectedJob.outbox_status) }}</NDescriptionsItem>
-          <NDescriptionsItem label="投递尝试">{{ selectedJob.outbox_attempts }}</NDescriptionsItem>
-          <NDescriptionsItem label="投递时间">{{ formatDate(selectedJob.outbox_published_at) }}</NDescriptionsItem>
-        </NDescriptions>
+    <div v-if="total > 0" class="table-pagination">
+      <span>共 {{ total }} 个任务，第 {{ page }} / {{ pageCount }} 页</span>
+      <NPagination
+        :page="page"
+        :page-size="pageSize"
+        :item-count="total"
+        :page-sizes="pageSizes"
+        :page-slot="7"
+        show-size-picker
+        @update:page="changePage"
+        @update:page-size="changePageSize"
+      />
+    </div>
 
-        <div class="detail-block"><h3>提示词</h3><p>{{ selectedJob.prompt }}</p></div>
-        <div v-if="selectedJob.revised_prompt" class="detail-block"><h3>修订提示词</h3><p>{{ selectedJob.revised_prompt }}</p></div>
-        <div v-if="selectedJob.error_message" class="detail-block error"><h3>错误信息</h3><p>{{ selectedJob.error_message }}</p></div>
-        <div v-if="selectedJob.outbox_last_error" class="detail-block error"><h3>Outbox 最近错误</h3><p>{{ selectedJob.outbox_last_error }}</p></div>
-        <div v-if="selectedJob.provider_job_meta" class="detail-block"><h3>上游元数据</h3><pre>{{ formatMeta(selectedJob.provider_job_meta) }}</pre></div>
-        <div v-if="selectedJob.image_url" class="detail-block"><h3>生成结果</h3><NImage :src="selectedJob.image_url" object-fit="contain" /></div>
+    <NDrawer :show="Boolean(selectedJob)" width="min(1040px, 96vw)" placement="right" @update:show="(show) => { if (!show) selectedJob = null }">
+      <NDrawerContent v-if="selectedJob" title="任务详情" closable>
+        <div class="job-detail-summary">
+          <div><span>任务 ID</span><code>{{ selectedJob.job_id }}</code></div>
+          <NTag :type="statusTagType(selectedJob.status)" size="small" :bordered="false">{{ statusLabel(selectedJob.status) }}</NTag>
+          <span>{{ selectedJob.username || '未知用户' }}</span>
+          <span>{{ formatDate(selectedJob.created_at) }}</span>
+        </div>
+
+        <div class="job-detail-layout" :class="{ 'has-image': selectedJob.image_url }">
+          <section v-if="selectedJob.image_url" class="result-panel">
+            <div class="detail-section-heading">
+              <div><span>Result</span><h2>生成结果</h2></div>
+              <span class="preview-hint"><Maximize2 :size="14" />点击图片放大</span>
+            </div>
+            <div class="result-canvas">
+              <NImage
+                :src="selectedJob.image_url"
+                :alt="`任务 ${selectedJob.job_id} 的生成结果`"
+                object-fit="contain"
+                class="result-image"
+                lazy
+              />
+            </div>
+            <div class="result-meta">
+              <span>{{ selectedJob.size }}</span>
+              <span>{{ selectedJob.aspect_ratio }}</span>
+              <span>{{ formatDuration(selectedJob.started_at, selectedJob.finished_at) }}</span>
+            </div>
+          </section>
+
+          <section class="detail-info-panel">
+            <div class="detail-section-heading"><div><span>Details</span><h2>任务信息</h2></div></div>
+            <NDescriptions label-placement="top" :column="2" bordered size="small">
+              <NDescriptionsItem label="模型">{{ selectedJob.model_label || selectedJob.model }}</NDescriptionsItem>
+              <NDescriptionsItem label="模型 ID"><code>{{ selectedJob.model }}</code></NDescriptionsItem>
+              <NDescriptionsItem label="渠道快照">{{ selectedJob.provider_name || '-' }}</NDescriptionsItem>
+              <NDescriptionsItem label="用户">{{ selectedJob.username || '-' }}</NDescriptionsItem>
+              <NDescriptionsItem label="单次价格">{{ selectedJob.credit_cost }} 丝</NDescriptionsItem>
+              <NDescriptionsItem label="账务状态">{{ billingStatusLabel(selectedJob.billing_status) }}</NDescriptionsItem>
+              <NDescriptionsItem label="尺寸 / 宽高比">{{ selectedJob.size }} / {{ selectedJob.aspect_ratio }}</NDescriptionsItem>
+              <NDescriptionsItem label="参考图">{{ selectedJob.reference_image_filename || '-' }}</NDescriptionsItem>
+              <NDescriptionsItem label="创建时间">{{ formatDate(selectedJob.created_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="开始时间">{{ formatDate(selectedJob.started_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="完成时间">{{ formatDate(selectedJob.finished_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="耗时">{{ formatDuration(selectedJob.started_at, selectedJob.finished_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="退款时间">{{ formatDate(selectedJob.refunded_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="执行领取">{{ selectedJob.execution_claimed ? 'Worker 已领取' : '未被领取 / 已释放' }}</NDescriptionsItem>
+              <NDescriptionsItem label="执行租约">{{ formatDate(selectedJob.lease_expires_at) }}</NDescriptionsItem>
+              <NDescriptionsItem label="Outbox">{{ outboxStatusLabel(selectedJob.outbox_status) }}</NDescriptionsItem>
+              <NDescriptionsItem label="投递尝试">{{ selectedJob.outbox_attempts }}</NDescriptionsItem>
+              <NDescriptionsItem label="投递时间">{{ formatDate(selectedJob.outbox_published_at) }}</NDescriptionsItem>
+            </NDescriptions>
+
+            <div class="detail-block"><h3>提示词</h3><p>{{ selectedJob.prompt }}</p></div>
+            <div v-if="selectedJob.revised_prompt" class="detail-block"><h3>修订提示词</h3><p>{{ selectedJob.revised_prompt }}</p></div>
+            <div v-if="selectedJob.error_message" class="detail-block error"><h3>错误信息</h3><p>{{ selectedJob.error_message }}</p></div>
+            <div v-if="selectedJob.outbox_last_error" class="detail-block error"><h3>Outbox 最近错误</h3><p>{{ selectedJob.outbox_last_error }}</p></div>
+            <div v-if="selectedJob.provider_job_meta" class="detail-block"><h3>上游元数据</h3><pre>{{ formatMeta(selectedJob.provider_job_meta) }}</pre></div>
+          </section>
+        </div>
       </NDrawerContent>
     </NDrawer>
   </section>
@@ -254,11 +333,40 @@ onMounted(loadJobs)
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .status-select { width: 180px; }
 .section-empty { padding: 72px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }
+.table-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; color: var(--text-muted); font-size: 12px; }
+.job-detail-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); color: var(--text-muted); font-size: 12px; }
+.job-detail-summary > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.job-detail-summary > div code { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.job-detail-summary > span:last-child { margin-left: auto; }
+.job-detail-layout { display: grid; gap: 24px; }
+.job-detail-layout.has-image { grid-template-columns: minmax(300px, .9fr) minmax(420px, 1.1fr); align-items: start; }
+.result-panel { position: sticky; top: 0; min-width: 0; }
+.detail-info-panel { min-width: 0; }
+.detail-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.detail-section-heading span { color: var(--accent); font: 600 10px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.detail-section-heading h2 { margin: 5px 0 0; color: var(--text-primary); font-size: 18px; line-height: 1.2; }
+.detail-section-heading .preview-hint { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font: 400 12px/1.4 var(--font-body); letter-spacing: 0; text-transform: none; }
+.result-canvas { display: grid; min-height: 300px; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); }
+.result-image { display: block; width: 100%; cursor: zoom-in; }
+.result-image :deep(img) { display: block; width: 100%; max-height: min(58vh, 620px); object-fit: contain; }
+.result-meta { display: flex; gap: 8px; margin-top: 8px; color: var(--text-muted); font: 11px/1.4 var(--font-mono); }
+.result-meta span + span::before { margin-right: 8px; color: var(--border); content: '/'; }
 .detail-block { margin-top: 22px; }
 .detail-block h3 { margin: 0 0 8px; color: var(--text-muted); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .detail-block p { margin: 0; color: var(--text-secondary); line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .detail-block pre { overflow-x: auto; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); color: var(--text-secondary); font: 12px/1.6 var(--font-mono); }
 .detail-block.error p { color: var(--error); }
 code { font-family: var(--font-mono); }
-@media (max-width: 560px) { .table-toolbar { align-items: stretch; flex-direction: column; } .status-select { width: 100%; } }
+@media (max-width: 900px) {
+  .job-detail-layout.has-image { grid-template-columns: 1fr; }
+  .result-panel { position: static; }
+}
+@media (max-width: 560px) {
+  .table-toolbar, .table-pagination { align-items: stretch; flex-direction: column; }
+  .status-select { width: 100%; }
+  .job-detail-summary { align-items: flex-start; flex-direction: column; }
+  .job-detail-summary > span:last-child { margin-left: 0; }
+  .detail-section-heading { align-items: flex-start; flex-direction: column; }
+  .result-canvas { min-height: 220px; }
+}
 </style>

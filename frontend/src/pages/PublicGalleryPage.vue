@@ -12,13 +12,19 @@ const loading = ref(true)
 const error = ref('')
 const selectedItem = ref<GalleryItem | null>(null)
 const displayName = ref('')
+const page = ref(1)
+const pageSize = 20
+const total = ref(0)
 
-async function loadGallery() {
+async function loadGallery(nextPage = page.value) {
   const username = route.params.username as string
   loading.value = true
   error.value = ''
   try {
-    gallery.value = await fetchUserGallery(username)
+    const response = await fetchUserGallery(username, nextPage, pageSize)
+    gallery.value = response.items
+    total.value = response.total
+    page.value = response.page
     if (gallery.value.length > 0 && gallery.value[0].username) {
       displayName.value = gallery.value[0].username
     } else {
@@ -54,7 +60,12 @@ onMounted(() => {
         <strong>这是公开页面</strong>
         <p>无需登录即可访问和查看作品；只有画廊总开关已开启、且用户主动发布的内容会显示在这里。</p>
       </section>
-      <GalleryGrid :items="gallery" @select="selectedItem = $event" @refresh="loadGallery" />
+      <GalleryGrid :items="gallery" @select="selectedItem = $event" @refresh="loadGallery(page)" />
+      <div v-if="total > pageSize" class="gallery-pagination">
+        <button class="ghost-button" :disabled="page <= 1" @click="loadGallery(page - 1)">上一页</button>
+        <span class="gallery-page-info">{{ page }} / {{ Math.ceil(total / pageSize) }}</span>
+        <button class="ghost-button" :disabled="page >= Math.ceil(total / pageSize)" @click="loadGallery(page + 1)">下一页</button>
+      </div>
     </template>
 
     <PromptModal :item="selectedItem" @close="selectedItem = null" />

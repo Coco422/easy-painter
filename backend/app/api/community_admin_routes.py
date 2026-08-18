@@ -16,6 +16,7 @@ from app.models.inspiration import Inspiration
 from app.models.media import MediaState
 from app.models.user import User
 from app.schemas.inspiration import AdminInspirationItem
+from app.schemas.pagination import PageResponse
 from app.api.media_routes import job_media_url
 from app.services.media_lifecycle import enqueue_deletion
 from app.services.storage import MinioStorageService, StorageError
@@ -37,6 +38,17 @@ class EditInspirationRequest(BaseModel):
     prompt: str | None = Field(default=None, min_length=1)
     categories: list[str] | None = None
     is_featured: bool | None = None
+
+
+class CommunityCandidate(BaseModel):
+    job_id: str
+    prompt: str
+    revised_prompt: str | None = None
+    image_url: str
+    username: str
+    display_name: str
+    tags: list[str]
+    finished_at: datetime | None = None
 
 
 def _eligible(job: GenerationJob, user: User | None) -> bool:
@@ -73,13 +85,13 @@ def _admin_response(item: Inspiration) -> AdminInspirationItem:
     )
 
 
-@community_admin_router.get("/admin/inspirations/candidates")
+@community_admin_router.get("/admin/inspirations/candidates", response_model=PageResponse[CommunityCandidate])
 def list_community_candidates(
-    offset: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
-) -> dict:
+) -> PageResponse[CommunityCandidate]:
     now = datetime.now(timezone.utc)
     already_curated = select(Inspiration.id).where(
         Inspiration.source_job_id == GenerationJob.id
@@ -97,7 +109,9 @@ def list_community_candidates(
     )
     total = int(db.scalar(select(func.count()).select_from(base.subquery())) or 0)
     rows = db.execute(
-        base.order_by(desc(GenerationJob.finished_at)).offset(offset).limit(limit)
+        base.order_by(desc(GenerationJob.finished_at), desc(GenerationJob.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
     candidates = [
         {
@@ -112,7 +126,7 @@ def list_community_candidates(
         }
         for job, user in rows
     ]
-    return {"items": candidates, "total": total}
+    return PageResponse[CommunityCandidate](items=candidates, total=total, page=page, page_size=page_size)
 
 
 @community_admin_router.post(

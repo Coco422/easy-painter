@@ -163,8 +163,9 @@ async def test_upload_list_file_and_delete_flow(monkeypatch):
     assert item.used_count == 0
     assert item.created_at is not None
 
-    items = reference_routes.list_staged_reference_images(db=db, current_user=user)
-    assert [entry.id for entry in items] == [item.id]
+    items = reference_routes.list_staged_reference_images(db=db, current_user=user, page=1, page_size=50)
+    assert items.total == 1
+    assert [entry.id for entry in items.items] == [item.id]
 
     response = reference_routes.get_staged_reference_image_file(image_id=item.id, db=db, current_user=user)
     assert response.body == PNG_BYTES
@@ -172,7 +173,7 @@ async def test_upload_list_file_and_delete_flow(monkeypatch):
     assert response.headers["Cache-Control"] == "private, max-age=3600"
 
     reference_routes.delete_staged_reference_image(image_id=item.id, db=db, current_user=user)
-    assert reference_routes.list_staged_reference_images(db=db, current_user=user) == []
+    assert reference_routes.list_staged_reference_images(db=db, current_user=user, page=1, page_size=50).items == []
     assert storage.deleted == [f"references/2026/08/04/staging/{item.id}.png"]
 
     with pytest.raises(HTTPException) as exc_info:
@@ -268,9 +269,9 @@ async def test_upload_evicts_oldest_images_beyond_limit(monkeypatch):
         current_user=user,
     )
 
-    remaining = reference_routes.list_staged_reference_images(db=db, current_user=user)
-    assert len(remaining) == reference_routes.MAX_REFERENCE_IMAGES_PER_USER
-    remaining_ids = {entry.id for entry in remaining}
+    remaining = reference_routes.list_staged_reference_images(db=db, current_user=user, page=1, page_size=50)
+    assert len(remaining.items) == reference_routes.MAX_REFERENCE_IMAGES_PER_USER
+    remaining_ids = {entry.id for entry in remaining.items}
     assert "old-0" not in remaining_ids
     assert item.id in remaining_ids
     assert storage.deleted == ["references/2026/05/07/staging/old-0.png"]

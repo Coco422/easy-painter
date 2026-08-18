@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -46,8 +46,13 @@ const codesLoading = ref(false)
 const usersLoading = ref(false)
 const transactionsLoading = ref(false)
 const selectedCodeKeys = ref<DataTableRowKey[]>([])
+let userSearchTimer: ReturnType<typeof setTimeout> | undefined
 
 const codesFilter = ref<'all' | 'unused' | 'used'>('all')
+const codesPage = ref(1)
+const codesPageSize = ref(50)
+const codesTotal = ref(0)
+const pageSizes = [25, 50, 100]
 const generateFormRef = ref<FormInst | null>(null)
 const generating = ref(false)
 const generateForm = reactive({ count: 10, credits: 100, prefix: 'EP' })
@@ -72,8 +77,8 @@ const adjustRules: FormRules = {
 
 const transactionUserId = ref<string | null>(null)
 const transactionPage = ref(1)
-const transactionPageSize = 50
-const transactionPageCount = computed(() => Math.max(1, transactionPage.value + (transactions.value.length === transactionPageSize ? 1 : 0)))
+const transactionPageSize = ref(50)
+const transactionTotal = ref(0)
 const userOptions = computed(() => users.value.map((user) => ({ label: `${user.username}（${user.credits ?? 0} 丝）`, value: user.id })))
 const transactionUserOptions = computed(() => [{ label: '全部用户', value: '' }, ...users.value.map((user) => ({ label: user.username, value: user.id }))])
 
@@ -90,10 +95,10 @@ function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : '-'
 }
 
-async function loadUsers() {
+async function loadUsers(query = '') {
   usersLoading.value = true
   try {
-    users.value = await adminFetchUsers()
+    users.value = (await adminFetchUsers({ pageSize: 100, q: query.trim() || undefined })).items
   } catch (error) {
     handleError(error, '用户列表加载失败。')
   } finally {
@@ -101,11 +106,18 @@ async function loadUsers() {
   }
 }
 
+function searchUsers(query: string) {
+  if (userSearchTimer) clearTimeout(userSearchTimer)
+  userSearchTimer = setTimeout(() => { void loadUsers(query) }, 250)
+}
+
 async function loadCodes() {
   codesLoading.value = true
   selectedCodeKeys.value = []
   try {
-    codes.value = await adminFetchCodes(codesFilter.value)
+    const response = await adminFetchCodes(codesFilter.value, codesPage.value, codesPageSize.value)
+    codes.value = response.items
+    codesTotal.value = response.total
   } catch (error) {
     handleError(error, '兑换码加载失败。')
   } finally {
@@ -116,12 +128,13 @@ async function loadCodes() {
 async function loadTransactions() {
   transactionsLoading.value = true
   try {
-    let items = await adminFetchTransactions(transactionUserId.value || undefined, transactionPage.value)
-    if (items.length === 0 && transactionPage.value > 1) {
+    let response = await adminFetchTransactions(transactionUserId.value || undefined, transactionPage.value, transactionPageSize.value)
+    if (response.items.length === 0 && transactionPage.value > 1) {
       transactionPage.value -= 1
-      items = await adminFetchTransactions(transactionUserId.value || undefined, transactionPage.value)
+      response = await adminFetchTransactions(transactionUserId.value || undefined, transactionPage.value, transactionPageSize.value)
     }
-    transactions.value = items
+    transactions.value = response.items
+    transactionTotal.value = response.total
   } catch (error) {
     handleError(error, '消费记录加载失败。')
   } finally {
@@ -139,6 +152,7 @@ async function generateCodes() {
   try {
     const result = await adminGenerateCodes({ ...generateForm })
     generateResult.value = result.codes
+    codesPage.value = 1
     await loadCodes()
     message.success(`已生成 ${result.codes.length} 个兑换码。`)
   } catch (error) {
@@ -211,6 +225,18 @@ async function adjustCredits() {
 
 function changeCodesFilter(value: 'all' | 'unused' | 'used') {
   codesFilter.value = value
+  codesPage.value = 1
+  void loadCodes()
+}
+
+function changeCodesPage(nextPage: number) {
+  codesPage.value = nextPage
+  void loadCodes()
+}
+
+function changeCodesPageSize(nextPageSize: number) {
+  codesPageSize.value = nextPageSize
+  codesPage.value = 1
   void loadCodes()
 }
 
@@ -222,6 +248,12 @@ function changeTransactionUser(value: string | null) {
 
 function changeTransactionPage(page: number) {
   transactionPage.value = page
+  void loadTransactions()
+}
+
+function changeTransactionPageSize(nextPageSize: number) {
+  transactionPageSize.value = nextPageSize
+  transactionPage.value = 1
   void loadTransactions()
 }
 
@@ -293,6 +325,7 @@ const transactionColumns: DataTableColumns<AdminTransaction> = [
 onMounted(() => {
   void refreshAll()
 })
+onBeforeUnmount(() => { if (userSearchTimer) clearTimeout(userSearchTimer) })
 </script>
 
 <template>
@@ -349,16 +382,21 @@ onMounted(() => {
             :single-line="false"
             :scroll-x="900"
             :max-height="420"
+            virtual-scroll
           />
         </template>
       </NSpin>
+      <div v-if="codesTotal > 0" class="table-pagination">
+        <span>共 {{ codesTotal }} 个兑换码</span>
+        <NPagination :page="codesPage" :page-size="codesPageSize" :item-count="codesTotal" :page-sizes="pageSizes" show-size-picker @update:page="changeCodesPage" @update:page-size="changeCodesPageSize" />
+      </div>
     </NCard>
 
     <NCard size="small" class="billing-card">
       <template #header><span class="card-title"><Wallet :size="17" />用户余额调整</span></template>
       <NSpin :show="usersLoading">
         <NForm ref="adjustFormRef" :model="adjustForm" :rules="adjustRules" label-placement="top" class="adjust-form">
-          <NFormItem label="用户" path="user_id"><NSelect v-model:value="adjustForm.user_id" :options="userOptions" filterable /></NFormItem>
+          <NFormItem label="用户" path="user_id"><NSelect v-model:value="adjustForm.user_id" :options="userOptions" filterable remote :loading="usersLoading" @search="searchUsers" /></NFormItem>
           <NFormItem label="调整数量" path="amount"><NInputNumber v-model:value="adjustForm.amount" /></NFormItem>
           <NFormItem label="原因"><NInput v-model:value="adjustForm.reason" maxlength="256" placeholder="可选" /></NFormItem>
           <NButton type="primary" :loading="adjusting" class="form-action" @click="adjustCredits">确认调整</NButton>
@@ -369,20 +407,16 @@ onMounted(() => {
     <NCard size="small" class="billing-card">
       <template #header><span class="card-title"><ArrowRightLeft :size="17" />消费记录</span></template>
       <template #header-extra>
-        <NSelect :value="transactionUserId || ''" :options="transactionUserOptions" filterable class="transaction-filter" @update:value="changeTransactionUser" />
+        <NSelect :value="transactionUserId || ''" :options="transactionUserOptions" filterable remote :loading="usersLoading" class="transaction-filter" @search="searchUsers" @update:value="changeTransactionUser" />
       </template>
       <NSpin :show="transactionsLoading">
         <NEmpty v-if="!transactionsLoading && transactions.length === 0" description="当前页没有消费记录" class="card-empty" />
-        <NDataTable v-else :columns="transactionColumns" :data="transactions" :row-key="(row: AdminTransaction) => row.id" size="small" :single-line="false" :scroll-x="1250" />
+        <NDataTable v-else :columns="transactionColumns" :data="transactions" :row-key="(row: AdminTransaction) => row.id" size="small" :single-line="false" :scroll-x="1250" :max-height="520" virtual-scroll />
       </NSpin>
-      <NPagination
-        v-if="transactions.length > 0 || transactionPage > 1"
-        :page="transactionPage"
-        :page-count="transactionPageCount"
-        :page-slot="5"
-        class="transaction-pagination"
-        @update:page="changeTransactionPage"
-      />
+      <div v-if="transactionTotal > 0" class="table-pagination">
+        <span>共 {{ transactionTotal }} 条流水</span>
+        <NPagination :page="transactionPage" :page-size="transactionPageSize" :item-count="transactionTotal" :page-sizes="pageSizes" :page-slot="5" show-size-picker @update:page="changeTransactionPage" @update:page-size="changeTransactionPageSize" />
+      </div>
     </NCard>
   </section>
 </template>
@@ -400,7 +434,7 @@ onMounted(() => {
 .code-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-empty { padding: 48px 0; }
 .transaction-filter { width: 220px; }
-.transaction-pagination { justify-content: flex-end; margin-top: 14px; }
+.table-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; color: var(--text-muted); font-size: 12px; }
 @media (max-width: 900px) { .generate-form, .adjust-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .generate-form, .adjust-form { grid-template-columns: 1fr; } .form-action { margin-bottom: 10px; } .transaction-filter { width: 160px; } }
 </style>

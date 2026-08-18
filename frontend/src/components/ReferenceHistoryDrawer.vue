@@ -20,6 +20,7 @@ const {
   uploading,
   history,
   historyLoading,
+  historyTotal,
   pendingPreviewUrl,
   pendingFilename,
   deletingIds,
@@ -138,6 +139,15 @@ async function handleRemove(item: ReferenceImageItem) {
               </button>
             </div>
           </div>
+          <button
+            v-if="history.length < historyTotal"
+            type="button"
+            class="ghost-button reference-load-more"
+            :disabled="historyLoading"
+            @click="loadHistory(false)"
+          >
+            {{ historyLoading ? '正在加载…' : `加载更多（${history.length} / ${historyTotal}）` }}
+          </button>
         </div>
       </aside>
     </div>
@@ -146,4 +156,5 @@ async function handleRemove(item: ReferenceImageItem) {
 
 <style scoped>
 .reference-drawer-expiry { position: absolute; right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow: hidden; color: #fff; font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, .85); }
+.reference-load-more { width: 100%; margin-top: 12px; }
 </style>

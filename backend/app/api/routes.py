@@ -657,6 +657,7 @@ def get_popular_tags(
         .where(or_(GenerationJob.user_id.is_(None), User.is_public.is_(True)))
         .where(GenerationJob.deleted_at.is_(None))
         .where(GenerationJob.media_state == MediaState.AVAILABLE)
+        .where(GenerationJob.object_key.is_not(None), GenerationJob.finished_at.is_not(None))
         .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
         .where(GenerationJob.tags.isnot(None))
         .limit(1000)
@@ -767,7 +768,7 @@ def get_gallery(
 
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     stmt = (
-        base.order_by(desc(GenerationJob.finished_at))
+        base.order_by(desc(GenerationJob.finished_at), desc(GenerationJob.id))
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -776,14 +777,14 @@ def get_gallery(
     return GalleryPageResponse(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/gallery/public", response_model=list[GalleryItem])
+@router.get("/gallery/public", response_model=GalleryPageResponse)
 def get_public_gallery(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
     sort: str = Query("recent", pattern="^(recent|liked)$"),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-) -> list[GalleryItem]:
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> GalleryPageResponse:
     stmt = (
         select(GenerationJob)
         .outerjoin(User, GenerationJob.user_id == User.id)
@@ -792,8 +793,10 @@ def get_public_gallery(
         .where(or_(GenerationJob.user_id.is_(None), User.is_public.is_(True)))
         .where(GenerationJob.deleted_at.is_(None))
         .where(GenerationJob.media_state == MediaState.AVAILABLE)
+        .where(GenerationJob.object_key.is_not(None), GenerationJob.finished_at.is_not(None))
         .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
     )
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
     if sort == "liked":
         like_count_sub = (
             select(GalleryLike.job_id, func.count().label("cnt"))
@@ -801,38 +804,48 @@ def get_public_gallery(
             .subquery()
         )
         stmt = stmt.outerjoin(like_count_sub, GenerationJob.id == like_count_sub.c.job_id)
-        stmt = stmt.order_by(desc(like_count_sub.c.cnt), desc(GenerationJob.finished_at))
+        stmt = stmt.order_by(desc(like_count_sub.c.cnt), desc(GenerationJob.finished_at), desc(GenerationJob.id))
     else:
-        stmt = stmt.order_by(desc(GenerationJob.finished_at))
-    stmt = stmt.offset(offset).limit(limit)
+        stmt = stmt.order_by(desc(GenerationJob.finished_at), desc(GenerationJob.id))
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
-    return _build_gallery_items(db, jobs, current_user.id if current_user else None)
+    return GalleryPageResponse(
+        items=_build_gallery_items(db, jobs, current_user.id if current_user else None),
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
-@router.get("/gallery/{username}", response_model=list[GalleryItem])
+@router.get("/gallery/{username}", response_model=GalleryPageResponse)
 def get_user_gallery(
     username: str,
     db: Session = Depends(get_db),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-) -> list[GalleryItem]:
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> GalleryPageResponse:
     user = db.scalar(select(User).where(User.username == username))
     if not user or not user.is_public:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该用户不存在或未公开画廊。")
-    stmt = (
+    base = (
         select(GenerationJob)
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
         .where(GenerationJob.user_id == user.id)
         .where(GenerationJob.is_public.is_(True))
         .where(GenerationJob.deleted_at.is_(None))
         .where(GenerationJob.media_state == MediaState.AVAILABLE)
+        .where(GenerationJob.object_key.is_not(None), GenerationJob.finished_at.is_not(None))
         .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
-        .order_by(desc(GenerationJob.finished_at))
-        .offset(offset)
-        .limit(limit)
     )
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    stmt = base.order_by(desc(GenerationJob.finished_at), desc(GenerationJob.id)).offset((page - 1) * page_size).limit(page_size)
     jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
-    return _build_gallery_items(db, jobs, None)
+    return GalleryPageResponse(
+        items=_build_gallery_items(db, jobs, None),
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 def _get_like_count(db: Session, job_id: str) -> int:

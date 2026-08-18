@@ -2,7 +2,7 @@ import { getAdminAuthHeader, getAuthHeader } from './auth'
 import type {
   AdminHealth,
   AdminInspirationItem,
-  AdminJobItem,
+  AdminJobPage,
   AdminOverview,
   AnnouncementItem,
   BatchCreateInspirationsResponse,
@@ -14,6 +14,7 @@ import type {
   InspirationFeedResponse,
   JobDetailResponse,
   ModelConfig,
+  PageResponse,
   PublicMetaResponse,
   RedemptionCodeItem,
   ReferenceImageItem,
@@ -122,8 +123,8 @@ export function uploadReferenceImage(file: File, confirmEvictOldest = false) {
   })
 }
 
-export function fetchReferenceImages() {
-  return apiRequest<ReferenceImageItem[]>('/api/v1/reference-images')
+export function fetchReferenceImages(page = 1, pageSize = 50) {
+  return apiRequest<PageResponse<ReferenceImageItem>>(`/api/v1/reference-images?page=${page}&page_size=${pageSize}`)
 }
 
 export function deleteReferenceImage(id: string) {
@@ -167,14 +168,14 @@ export function fetchGallery(params: {
 
 export function fetchPublicGallery(params: {
   sort?: 'recent' | 'liked'
-  offset?: number
-  limit?: number
+  page?: number
+  page_size?: number
 } = {}) {
   const qs = new URLSearchParams()
   if (params.sort) qs.set('sort', params.sort)
-  if (params.offset) qs.set('offset', String(params.offset))
-  if (params.limit) qs.set('limit', String(params.limit))
-  return apiRequest<GalleryItem[]>(`/api/v1/gallery/public?${qs}`)
+  if (params.page) qs.set('page', String(params.page))
+  if (params.page_size) qs.set('page_size', String(params.page_size))
+  return apiRequest<GalleryPageResponse>(`/api/v1/gallery/public?${qs}`)
 }
 
 export function deleteJob(jobId: string) {
@@ -207,8 +208,8 @@ export function fetchPopularTags(limit = 20) {
   return apiRequest<string[]>(`/api/v1/tags/popular?limit=${limit}`)
 }
 
-export function fetchUserGallery(username: string) {
-  return apiRequest<GalleryItem[]>(`/api/v1/gallery/${username}`)
+export function fetchUserGallery(username: string, page = 1, pageSize = 20) {
+  return apiRequest<GalleryPageResponse>(`/api/v1/gallery/${username}?page=${page}&page_size=${pageSize}`)
 }
 
 export function updateProfile(data: { display_name?: string; is_public?: boolean }) {
@@ -269,9 +270,12 @@ export function adminDeleteJob(jobId: string) {
   return adminApiRequest<void>(`/api/v1/admin/jobs/${jobId}`, { method: 'DELETE' })
 }
 
-export function adminFetchJobs(statusFilter?: string) {
-  const params = statusFilter ? `?status=${statusFilter}` : ''
-  return adminApiRequest<AdminJobItem[]>(`/api/v1/admin/jobs${params}`)
+export function adminFetchJobs(options: { status?: string; page?: number; pageSize?: number } = {}) {
+  const params = new URLSearchParams()
+  if (options.status) params.set('status', options.status)
+  params.set('page', String(options.page ?? 1))
+  params.set('page_size', String(options.pageSize ?? 50))
+  return adminApiRequest<AdminJobPage>(`/api/v1/admin/jobs?${params.toString()}`)
 }
 
 export function adminBatchDeleteJobs(jobIds: string[]) {
@@ -281,8 +285,14 @@ export function adminBatchDeleteJobs(jobIds: string[]) {
   })
 }
 
-export function adminFetchUsers() {
-  return adminApiRequest<UserInfo[]>('/api/v1/admin/users')
+export function adminFetchUsers(options: { page?: number; pageSize?: number; q?: string; groupCode?: string } = {}) {
+  const params = new URLSearchParams({
+    page: String(options.page ?? 1),
+    page_size: String(options.pageSize ?? 50),
+  })
+  if (options.q) params.set('q', options.q)
+  if (options.groupCode) params.set('group_code', options.groupCode)
+  return adminApiRequest<PageResponse<UserInfo>>(`/api/v1/admin/users?${params}`)
 }
 
 export function adminCreateUser(data: { username: string; email?: string; password: string; display_name?: string; group_code?: string }) {
@@ -323,8 +333,8 @@ export function adminDeleteUser(userId: string) {
 
 // ---- Admin Announcement APIs ----
 
-export function adminFetchAnnouncements() {
-  return adminApiRequest<AnnouncementItem[]>('/api/v1/admin/announcements')
+export function adminFetchAnnouncements(page = 1, pageSize = 50) {
+  return adminApiRequest<PageResponse<AnnouncementItem>>(`/api/v1/admin/announcements?page=${page}&page_size=${pageSize}`)
 }
 
 export function adminCreateAnnouncement(data: {
@@ -441,8 +451,10 @@ export function adminGenerateCodes(data: { count: number; credits: number; prefi
   })
 }
 
-export function adminFetchCodes(statusFilter: 'all' | 'unused' | 'used' = 'all') {
-  return adminApiRequest<RedemptionCodeItem[]>(`/api/v1/admin/codes?status=${statusFilter}`)
+export function adminFetchCodes(statusFilter: 'all' | 'unused' | 'used' = 'all', page = 1, pageSize = 50) {
+  return adminApiRequest<PageResponse<RedemptionCodeItem>>(
+    `/api/v1/admin/codes?status=${statusFilter}&page=${page}&page_size=${pageSize}`,
+  )
 }
 
 export function adminAdjustCredits(userId: string, data: { amount: number; reason?: string }) {
@@ -460,10 +472,10 @@ export function adminFetchHealth() {
   return adminApiRequest<AdminHealth>('/api/v1/admin/health')
 }
 
-export function adminFetchTransactions(userId?: string, page = 1) {
-  const params = new URLSearchParams({ page: String(page) })
+export function adminFetchTransactions(userId?: string, page = 1, pageSize = 50) {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
   if (userId) params.set('user_id', userId)
-  return adminApiRequest<(CreditTransactionItem & { id: string; user_id: string; username: string | null })[]>(
+  return adminApiRequest<PageResponse<CreditTransactionItem & { id: string; user_id: string; username: string | null }>>(
     `/api/v1/admin/transactions?${params}`,
   )
 }
@@ -493,15 +505,16 @@ export function fetchInspirationCategories(limit = 20) {
 }
 
 export function adminFetchInspirations(params: {
-  offset?: number
-  limit?: number
+  page?: number
+  pageSize?: number
   source?: string
-} = {}): Promise<AdminInspirationItem[]> {
-  const qs = new URLSearchParams()
-  if (params.offset) qs.set('offset', String(params.offset))
-  if (params.limit) qs.set('limit', String(params.limit))
+} = {}): Promise<PageResponse<AdminInspirationItem>> {
+  const qs = new URLSearchParams({
+    page: String(params.page ?? 1),
+    page_size: String(params.pageSize ?? 50),
+  })
   if (params.source) qs.set('source', params.source)
-  return adminApiRequest<AdminInspirationItem[]>(`/api/v1/admin/inspirations?${qs}`)
+  return adminApiRequest<PageResponse<AdminInspirationItem>>(`/api/v1/admin/inspirations?${qs}`)
 }
 
 export function adminCreateInspiration(formData: FormData): Promise<{ id: string; image_url: string }> {
@@ -535,11 +548,12 @@ export function adminDeleteInspiration(id: string): Promise<void> {
   return adminApiRequest(`/api/v1/admin/inspirations/${id}`, { method: 'DELETE' })
 }
 
-export function adminFetchInspirationCandidates(params: { offset?: number; limit?: number } = {}) {
-  const qs = new URLSearchParams()
-  if (params.offset) qs.set('offset', String(params.offset))
-  if (params.limit) qs.set('limit', String(params.limit))
-  return adminApiRequest<{ items: import('./types').AdminInspirationCandidate[]; total: number }>(`/api/v1/admin/inspirations/candidates?${qs}`)
+export function adminFetchInspirationCandidates(params: { page?: number; pageSize?: number } = {}) {
+  const qs = new URLSearchParams({
+    page: String(params.page ?? 1),
+    page_size: String(params.pageSize ?? 50),
+  })
+  return adminApiRequest<PageResponse<import('./types').AdminInspirationCandidate>>(`/api/v1/admin/inspirations/candidates?${qs}`)
 }
 
 export function adminCreateInspirationFromJob(jobId: string) {

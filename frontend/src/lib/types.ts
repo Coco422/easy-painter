@@ -144,6 +144,13 @@ export interface GalleryPageResponse {
   page_size: number
 }
 
+export interface PageResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface UserInfo {
   id: string
   username: string
@@ -232,6 +239,8 @@ export interface AdminJobItem {
   started_at: string | null
   finished_at: string | null
 }
+
+export type AdminJobPage = PageResponse<AdminJobItem>
 
 export interface AdminMetricItem {
   label: string

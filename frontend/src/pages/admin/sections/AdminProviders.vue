@@ -244,6 +244,8 @@ onMounted(loadProviders)
         :single-line="false"
         size="small"
         :scroll-x="980"
+        :max-height="680"
+        virtual-scroll
       />
     </NSpin>
 

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,7 @@ from app.models.reference_image import ReferenceImage
 from app.models.media import MediaState
 from app.models.user import User
 from app.schemas.reference_image import ReferenceImageItem
+from app.schemas.pagination import PageResponse
 from app.services.reference_images import ReferenceImageValidationError, validate_reference_image
 from app.services.group_policy import resolve_user_policy
 from app.services.media_lifecycle import enqueue_deletion
@@ -160,19 +161,31 @@ async def upload_staged_reference_image(
     return _build_reference_image_item(image)
 
 
-@reference_router.get("/reference-images", response_model=list[ReferenceImageItem])
+@reference_router.get("/reference-images", response_model=PageResponse[ReferenceImageItem])
 def list_staged_reference_images(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
-) -> list[ReferenceImageItem]:
-    images = db.scalars(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+) -> PageResponse[ReferenceImageItem]:
+    base = (
         select(ReferenceImage)
         .where(ReferenceImage.user_id == current_user.id)
         .where(ReferenceImage.media_state == MediaState.AVAILABLE)
         .where((ReferenceImage.media_expires_at.is_(None)) | (ReferenceImage.media_expires_at > datetime.now(timezone.utc)))
-        .order_by(desc(ReferenceImage.created_at))
+    )
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    images = db.scalars(
+        base.order_by(desc(ReferenceImage.created_at), desc(ReferenceImage.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
-    return [_build_reference_image_item(image) for image in images]
+    return PageResponse[ReferenceImageItem](
+        items=[_build_reference_image_item(image) for image in images],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @reference_router.get("/reference-images/{image_id}/file")

@@ -75,11 +75,15 @@ def test_admin_can_create_update_disable_and_delete_announcement():
     )
     assert updated.content == "请尽快完成邮箱验证。"
     assert updated.enabled is False
-    assert [item.id for item in announcement_routes.admin_list_announcements(db=db, _=admin_claims)] == [created.id]
+    page = announcement_routes.admin_list_announcements(db=db, _=admin_claims, page=1, page_size=50)
+    assert page.total == 1
+    assert [item.id for item in page.items] == [created.id]
 
     announcement_routes.admin_delete_announcement(
         announcement_id=created.id,
         db=db,
         _=admin_claims,
     )
-    assert announcement_routes.admin_list_announcements(db=db, _=admin_claims) == []
+    page = announcement_routes.admin_list_announcements(db=db, _=admin_claims, page=1, page_size=50)
+    assert page.total == 0
+    assert page.items == []

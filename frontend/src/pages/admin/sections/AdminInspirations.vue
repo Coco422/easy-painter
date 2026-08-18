@@ -8,6 +8,7 @@ import {
   NFormItem,
   NInput,
   NModal,
+  NPagination,
   NSpace,
   NSpin,
   NSwitch,
@@ -38,6 +39,13 @@ const loading = ref(false)
 const candidates = ref<AdminInspirationCandidate[]>([])
 const inspirations = ref<AdminInspirationItem[]>([])
 const collectingId = ref('')
+const candidatePage = ref(1)
+const candidatePageSize = ref(25)
+const candidateTotal = ref(0)
+const inspirationPage = ref(1)
+const inspirationPageSize = ref(25)
+const inspirationTotal = ref(0)
+const pageSizes = [25, 50, 100]
 
 const importOpen = ref(false)
 const importing = ref(false)
@@ -85,11 +93,13 @@ async function load() {
   loading.value = true
   try {
     const [candidateData, permanent] = await Promise.all([
-      adminFetchInspirationCandidates({ limit: 100 }),
-      adminFetchInspirations({ limit: 100 }),
+      adminFetchInspirationCandidates({ page: candidatePage.value, pageSize: candidatePageSize.value }),
+      adminFetchInspirations({ page: inspirationPage.value, pageSize: inspirationPageSize.value }),
     ])
     candidates.value = candidateData.items
-    inspirations.value = permanent
+    candidateTotal.value = candidateData.total
+    inspirations.value = permanent.items
+    inspirationTotal.value = permanent.total
   } catch (error) {
     handleError(error, '社区内容加载失败。')
   } finally {
@@ -100,15 +110,36 @@ async function load() {
 async function collect(candidate: AdminInspirationCandidate) {
   collectingId.value = candidate.job_id
   try {
-    const created = await adminCreateInspirationFromJob(candidate.job_id)
-    inspirations.value.unshift(created)
-    candidates.value = candidates.value.filter(item => item.job_id !== candidate.job_id)
+    await adminCreateInspirationFromJob(candidate.job_id)
+    await load()
     message.success('已收录为独立永久社区内容。')
   } catch (error) {
     handleError(error, '收录失败。')
   } finally {
     collectingId.value = ''
   }
+}
+
+function changeCandidatePage(nextPage: number) {
+  candidatePage.value = nextPage
+  void load()
+}
+
+function changeCandidatePageSize(nextPageSize: number) {
+  candidatePageSize.value = nextPageSize
+  candidatePage.value = 1
+  void load()
+}
+
+function changeInspirationPage(nextPage: number) {
+  inspirationPage.value = nextPage
+  void load()
+}
+
+function changeInspirationPageSize(nextPageSize: number) {
+  inspirationPageSize.value = nextPageSize
+  inspirationPage.value = 1
+  void load()
 }
 
 function onImportFile(event: Event) {
@@ -198,7 +229,11 @@ function remove(item: AdminInspirationItem) {
     async onPositiveClick() {
       try {
         await adminDeleteInspiration(item.id)
-        inspirations.value = inspirations.value.filter(entry => entry.id !== item.id)
+        await load()
+        if (inspirations.value.length === 0 && inspirationPage.value > 1) {
+          inspirationPage.value -= 1
+          await load()
+        }
         message.success('内容已撤下。')
       } catch (error) {
         handleError(error, '撤下失败。')
@@ -247,13 +282,21 @@ onMounted(load)
 
     <NSpin :show="loading">
       <NTabs type="line" animated>
-        <NTabPane name="candidates" tab="收录候选">
+        <NTabPane name="candidates" :tab="`收录候选（${candidateTotal}）`">
           <NEmpty v-if="!loading && candidates.length === 0" description="暂无符合收录条件的公开作品" class="section-empty" />
-          <NDataTable v-else :columns="candidateColumns" :data="candidates" :row-key="row => row.job_id" size="small" :single-line="false" :scroll-x="780" />
+          <NDataTable v-else :columns="candidateColumns" :data="candidates" :row-key="row => row.job_id" size="small" :single-line="false" :scroll-x="780" :max-height="620" virtual-scroll />
+          <div v-if="candidateTotal > 0" class="table-pagination">
+            <span>共 {{ candidateTotal }} 个候选</span>
+            <NPagination :page="candidatePage" :page-size="candidatePageSize" :item-count="candidateTotal" :page-sizes="pageSizes" show-size-picker @update:page="changeCandidatePage" @update:page-size="changeCandidatePageSize" />
+          </div>
         </NTabPane>
-        <NTabPane name="published" tab="已收录内容">
+        <NTabPane name="published" :tab="`已收录内容（${inspirationTotal}）`">
           <NEmpty v-if="!loading && inspirations.length === 0" description="还没有永久社区内容" class="section-empty" />
-          <NDataTable v-else :columns="inspirationColumns" :data="inspirations" :row-key="row => row.id" size="small" :single-line="false" :scroll-x="820" />
+          <NDataTable v-else :columns="inspirationColumns" :data="inspirations" :row-key="row => row.id" size="small" :single-line="false" :scroll-x="820" :max-height="620" virtual-scroll />
+          <div v-if="inspirationTotal > 0" class="table-pagination">
+            <span>共 {{ inspirationTotal }} 条永久内容</span>
+            <NPagination :page="inspirationPage" :page-size="inspirationPageSize" :item-count="inspirationTotal" :page-sizes="pageSizes" show-size-picker @update:page="changeInspirationPage" @update:page-size="changeInspirationPageSize" />
+          </div>
         </NTabPane>
       </NTabs>
     </NSpin>
@@ -292,6 +335,7 @@ onMounted(load)
 
 <style scoped>
 .section-empty { padding: 72px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }
+.table-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; color: var(--text-muted); font-size: 12px; }
 .community-modal { width: min(680px, calc(100vw - 32px)); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 620px) { .form-grid { grid-template-columns: 1fr; gap: 0; } }

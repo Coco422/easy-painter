@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from redis import Redis
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -34,6 +34,7 @@ from app.schemas.inspiration import (
     BatchCreateInspirationsResponse,
     CreateInspirationResponse,
 )
+from app.schemas.pagination import PageResponse
 from app.services.storage import MinioStorageService, StorageError
 from app.services.billing import adjust_user_credits
 from app.services.job_lifecycle import mark_generation_failed
@@ -211,17 +212,34 @@ class AdminJobItem(BaseModel):
     finished_at: str | None = None
 
 
-@admin_router.get("/admin/jobs", response_model=list[AdminJobItem])
+class AdminJobPage(BaseModel):
+    items: list[AdminJobItem]
+    total: int
+    page: int
+    page_size: int
+
+
+@admin_router.get("/admin/jobs", response_model=AdminJobPage)
 def admin_list_jobs(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
-    status_filter: str | None = Query(None, alias="status"),
-) -> list[AdminJobItem]:
-    stmt = select(GenerationJob).order_by(desc(GenerationJob.created_at))
+    status_filter: JobStatus | None = Query(None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+) -> AdminJobPage:
+    stmt = select(GenerationJob).order_by(desc(GenerationJob.created_at), desc(GenerationJob.id))
+    count_stmt = select(func.count()).select_from(GenerationJob)
     if status_filter:
         stmt = stmt.where(GenerationJob.status == status_filter)
-    stmt = stmt.limit(500)
+        count_stmt = count_stmt.where(GenerationJob.status == status_filter)
+    total = db.scalar(count_stmt) or 0
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     jobs = db.scalars(stmt).all()
+    user_ids = {job.user_id for job in jobs if job.user_id}
+    user_map = {
+        user.id: user.username
+        for user in db.scalars(select(User).where(User.id.in_(user_ids))).all()
+    } if user_ids else {}
     charge_map = {
         charge.job_id: charge
         for charge in db.scalars(select(JobCharge).where(JobCharge.job_id.in_([job.id for job in jobs]))).all()
@@ -237,11 +255,6 @@ def admin_list_jobs(
             outbox_map.setdefault(event.aggregate_id, event)
     result = []
     for job in jobs:
-        username = None
-        if job.user_id:
-            user = db.get(User, job.user_id)
-            if user:
-                username = user.username
         charge = charge_map.get(job.id)
         outbox = outbox_map.get(job.id)
         result.append(AdminJobItem(
@@ -252,7 +265,7 @@ def admin_list_jobs(
             model=job.model,
             size=job.size or "auto",
             aspect_ratio=job.aspect_ratio or "auto",
-            username=username,
+            username=user_map.get(job.user_id),
             error_message=job.error_message,
             provider_job_meta=job.provider_job_meta,
             image_url=(
@@ -276,7 +289,7 @@ def admin_list_jobs(
             started_at=job.started_at.isoformat() if job.started_at else None,
             finished_at=job.finished_at.isoformat() if job.finished_at else None,
         ))
-    return result
+    return AdminJobPage(items=result, total=total, page=page, page_size=page_size)
 
 
 def _mark_job_deleted(db: Session, job: GenerationJob) -> None:
@@ -363,13 +376,38 @@ def admin_batch_delete_jobs(
     return BatchDeleteResponse(deleted=deleted, failed=failed)
 
 
-@admin_router.get("/admin/users", response_model=list[UserResponse])
+@admin_router.get("/admin/users", response_model=PageResponse[UserResponse])
 def admin_list_users(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
-) -> list[UserResponse]:
-    users = db.scalars(select(User).order_by(User.created_at)).all()
-    return [_admin_user_response(user, db) for user in users]
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    q: str | None = Query(None, max_length=200),
+    group_code: str | None = Query(None, max_length=64),
+) -> PageResponse[UserResponse]:
+    filters = []
+    if q:
+        pattern = f"%{q.strip()}%"
+        filters.append(or_(User.username.ilike(pattern), User.display_name.ilike(pattern), User.email.ilike(pattern)))
+    if group_code:
+        filters.append(User.group_code == group_code)
+    total_stmt = select(func.count()).select_from(User)
+    users_stmt = select(User)
+    if filters:
+        total_stmt = total_stmt.where(*filters)
+        users_stmt = users_stmt.where(*filters)
+    total = db.scalar(total_stmt) or 0
+    users = db.scalars(
+        users_stmt.order_by(desc(User.created_at), desc(User.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return PageResponse[UserResponse](
+        items=[_admin_user_response(user, db) for user in users],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @admin_router.post("/admin/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -759,29 +797,44 @@ def admin_generate_codes(
     return GenerateCodesResponse(codes=codes)
 
 
-@admin_router.get("/admin/codes", response_model=list[CodeItem])
+@admin_router.get("/admin/codes", response_model=PageResponse[CodeItem])
 def admin_list_codes(
     status_filter: str = Query("all", pattern="^(all|unused|used)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
-) -> list[CodeItem]:
-    stmt = select(RedemptionCode).order_by(desc(RedemptionCode.created_at)).limit(500)
+) -> PageResponse[CodeItem]:
+    stmt = select(RedemptionCode)
+    count_stmt = select(func.count()).select_from(RedemptionCode)
     if status_filter == "unused":
         stmt = stmt.where(RedemptionCode.used_by.is_(None))
+        count_stmt = count_stmt.where(RedemptionCode.used_by.is_(None))
     elif status_filter == "used":
         stmt = stmt.where(RedemptionCode.used_by.is_not(None))
-    codes = db.scalars(stmt).all()
-    return [
-        CodeItem(
-            id=c.id,
-            code=c.code,
-            credits=c.credits,
-            used_by=c.used_by,
-            used_at=c.used_at.isoformat() if c.used_at else None,
-            created_at=c.created_at.isoformat() if c.created_at else "",
-        )
-        for c in codes
-    ]
+        count_stmt = count_stmt.where(RedemptionCode.used_by.is_not(None))
+    total = db.scalar(count_stmt) or 0
+    codes = db.scalars(
+        stmt.order_by(desc(RedemptionCode.created_at), desc(RedemptionCode.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return PageResponse[CodeItem](
+        items=[
+            CodeItem(
+                id=c.id,
+                code=c.code,
+                credits=c.credits,
+                used_by=c.used_by,
+                used_at=c.used_at.isoformat() if c.used_at else None,
+                created_at=c.created_at.isoformat() if c.created_at else "",
+            )
+            for c in codes
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @admin_router.post("/admin/users/{user_id}/credits")
@@ -804,17 +857,20 @@ def admin_adjust_credits(
     return {"credits": balance, "requested_amount": body.amount, "applied_amount": applied_amount}
 
 
-@admin_router.get("/admin/transactions", response_model=list[AdminCreditTransactionItem])
+@admin_router.get("/admin/transactions", response_model=PageResponse[AdminCreditTransactionItem])
 def admin_list_transactions(
     user_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
-) -> list[AdminCreditTransactionItem]:
-    stmt = select(CreditTransaction).order_by(desc(CreditTransaction.created_at))
+) -> PageResponse[AdminCreditTransactionItem]:
+    stmt = select(CreditTransaction).order_by(desc(CreditTransaction.created_at), desc(CreditTransaction.id))
+    count_stmt = select(func.count()).select_from(CreditTransaction)
     if user_id:
         stmt = stmt.where(CreditTransaction.user_id == user_id)
+        count_stmt = count_stmt.where(CreditTransaction.user_id == user_id)
+    total = db.scalar(count_stmt) or 0
     offset = (page - 1) * page_size
     stmt = stmt.offset(offset).limit(page_size)
     txns = db.scalars(stmt).all()
@@ -828,46 +884,51 @@ def admin_list_transactions(
         for charge in db.scalars(select(JobCharge).where(JobCharge.job_id.in_(job_ids))).all()
     } if job_ids else {}
 
-    return [
-        AdminCreditTransactionItem(
-            id=t.id,
-            user_id=t.user_id,
-            username=username_map.get(t.user_id),
-            transaction_type=t.transaction_type.value,
-            job_id=t.job_id,
-            model_label=charge_map[t.job_id].model_label if t.job_id in charge_map else (t.details or {}).get("model_label"),
-            billing_status=charge_map[t.job_id].status.value if t.job_id in charge_map else None,
-            related_transaction_id=t.related_transaction_id,
-            amount=t.amount,
-            balance_after=t.balance_after,
-            reason=t.reason,
-            created_at=t.created_at.isoformat() if t.created_at else "",
-        )
-        for t in txns
-    ]
+    return PageResponse[AdminCreditTransactionItem](
+        items=[
+            AdminCreditTransactionItem(
+                id=t.id,
+                user_id=t.user_id,
+                username=username_map.get(t.user_id),
+                transaction_type=t.transaction_type.value,
+                job_id=t.job_id,
+                model_label=charge_map[t.job_id].model_label if t.job_id in charge_map else (t.details or {}).get("model_label"),
+                billing_status=charge_map[t.job_id].status.value if t.job_id in charge_map else None,
+                related_transaction_id=t.related_transaction_id,
+                amount=t.amount,
+                balance_after=t.balance_after,
+                reason=t.reason,
+                created_at=t.created_at.isoformat() if t.created_at else "",
+            )
+            for t in txns
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 # ---- Inspiration admin endpoints ----
 
-@admin_router.get("/admin/inspirations", response_model=list[AdminInspirationItem])
+@admin_router.get("/admin/inspirations", response_model=PageResponse[AdminInspirationItem])
 def admin_list_inspirations(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     source: str | None = Query(None),
-) -> list[AdminInspirationItem]:
+) -> PageResponse[AdminInspirationItem]:
     stmt = (
         select(Inspiration)
         .where(Inspiration.deleted_at.is_(None), Inspiration.media_state == MediaState.AVAILABLE)
-        .order_by(desc(Inspiration.created_at))
+        .order_by(desc(Inspiration.created_at), desc(Inspiration.id))
     )
     if source:
         stmt = stmt.where(Inspiration.source == source)
-    stmt = stmt.offset(offset).limit(limit)
-    items = db.scalars(stmt).all()
-    return [
-        AdminInspirationItem(
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
+    items = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
+    return PageResponse[AdminInspirationItem](
+        items=[AdminInspirationItem(
             id=item.id,
             title=item.title,
             description=item.description,
@@ -886,8 +947,11 @@ def admin_list_inspirations(
             created_at=item.created_at,
             updated_at=item.updated_at,
         )
-        for item in items
-    ]
+        for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @admin_router.post("/admin/inspirations", response_model=CreateInspirationResponse, status_code=status.HTTP_201_CREATED)

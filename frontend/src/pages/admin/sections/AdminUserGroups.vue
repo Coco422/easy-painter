@@ -73,7 +73,7 @@ onMounted(loadGroups)
 <template>
   <section class="admin-section-view">
     <header class="section-header"><div><p class="section-kicker">Groups</p><h1>用户组</h1><span>统一配置结算倍率和媒体保留策略；变更只影响后续任务与上传。</span></div><NSpace><NButton :loading="loading" @click="loadGroups"><template #icon><RefreshCw :size="15" /></template>刷新</NButton><NButton type="primary" @click="openCreate"><template #icon><Plus :size="16" /></template>新增用户组</NButton></NSpace></header>
-    <NSpin :show="loading"><NEmpty v-if="!loading && groups.length === 0" description="还没有用户组" class="section-empty" /><NDataTable v-else :columns="columns" :data="groups" :row-key="row => row.code" size="small" :single-line="false" :scroll-x="900" /></NSpin>
+    <NSpin :show="loading"><NEmpty v-if="!loading && groups.length === 0" description="还没有用户组" class="section-empty" /><NDataTable v-else :columns="columns" :data="groups" :row-key="row => row.code" size="small" :single-line="false" :scroll-x="900" :max-height="680" virtual-scroll /></NSpin>
     <NModal v-model:show="modalOpen" preset="card" class="admin-form-modal" :title="editingCode ? '编辑用户组' : '新增用户组'" :mask-closable="!saving">
       <NForm ref="formRef" :model="form" :rules="rules" label-placement="top">
         <NFormItem label="代码" path="code"><NInput v-model:value="form.code" :disabled="Boolean(editingCode)" placeholder="standard / vip" /></NFormItem>

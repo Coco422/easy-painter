@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import desc, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user_optional, require_admin
@@ -14,6 +14,7 @@ from app.schemas.announcement import (
     AnnouncementResponse,
     AnnouncementUpdateRequest,
 )
+from app.schemas.pagination import PageResponse
 
 
 announcement_router = APIRouter()
@@ -39,14 +40,21 @@ def list_active_announcements(
     ).all())
 
 
-@announcement_router.get("/admin/announcements", response_model=list[AnnouncementResponse])
+@announcement_router.get("/admin/announcements", response_model=PageResponse[AnnouncementResponse])
 def admin_list_announcements(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
-) -> list[Announcement]:
-    return list(db.scalars(
-        select(Announcement).order_by(desc(Announcement.created_at)).limit(500)
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+) -> PageResponse[AnnouncementResponse]:
+    total = db.scalar(select(func.count()).select_from(Announcement)) or 0
+    items = list(db.scalars(
+        select(Announcement)
+        .order_by(desc(Announcement.created_at), desc(Announcement.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all())
+    return PageResponse[AnnouncementResponse](items=items, total=total, page=page, page_size=page_size)
 
 
 @announcement_router.post(

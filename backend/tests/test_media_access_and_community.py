@@ -88,7 +88,9 @@ def test_media_capability_rechecks_resource_visibility_and_scope(monkeypatch):
     assert exc_info.value.status_code == 401
     assert exc_info.value.headers["Cache-Control"] == "no-store"
 
-    tampered = owner_token[:-1] + ("a" if owner_token[-1] != "a" else "b")
+    token_parts = owner_token.split(".")
+    token_parts[2] = ("a" if token_parts[2][0] != "a" else "b") + token_parts[2][1:]
+    tampered = ".".join(token_parts)
     with pytest.raises(HTTPException) as exc_info:
         media_routes.stream_job_media(job.id, request(), tampered)
     assert exc_info.value.status_code == 401
@@ -181,8 +183,9 @@ def test_curated_copy_survives_source_deletion_and_hidden_prompts_are_ineligible
     storage = Storage()
     monkeypatch.setattr(community_admin_routes, "MinioStorageService", lambda: storage)
 
-    candidates = community_admin_routes.list_community_candidates(offset=0, limit=50, db=db, _={})
-    assert [item["job_id"] for item in candidates["items"]] == [eligible.id]
+    candidates = community_admin_routes.list_community_candidates(page=1, page_size=50, db=db, _={})
+    assert candidates.total == 1
+    assert [item.job_id for item in candidates.items] == [eligible.id]
     curated = community_admin_routes.curate_job(
         eligible.id,
         community_admin_routes.CurateRequest(is_featured=True),
@@ -270,9 +273,9 @@ def test_public_gallery_hides_private_prompt_and_like_rechecks_visibility():
     db.add_all([owner, viewer, job])
     db.commit()
 
-    items = routes.get_public_gallery(db=db, current_user=viewer, sort="recent", offset=0, limit=20)
-    assert items[0].prompt == ""
-    assert items[0].revised_prompt is None
+    items = routes.get_public_gallery(db=db, current_user=viewer, sort="recent", page=1, page_size=20)
+    assert items.items[0].prompt == ""
+    assert items.items[0].revised_prompt is None
     routes.like_gallery_item(job.id, db=db, current_user=viewer)
 
     job.is_public = False

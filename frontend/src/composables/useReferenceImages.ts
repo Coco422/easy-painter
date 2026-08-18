@@ -13,6 +13,8 @@ const selected = ref<ReferenceImageItem | null>(null)
 const uploading = ref(false)
 const history = ref<ReferenceImageItem[]>([])
 const historyLoading = ref(false)
+const historyPage = ref(1)
+const historyTotal = ref(0)
 const pendingPreviewUrl = ref<string | null>(null)
 const pendingFilename = ref('')
 
@@ -79,6 +81,7 @@ async function uploadAndSelect(file: File, confirmEvictOldest = false) {
     }
     selected.value = item
     history.value = [item, ...history.value.filter((entry) => entry.id !== item.id)]
+    await loadHistory()
     return item
   } finally {
     if (pendingPreviewUrl.value) {
@@ -104,6 +107,7 @@ async function remove(item: ReferenceImageItem) {
   try {
     await deleteReferenceImage(item.id)
     history.value = history.value.filter((entry) => entry.id !== item.id)
+    historyTotal.value = Math.max(0, historyTotal.value - 1)
     if (selected.value?.id === item.id) {
       selected.value = null
     }
@@ -113,10 +117,16 @@ async function remove(item: ReferenceImageItem) {
   }
 }
 
-async function loadHistory() {
+async function loadHistory(reset = true) {
   historyLoading.value = true
   try {
-    history.value = await fetchReferenceImages()
+    const nextPage = reset ? 1 : historyPage.value + 1
+    const response = await fetchReferenceImages(nextPage)
+    history.value = reset
+      ? response.items
+      : [...history.value, ...response.items.filter((item) => !history.value.some((entry) => entry.id === item.id))]
+    historyPage.value = response.page
+    historyTotal.value = response.total
   } finally {
     historyLoading.value = false
   }
@@ -128,6 +138,7 @@ export function useReferenceImages() {
     uploading,
     history,
     historyLoading,
+    historyTotal,
     pendingPreviewUrl,
     pendingFilename,
     deletingIds,

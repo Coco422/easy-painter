@@ -633,10 +633,11 @@ def test_public_gallery_requires_user_master_switch_and_published_job():
         db=db,
         current_user=None,
         sort="recent",
-        offset=0,
-        limit=20,
+        page=1,
+        page_size=20,
     )
-    assert {item.job_id for item in public_items} == {visible_job.id, legacy_anonymous_job.id}
+    assert public_items.total == 2
+    assert {item.job_id for item in public_items.items} == {visible_job.id, legacy_anonymous_job.id}
 
     inspiration_items = inspiration_routes.list_inspirations(
         db=db,
@@ -652,10 +653,10 @@ def test_public_gallery_requires_user_master_switch_and_published_job():
     assert inspiration_items.items == []
 
     with pytest.raises(HTTPException) as exc_info:
-        routes.get_user_gallery(username="hidden", db=db, offset=0, limit=20)
+        routes.get_user_gallery(username="hidden", db=db, page=1, page_size=20)
     assert exc_info.value.status_code == 404
 
     hidden_user.is_public = True
     db.commit()
-    hidden_items = routes.get_user_gallery(username="hidden", db=db, offset=0, limit=20)
-    assert [item.job_id for item in hidden_items] == [hidden_job.id]
+    hidden_items = routes.get_user_gallery(username="hidden", db=db, page=1, page_size=20)
+    assert [item.job_id for item in hidden_items.items] == [hidden_job.id]

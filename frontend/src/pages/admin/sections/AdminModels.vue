@@ -406,7 +406,7 @@ onBeforeUnmount(clearDragState)
 
     <NSpin :show="loading">
       <NEmpty v-if="!loading && models.length === 0" description="还没有模型配置" class="section-empty" />
-      <NDataTable v-else :columns="columns" :data="models" :row-key="(row: ModelConfig) => row.id" :row-props="getRowProps" size="small" :single-line="false" :scroll-x="1080" />
+      <NDataTable v-else :columns="columns" :data="models" :row-key="(row: ModelConfig) => row.id" :row-props="getRowProps" size="small" :single-line="false" :scroll-x="1080" :max-height="680" virtual-scroll />
     </NSpin>
 
     <NModal v-model:show="modalOpen" preset="card" :title="editingId ? '编辑模型' : '新增模型'" class="admin-form-modal" :mask-closable="!saving">
