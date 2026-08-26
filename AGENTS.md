@@ -39,3 +39,4 @@ cd frontend && npx vue-tsc --noEmit  # typecheck
 - Root `VERSION` is canonical and holds `vX.Y.Z`; **frontend/backend manifests store the same value WITHOUT the `v` prefix** (frontend/package.json + backend/pyproject.toml).
 - Bump with `python3 scripts/version.py set vX.Y.Z` so all manifests stay in sync; validate with `check`, preview release notes with `notes`.
 - `CHANGELOG.md` (section format `## vX.Y.Z - YYYY-MM-DD`) is the release-notes source. Pushing a `vX.Y.Z` tag runs `version.py check` and creates the GitHub Release; don't cut a release by hand-editing manifests only.
+- Every production deployment must use a newly created semantic-version tag; never deploy `main` or a bare `sha-*` build as the steady production version. Restarting the same release for recovery is not a new deployment, and rollback must pin an earlier existing version tag.

@@ -7,6 +7,8 @@ description: Use this skill when the user asks to release, bump a version, creat
 
 Easy Painter releases the frontend and backend together from one repository. `VERSION` is the canonical version source, while `CHANGELOG.md` is the only source for human-written release notes and GitHub Release content.
 
+Every production deployment requires a newly created semantic-version tag. `main` and `sha-*` images may be built for validation and diagnostics, but must not be pinned as the steady production version. Restarting the currently pinned release for recovery does not require a bump; rollback uses an earlier existing version tag.
+
 ## Safety Rules
 
 - Preserve unrelated local changes and stage only explicit release paths.

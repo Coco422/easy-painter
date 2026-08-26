@@ -140,4 +140,5 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - Admin uses a separate JWT (not a user account) — verified via `ADMIN_SECRET_KEY` env var
 - No frontend state management library — auth state is a simple Vue `reactive()` object in `lib/auth.ts`
 - Frontend and backend must be released together; the version center only reports updates and does not perform partial upgrades
+- Every production deployment pins a newly created `vX.Y.Z` tag; `main` and `sha-*` images are build/diagnostic artifacts, not steady production releases
 - Database schema is managed only by forward-only Flyway SQL migrations; API startup must not run `create_all` or ad-hoc `ALTER TABLE`

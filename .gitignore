@@ -24,3 +24,6 @@ scripts/upload_inspirations.py
 
 # Local AI coding tool configuration
 opencode.json
+
+# Private production operations (hosts, SSH aliases, deployment notes)
+.ops/

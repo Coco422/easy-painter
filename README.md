@@ -168,7 +168,7 @@ make deploy
 
 ## 服务器部署（GHCR）
 
-`main` 分支更新相关文件或推送 `vX.Y.Z` 正式版本标签时，GitHub Actions 会构建三个 `linux/amd64` 镜像并推送到 GHCR：
+`main` 分支更新相关文件或推送 `vX.Y.Z` 正式版本标签时，GitHub Actions 会构建三个 `linux/amd64` 镜像并推送到 GHCR。`main` 和 `sha-*` 仅用于构建验证与问题定位；每次生产部署必须先创建新的语义化版本，并固定使用对应的 `vX.Y.Z` 镜像标签：
 
 - `ghcr.io/coco422/easy-painter-backend`
 - `ghcr.io/coco422/easy-painter-nginx`
@@ -196,23 +196,24 @@ docker compose -f compose.yml pull
 docker compose -f compose.yml up -d --remove-orphans
 ```
 
-后续更新：
+后续更新必须先按“版本与发布”章节完成版本号、changelog、测试、提交和 tag，再等待三个版本镜像构建成功。服务器只部署新的正式版本标签：
 
 ```bash
 cd ~/easy-painter
+sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=vX.Y.Z/' .env
 docker compose -f compose.yml pull
 docker compose -f compose.yml up -d --remove-orphans
 ```
 
-`IMAGE_TAG` 默认使用 `main`，适合跟踪最新构建。生产部署建议固定为已经发布的 `vX.Y.Z` 正式版本标签；需要精确定位构建或回滚时，可以使用不可变的提交 SHA 标签：
+`IMAGE_TAG` 模板默认使用 `main`，只适合本地或临时验证。生产环境必须固定为新发布的 `vX.Y.Z`；回滚时固定为上一个已经验证的正式版本：
 
 ```dotenv
 IMAGE_TAG=vX.Y.Z
 ```
 
 ```bash
-IMAGE_TAG=sha-<完整提交 SHA> docker compose -f compose.yml pull
-IMAGE_TAG=sha-<完整提交 SHA> docker compose -f compose.yml up -d --remove-orphans
+IMAGE_TAG=v<上一正式版本> docker compose -f compose.yml pull
+IMAGE_TAG=v<上一正式版本> docker compose -f compose.yml up -d --remove-orphans
 ```
 
 GHCR 包必须允许服务器拉取：公开包可匿名拉取；私有包需先执行 `docker login ghcr.io`。只有在新镜像成功启动并通过健康检查后，才能删除服务器上的源码，且不得删除 `.env`、`compose.yml` 和 `data/`。
