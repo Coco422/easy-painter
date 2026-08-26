@@ -1272,6 +1272,15 @@ a {
 
 /* ---- Loading Ritual Panel ---- */
 .loading-ritual-panel {
+  --ritual-grid-line: rgba(44, 37, 24, 0.045);
+  --ritual-panel-bg: linear-gradient(160deg, #fffef2 0%, #f3f0e8 52%, #f8f5ee 100%);
+  --ritual-panel-border: rgba(196, 149, 54, 0.22);
+  --ritual-panel-inset: rgba(196, 149, 54, 0.07);
+  --ritual-scan-color: rgba(196, 149, 54, 0.09);
+  --ritual-log-border: rgba(44, 37, 24, 0.07);
+  --ritual-log-bg: rgba(255, 255, 255, 0.62);
+  --ritual-track-bg: rgba(44, 37, 24, 0.08);
+  --ritual-progress-glow: rgba(196, 149, 54, 0.22);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1280,10 +1289,22 @@ a {
   padding: 20px;
   color: var(--text-primary);
   background:
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(160deg, #0e0e10 0%, #141416 50%, #0e100e 100%);
+    linear-gradient(var(--ritual-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ritual-grid-line) 1px, transparent 1px),
+    var(--ritual-panel-bg);
   background-size: 24px 24px, 24px 24px, auto;
+}
+
+[data-theme="dark"] .loading-ritual-panel {
+  --ritual-grid-line: rgba(255, 255, 255, 0.02);
+  --ritual-panel-bg: linear-gradient(160deg, #0e0e10 0%, #141416 50%, #0e100e 100%);
+  --ritual-panel-border: rgba(212, 168, 83, 0.1);
+  --ritual-panel-inset: rgba(212, 168, 83, 0.04);
+  --ritual-scan-color: rgba(212, 168, 83, 0.08);
+  --ritual-log-border: rgba(255, 255, 255, 0.04);
+  --ritual-log-bg: rgba(0, 0, 0, 0.3);
+  --ritual-track-bg: rgba(255, 255, 255, 0.04);
+  --ritual-progress-glow: rgba(212, 168, 83, 0.3);
 }
 
 .current-job-visual.is-landscape .ritual-stage {
@@ -1308,13 +1329,13 @@ a {
 }
 
 .loading-ritual-panel::before {
-  border: 1px solid rgba(212, 168, 83, 0.1);
-  box-shadow: inset 0 0 42px rgba(212, 168, 83, 0.04);
+  border: 1px solid var(--ritual-panel-border);
+  box-shadow: inset 0 0 42px var(--ritual-panel-inset);
 }
 
 .loading-ritual-panel::after {
   transform: translateX(-72%);
-  background: linear-gradient(90deg, transparent, rgba(212, 168, 83, 0.08), transparent);
+  background: linear-gradient(90deg, transparent, var(--ritual-scan-color), transparent);
   animation: ritual-scan 5.8s ease-in-out infinite;
 }
 
@@ -1397,10 +1418,10 @@ a {
   overflow: hidden;
   min-height: 28px;
   padding: 6px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--ritual-log-border);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--ritual-log-bg);
   font-size: 11px;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -1415,7 +1436,7 @@ a {
   margin-top: 16px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--ritual-track-bg);
 }
 
 .ritual-progress-track span {
@@ -1424,7 +1445,7 @@ a {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent), var(--accent-strong));
-  box-shadow: 0 0 18px rgba(212, 168, 83, 0.3);
+  box-shadow: 0 0 18px var(--ritual-progress-glow);
   transition: width 700ms ease;
 }
 
