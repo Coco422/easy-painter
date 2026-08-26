@@ -21,3 +21,6 @@ scripts/upload_inspirations.py
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+
+# Local AI coding tool configuration
+opencode.json
