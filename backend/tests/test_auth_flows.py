@@ -647,6 +647,7 @@ def test_public_gallery_requires_user_master_switch_and_published_job():
         source="gallery",
         category=None,
         sort="recent",
+        current_user=None,
     )
     # The community feed is now a permanent curated/imported collection;
     # ordinary public-gallery jobs remain available only in the gallery.

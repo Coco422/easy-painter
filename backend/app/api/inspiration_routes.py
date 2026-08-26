@@ -9,14 +9,17 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_current_user_optional
 from app.db.session import get_db
 from app.models.inspiration import Inspiration
 from app.models.media import MediaState
+from app.models.user import User
 from app.schemas.inspiration import InspirationFeedResponse, InspirationItemResponse
 from app.services.storage import MinioStorageService, StorageError
 
 logger = logging.getLogger(__name__)
 inspiration_router = APIRouter()
+GUEST_INSPIRATION_PREVIEW_LIMIT = 20
 
 
 def _inspiration_to_response(item: Inspiration) -> InspirationItemResponse:
@@ -62,8 +65,12 @@ def list_inspirations(
     source: str | None = Query(None, max_length=128),
     category: str | None = Query(None, max_length=100),
     sort: str = Query("recent", pattern="^(recent|featured)$"),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> InspirationFeedResponse:
     items: list[InspirationItemResponse] = []
+    effective_limit = limit
+    if current_user is None:
+        effective_limit = min(limit, max(0, GUEST_INSPIRATION_PREVIEW_LIMIT - offset))
 
     stmt = select(Inspiration).where(Inspiration.deleted_at.is_(None), Inspiration.media_state == MediaState.AVAILABLE)
 
@@ -85,10 +92,10 @@ def list_inspirations(
         inspiration_rows = db.scalars(stmt.limit(5000)).all()
         inspiration_rows = [row for row in inspiration_rows if isinstance(row.categories, list) and category in row.categories]
         total = len(inspiration_rows)
-        inspiration_rows = inspiration_rows[offset : offset + limit]
+        inspiration_rows = inspiration_rows[offset : offset + effective_limit]
     else:
         total = int(db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0)
-        inspiration_rows = db.scalars(stmt.offset(offset).limit(limit)).all()
+        inspiration_rows = db.scalars(stmt.offset(offset).limit(effective_limit)).all() if effective_limit > 0 else []
     items.extend(_inspiration_to_response(row) for row in inspiration_rows)
 
     return InspirationFeedResponse(

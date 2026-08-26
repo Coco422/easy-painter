@@ -14,6 +14,7 @@ from app.api import community_admin_routes, inspiration_routes, media_routes, ro
 from app.core.config import get_settings
 from app.db.base import Base
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.inspiration import Inspiration
 from app.models.media import MediaState
 from app.models.user import User
 
@@ -217,6 +218,7 @@ def test_curated_copy_survives_source_deletion_and_hidden_prompts_are_ineligible
         source=None,
         category=None,
         sort="recent",
+        current_user=None,
     )
     assert [item.id for item in feed.items] == [curated.id]
     assert inspiration_routes.list_inspiration_categories(db=db, limit=20) == ["landscape"]
@@ -228,6 +230,7 @@ def test_curated_copy_survives_source_deletion_and_hidden_prompts_are_ineligible
         source="community-curated",
         category=None,
         sort="recent",
+        current_user=None,
     )
     assert [item.id for item in curated_feed.items] == [curated.id]
     imported_feed = inspiration_routes.list_inspirations(
@@ -238,6 +241,7 @@ def test_curated_copy_survives_source_deletion_and_hidden_prompts_are_ineligible
         source="imported",
         category=None,
         sort="recent",
+        current_user=None,
     )
     assert imported_feed.items == []
 
@@ -249,6 +253,62 @@ def test_curated_copy_survives_source_deletion_and_hidden_prompts_are_ineligible
     )
     assert updated.description is None
     assert updated.categories == []
+    db.close()
+
+
+def test_guest_inspiration_feed_is_capped_but_authenticated_feed_is_not():
+    session_factory = make_session_factory()
+    db = session_factory()
+    db.add_all(
+        [
+            Inspiration(
+                id=f"inspiration-{index}",
+                title=f"Case {index}",
+                prompt=f"Prompt {index}",
+                image_url=f"https://example.com/{index}.jpg",
+                source="test",
+                media_state=MediaState.AVAILABLE,
+            )
+            for index in range(25)
+        ]
+    )
+    db.commit()
+
+    guest_feed = inspiration_routes.list_inspirations(
+        db=db,
+        offset=0,
+        limit=100,
+        q=None,
+        source=None,
+        category=None,
+        sort="recent",
+        current_user=None,
+    )
+    guest_next_page = inspiration_routes.list_inspirations(
+        db=db,
+        offset=20,
+        limit=20,
+        q=None,
+        source=None,
+        category=None,
+        sort="recent",
+        current_user=None,
+    )
+    signed_in_feed = inspiration_routes.list_inspirations(
+        db=db,
+        offset=0,
+        limit=100,
+        q=None,
+        source=None,
+        category=None,
+        sort="recent",
+        current_user=User(username="viewer", password_hash="hash"),
+    )
+
+    assert guest_feed.total == 25
+    assert len(guest_feed.items) == inspiration_routes.GUEST_INSPIRATION_PREVIEW_LIMIT
+    assert guest_next_page.items == []
+    assert len(signed_in_feed.items) == 25
     db.close()
 
 

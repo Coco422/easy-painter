@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { LockKeyhole } from 'lucide-vue-next'
 
 import InspirationDetailModal from '@/components/InspirationDetailModal.vue'
 import InspirationGrid from '@/components/InspirationGrid.vue'
 import { fetchInspirationCategories, fetchInspirations } from '@/lib/api'
+import { authState } from '@/lib/auth'
 import type { InspirationItem } from '@/lib/types'
 
+const GUEST_PREVIEW_LIMIT = 20
 const items = ref<InspirationItem[]>([])
 const total = ref(0)
 const offset = ref(0)
@@ -21,14 +24,29 @@ const selectedItem = ref<InspirationItem | null>(null)
 const scrollSentinel = ref<HTMLElement | null>(null)
 const communityTags = ref<string[]>([])
 let scrollObserver: IntersectionObserver | null = null
+const isGuest = computed(() => !authState.token)
+const guestRemainingCount = computed(() => Math.max(0, total.value - items.value.length))
+const showGuestGate = computed(() => (
+  isGuest.value
+  && !loading.value
+  && items.value.length >= GUEST_PREVIEW_LIMIT
+  && guestRemainingCount.value > 0
+))
 
 async function loadMore() {
   if (loadingMore.value || !hasMore.value) return
+  if (isGuest.value && offset.value >= GUEST_PREVIEW_LIMIT) {
+    hasMore.value = false
+    return
+  }
   loadingMore.value = true
   try {
+    const requestLimit = isGuest.value
+      ? Math.min(limit.value, GUEST_PREVIEW_LIMIT - offset.value)
+      : limit.value
     const data = await fetchInspirations({
       offset: offset.value,
-      limit: limit.value,
+      limit: requestLimit,
       q: searchQuery.value || undefined,
       source: selectedSource.value || undefined,
       category: selectedCategory.value || undefined,
@@ -36,8 +54,9 @@ async function loadMore() {
     })
     items.value.push(...data.items)
     offset.value += data.items.length
-    hasMore.value = data.items.length >= limit.value
     total.value = data.total
+    const reachedGuestLimit = isGuest.value && offset.value >= GUEST_PREVIEW_LIMIT
+    hasMore.value = !reachedGuestLimit && data.items.length >= requestLimit && offset.value < data.total
   } catch (error) {
     console.error('Failed to load inspirations:', error)
   } finally {
@@ -174,12 +193,27 @@ onMounted(() => {
       >{{ tag }}</button>
     </div>
 
-    <InspirationGrid
-      v-if="items.length > 0 || loading"
-      :items="items"
-      :loading="loading"
-      @select="selectedItem = $event"
-    />
+    <div v-if="items.length > 0 || loading" class="inspiration-feed">
+      <InspirationGrid
+        :items="items"
+        :loading="loading"
+        @select="selectedItem = $event"
+      />
+
+      <aside v-if="showGuestGate" class="guest-preview-gate" aria-labelledby="guest-preview-title">
+        <div class="guest-preview-lock" aria-hidden="true">
+          <LockKeyhole :size="20" :stroke-width="1.7" />
+        </div>
+        <p class="guest-preview-kicker">访客预览已结束</p>
+        <h2 id="guest-preview-title">登录后，继续逛灵感库</h2>
+        <p>
+          已为你展示 {{ GUEST_PREVIEW_LIMIT }} 个案例。登录后可继续浏览其余
+          {{ guestRemainingCount }} 个案例，探索更多创作思路。
+        </p>
+        <router-link to="/login" class="guest-preview-action">登录继续浏览</router-link>
+        <small>登录后解除访客浏览上限</small>
+      </aside>
+    </div>
 
     <div v-if="!loading && items.length === 0" class="inspiration-empty-state">
       <p class="empty-title">灵感库正在建设中</p>
@@ -187,7 +221,7 @@ onMounted(() => {
       <router-link to="/create" class="empty-link">直接去创作 →</router-link>
     </div>
 
-    <div ref="scrollSentinel" class="scroll-sentinel">
+    <div v-if="!showGuestGate" ref="scrollSentinel" class="scroll-sentinel">
       <span v-if="loadingMore">加载中...</span>
       <span v-else-if="!hasMore && items.length > 0">没有更多了</span>
     </div>
@@ -416,8 +450,91 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.guest-preview-gate {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin: -112px auto 40px;
+  padding: 156px 32px 36px;
+  color: var(--text-primary);
+  text-align: center;
+  background: linear-gradient(
+    to bottom,
+    transparent 0,
+    color-mix(in srgb, var(--bg-deep) 88%, transparent) 92px,
+    var(--bg-deep) 132px
+  );
+}
+
+.guest-preview-lock {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-accent);
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--bg-surface);
+}
+
+.guest-preview-kicker {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font: 700 11px/1.4 var(--font-mono);
+  letter-spacing: 0.12em;
+}
+
+.guest-preview-gate h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 600;
+}
+
+.guest-preview-gate > p:not(.guest-preview-kicker) {
+  max-width: 520px;
+  margin: 12px 0 24px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.guest-preview-action {
+  min-width: 180px;
+  padding: 11px 24px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-inverse);
+  background: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  transition: background-color 200ms ease, border-color 200ms ease, transform 200ms ease;
+}
+
+.guest-preview-action:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  transform: translateY(-1px);
+}
+
+.guest-preview-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.guest-preview-gate small {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 @media (max-width: 620px) {
   .source-explainer { grid-template-columns: 1fr; }
   .source-explainer > div + div { border-top: 1px solid var(--border); border-left: 0; }
+  .guest-preview-gate { padding-inline: 20px; }
 }
 </style>
