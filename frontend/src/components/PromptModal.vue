@@ -3,6 +3,7 @@ import { Check, Copy, Download, Globe, Lock, Sparkles, Star, X } from 'lucide-vu
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { imageDownloadFilename } from '@/lib/image-download'
 import type { GalleryItem } from '@/lib/types'
 
 const DEFAULT_TAGS = ['头像', '插画', '海报', '风景', '人像', '动漫', '3D', 'LOGO', '表情包', '壁纸']
@@ -103,21 +104,21 @@ async function copyPrompt() {
 
 async function downloadImage() {
   if (!props.item) return
-  const filename = props.item.image_url.split('/').pop() || `${props.item.job_id}.png`
+  const item = props.item
   try {
-    const response = await fetch(props.item.image_url)
+    const response = await fetch(item.image_url)
     if (!response.ok) throw new Error('download failed')
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = filename
+    anchor.download = imageDownloadFilename(item.job_id, blob.type)
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
     URL.revokeObjectURL(url)
   } catch {
-    window.open(props.item.image_url, '_blank', 'noopener,noreferrer')
+    window.open(item.image_url, '_blank', 'noopener,noreferrer')
   }
 }
 

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NImage, type ImageInst } from 'naive-ui'
 
 import RetryableImage from '@/components/RetryableImage.vue'
+import { imageDownloadFilename } from '@/lib/image-download'
 import { resolveImageLayout } from '@/lib/image-layout'
 import type { JobDetailResponse } from '@/lib/types'
 
@@ -72,6 +73,7 @@ const actualImageAspectRatio = ref<string | null>(null)
 const resultImageLoaded = ref(false)
 const mediaRefreshRequested = ref(false)
 const imagePreviewRef = ref<ImageInst | null>(null)
+const downloading = ref(false)
 let clockTimer: number | undefined
 let typingTimer: number | undefined
 let messageTimer: number | undefined
@@ -160,6 +162,29 @@ function requestMediaRefresh() {
 function openImagePreview() {
   if (!resultImageLoaded.value) return
   imagePreviewRef.value?.showPreview()
+}
+
+async function downloadImage() {
+  const job = props.job
+  if (!job || job.status !== 'succeeded' || !job.image_url || downloading.value) return
+  downloading.value = true
+  try {
+    const response = await fetch(job.image_url)
+    if (!response.ok) throw new Error('download failed')
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = imageDownloadFilename(job.job_id, blob.type)
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  } catch {
+    window.open(job.image_url, '_blank', 'noopener,noreferrer')
+  } finally {
+    downloading.value = false
+  }
 }
 
 function hashSeed(value: string) {
@@ -297,6 +322,9 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="job.status === 'succeeded' && job.image_url" class="current-job-actions">
         <button type="button" class="secondary-button" @click="emit('addToGallery', job)">加入画廊</button>
+        <button type="button" class="ghost-button" :disabled="downloading" :aria-busy="downloading" @click="downloadImage">
+          {{ downloading ? '下载中…' : '下载图片' }}
+        </button>
         <button type="button" class="ghost-button" @click="emit('dismiss', job.job_id)">关闭</button>
       </div>
     </div>

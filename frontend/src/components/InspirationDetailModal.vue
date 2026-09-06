@@ -3,6 +3,7 @@ import { Check, Copy, Download, ExternalLink, Sparkles, X } from 'lucide-vue-nex
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { imageDownloadFilename } from '@/lib/image-download'
 import type { InspirationItem } from '@/lib/types'
 
 const props = defineProps<{
@@ -45,21 +46,21 @@ function goToCreate() {
 
 async function downloadImage() {
   if (!props.item) return
-  const filename = props.item.image_url.split('/').pop() || `${props.item.id}.png`
+  const item = props.item
   try {
-    const response = await fetch(props.item.image_url)
+    const response = await fetch(item.image_url)
     if (!response.ok) throw new Error('download failed')
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = filename
+    anchor.download = imageDownloadFilename(item.id, blob.type)
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
     URL.revokeObjectURL(url)
   } catch {
-    window.open(props.item.image_url, '_blank', 'noopener,noreferrer')
+    window.open(item.image_url, '_blank', 'noopener,noreferrer')
   }
 }
 
