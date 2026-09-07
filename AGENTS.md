@@ -29,6 +29,7 @@ cd frontend && npx vue-tsc --noEmit  # typecheck
 ## Architecture gotchas
 
 - Backend services under `backend/app/` (api, core, db, models, services). API/worker share one Docker image (`backend/Dockerfile`).
+- New migrations must also update `EXPECTED_FLYWAY_VERSION` in `backend/app/services/health.py`; the health tests check it against the latest migration filename.
 - **DB schema is Flyway forward-only** migrations in `backend/db/migration/`. API startup must never run `create_all` or ad-hoc `ALTER TABLE`; schema changes go in new SQL migration files. `backend/db/init_db.py` only seeds (default user, models) — no schema.
 - Never rsync a live `data/postgres` directory. Production backups use a transaction-consistent `pg_dump`; only MinIO uses rsync hard-link incrementals, and Redis is intentionally not restored.
 - Job creation atomically writes job + precharge + negative credit tx + outbox event in one DB transaction; charges settle only on successful image delivery, refund fully otherwise.
