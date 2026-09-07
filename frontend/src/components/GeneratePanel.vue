@@ -6,7 +6,7 @@ import ReferenceHistoryDrawer from '@/components/ReferenceHistoryDrawer.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import { ApiError } from '@/lib/api'
 import { resolveImageLayout } from '@/lib/image-layout'
-import type { BatchCount, ImageSize, PublicModel } from '@/lib/types'
+import type { BatchCount, ImageSize, PublicModel, ReferenceImageItem } from '@/lib/types'
 
 const props = defineProps<{
   prompt: string
@@ -36,7 +36,7 @@ const {
   releaseObjectUrls,
   uploadAndSelect,
   select,
-  clearSelected,
+  deselect,
 } = useReferenceImages()
 
 const promptLength = computed(() => props.prompt.length)
@@ -64,8 +64,9 @@ const drawerOpen = ref(false)
 const sizePickerOpen = ref(false)
 const sizePickerDialog = ref<HTMLElement | null>(null)
 const referenceError = ref('')
-const chipThumbUrl = computed(() => pendingPreviewUrl.value ?? (selected.value ? getObjectUrl(selected.value.id) : undefined))
-const chipName = computed(() => (uploading.value ? pendingFilename.value : selected.value?.filename) ?? '')
+const uploadingBatch = ref(false)
+const referenceLimit = computed(() => selectedModelConfig.value?.supports_reference_image === false ? 0 : (selectedModelConfig.value?.max_reference_images ?? 5))
+const referencesOverLimit = computed(() => selected.value.length > referenceLimit.value)
 const selectedSizeOption = computed(() => sizeOptions.find((option) => option.value === props.selectedSize) ?? sizeOptions[0])
 const selectedSizeLayout = computed(() => resolveImageLayout(selectedSizeOption.value.value))
 const selectedModelConfig = computed(() => props.models.find((model) => model.id === props.selectedModel))
@@ -82,6 +83,7 @@ onBeforeUnmount(() => {
 })
 
 function handleSubmit() {
+  if (uploading.value || uploadingBatch.value || referencesOverLimit.value || props.submitting) return
   emit('submit')
 }
 
@@ -92,7 +94,7 @@ async function handleUpload(file: File) {
   }
   referenceError.value = ''
   try {
-    await uploadAndSelect(file)
+    await uploadAndSelect(file, false, referenceLimit.value)
   } catch (error) {
     if (error instanceof ApiError && error.status === 409 && error.detail?.max_reference_images) {
       const limit = error.detail.max_reference_images as number
@@ -101,7 +103,7 @@ async function handleUpload(file: File) {
       const summary = current === undefined ? `参考图已达到 ${limit} 张上限。` : `当前已有 ${current}/${limit} 张参考图。`
       if (window.confirm(`${summary}\n继续将自动淘汰最早上传的 ${evict ?? 1} 张参考图，此操作不可恢复。`)) {
         try {
-          await uploadAndSelect(file, true)
+          await uploadAndSelect(file, true, referenceLimit.value)
           return
         } catch (retryError) {
           referenceError.value = retryError instanceof Error ? retryError.message : '参考图上传失败，请稍后重试。'
@@ -115,17 +117,31 @@ async function handleUpload(file: File) {
   }
 }
 
-function handlePaste(event: ClipboardEvent) {
-  const items = event.clipboardData?.items
-  if (!items) return
-  for (const item of items) {
-    if (!item.type.startsWith('image/')) continue
-    const file = item.getAsFile()
-    if (file) {
-      event.preventDefault()
-      void handleUpload(file)
-      return
+async function handleFiles(files: File[]) {
+  if (!files.length) return
+  if (uploadingBatch.value || uploading.value || props.submitting) return
+  if (selected.value.length + files.length > referenceLimit.value) {
+    referenceError.value = `当前模型单次最多支持 ${referenceLimit.value} 张参考图，已选 ${selected.value.length} 张。`
+    return
+  }
+  uploadingBatch.value = true
+  try {
+    for (const file of files) {
+      await handleUpload(file)
+      if (referenceError.value) break
     }
+  } finally {
+    uploadingBatch.value = false
+  }
+}
+
+function handlePaste(event: ClipboardEvent) {
+  const files = Array.from(event.clipboardData?.items ?? [])
+    .filter((item) => item.type.startsWith('image/'))
+    .map((item) => item.getAsFile()).filter((file): file is File => file !== null)
+  if (files.length) {
+    event.preventDefault()
+    void handleFiles(files)
   }
 }
 
@@ -141,32 +157,28 @@ function handleDragLeave(event: DragEvent) {
 
 function handleDrop(event: DragEvent) {
   isDragging.value = false
-  const file = Array.from(event.dataTransfer?.files ?? []).find((entry) => entry.type.startsWith('image/'))
-  if (file) {
-    void handleUpload(file)
-  }
+  void handleFiles(Array.from(event.dataTransfer?.files ?? []).filter((entry) => entry.type.startsWith('image/')))
 }
 
 function handleReferenceFileChange(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
+  const files = Array.from(input.files ?? [])
   input.value = ''
-  if (file) {
-    void handleUpload(file)
-  }
+  void handleFiles(files)
 }
 
 function openReferencePicker() {
   fileInput.value?.click()
 }
 
-function handleClearSelected() {
+function handleSelect(item: ReferenceImageItem) {
   referenceError.value = ''
-  clearSelected()
+  try { select(item, referenceLimit.value) }
+  catch (error) { referenceError.value = error instanceof Error ? error.message : '选择失败。' }
 }
 
 function modelSupportsCurrentInput(model: PublicModel) {
-  return model.enabled && (!selected.value || model.supports_reference_image !== false)
+  return model.enabled && (selected.value.length === 0 || model.supports_reference_image !== false)
 }
 
 function sizeSupportedBySelectedModel(size: ImageSize) {
@@ -226,15 +238,24 @@ watch(sizePickerOpen, (open) => {
           @input="emit('update:prompt', ($event.target as HTMLTextAreaElement).value)"
         />
 
-        <div v-if="selected || uploading" class="reference-chip" :class="{ uploading }">
-          <img v-if="chipThumbUrl" :src="chipThumbUrl" :alt="chipName" />
-          <span v-else class="reference-chip-placeholder" aria-hidden="true"><ImagePlus :size="18" /></span>
-          <span class="reference-chip-name">{{ chipName }}</span>
-          <Loader2 v-if="uploading" :size="16" class="reference-chip-spinner" />
-          <button v-else type="button" title="取消使用参考图" aria-label="取消使用参考图" @click="handleClearSelected">
-            <X :size="14" />
-          </button>
+        <div v-if="selected.length || uploading" class="reference-chips">
+          <div v-for="(item, index) in selected" :key="item.id" class="reference-chip">
+            <img v-if="getObjectUrl(item.id)" :src="getObjectUrl(item.id)" :alt="item.filename" />
+            <span v-else class="reference-chip-placeholder" aria-hidden="true"><ImagePlus :size="18" /></span>
+            <span class="reference-chip-name">参考图 {{ index + 1 }} · {{ item.filename }}</span>
+            <button type="button" :aria-label="`取消使用参考图 ${index + 1}`" :disabled="submitting || uploadingBatch" @click="deselect(item.id)">
+              <X :size="14" />
+            </button>
+          </div>
+          <div v-if="uploading" class="reference-chip uploading">
+            <img v-if="pendingPreviewUrl" :src="pendingPreviewUrl" :alt="pendingFilename" />
+            <span class="reference-chip-name">{{ pendingFilename }}</span>
+            <Loader2 :size="16" class="reference-chip-spinner" />
+          </div>
         </div>
+        <p class="reference-count" :class="{ 'reference-error': referencesOverLimit }" aria-live="polite">
+          已选 {{ selected.length }} / {{ referenceLimit }} 张参考图{{ referencesOverLimit ? '，请移除多余图片后提交' : '，按编号顺序提交' }}
+        </p>
         <p v-if="referenceError" class="reference-error">{{ referenceError }}</p>
 
         <div class="prompt-toolbar">
@@ -243,7 +264,7 @@ watch(sizePickerOpen, (open) => {
             class="prompt-tool-button"
             title="上传参考图"
             aria-label="上传参考图"
-            :disabled="uploading"
+            :disabled="uploading || uploadingBatch || submitting || selected.length >= referenceLimit"
             @click="openReferencePicker"
           >
             <ImagePlus :size="18" />
@@ -253,6 +274,7 @@ watch(sizePickerOpen, (open) => {
             class="prompt-tool-button"
             title="参考图历史"
             aria-label="参考图历史"
+            :disabled="uploading || uploadingBatch || submitting"
             @click="drawerOpen = true"
           >
             <History :size="18" />
@@ -260,6 +282,7 @@ watch(sizePickerOpen, (open) => {
           <input
             ref="fileInput"
             type="file"
+            multiple
             accept="image/png,image/jpeg,image/webp"
             hidden
             @change="handleReferenceFileChange"
@@ -268,7 +291,7 @@ watch(sizePickerOpen, (open) => {
       </div>
     </div>
 
-    <ReferenceHistoryDrawer v-model:open="drawerOpen" @select="select" />
+    <ReferenceHistoryDrawer v-model:open="drawerOpen" :selection-limit="referenceLimit" :selection-disabled="uploadingBatch || submitting" @select="handleSelect" />
 
     <div class="panel-actions">
       <label class="field-label">
@@ -279,7 +302,7 @@ watch(sizePickerOpen, (open) => {
           @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="model in models" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
-            {{ model.label }}{{ selected && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张{{ model.base_credit_cost !== model.credit_cost ? `，原价 ${model.base_credit_cost} 丝` : '' }}）
+            {{ model.label }}{{ selected.length > 0 && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张{{ model.base_credit_cost !== model.credit_cost ? `，原价 ${model.base_credit_cost} 丝` : '' }}）
           </option>
         </select>
       </label>
@@ -323,7 +346,7 @@ watch(sizePickerOpen, (open) => {
         </span>
       </label>
 
-      <button class="primary-button" :disabled="submitting || !selectedModel" @click="handleSubmit">
+      <button class="primary-button" :disabled="submitting || uploading || uploadingBatch || referencesOverLimit || !selectedModel" @click="handleSubmit">
         {{ submitting ? '正在提交...' : '开始创作' }}
       </button>
 

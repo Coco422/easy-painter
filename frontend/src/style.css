@@ -2973,3 +2973,11 @@ a {
     transition: none;
   }
 }
+
+.reference-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 10px; }
+.reference-chips .reference-chip { margin: 0; max-width: 100%; }
+.reference-count { margin: 0 16px 10px; color: var(--text-muted); font-size: 12px; }
+.reference-count.reference-error { color: var(--error); }
+.reference-drawer-item[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+.reference-drawer-item[data-selection-full="true"] > img { opacity: .5; }

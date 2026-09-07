@@ -12,6 +12,7 @@ from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
 from app.models.media import MediaDeletionStatus, MediaDeletionTask, MediaState
 from app.models.reference_image import ReferenceImage
+from app.services.reference_images import job_reference_images
 from app.services.storage import MinioStorageService, StorageError
 
 
@@ -104,9 +105,18 @@ def scan_expired_media(db: Session, *, now: datetime | None = None) -> int:
 
 def enqueue_terminal_reference_cleanup(db: Session, job: GenerationJob) -> None:
     """Job-specific reference copies cannot outlive terminal jobs unnecessarily."""
-    if job.reference_image_key and job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED):
-        enqueue_deletion(db, bucket_type="reference", object_key=job.reference_image_key, resource_type="job_reference", resource_id=job.id)
-        job.reference_image_key = None
+    if job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED):
+        enqueue_job_reference_cleanup(db, job)
+
+
+def enqueue_job_reference_cleanup(db: Session, job: GenerationJob) -> None:
+    keys = {item["object_key"] for item in job_reference_images(job)}
+    if job.reference_image_key:
+        keys.add(job.reference_image_key)
+    for key in keys:
+        enqueue_deletion(db, bucket_type="reference", object_key=key, resource_type="job_reference", resource_id=job.id)
+    job.reference_image_key = None
+    job.reference_images = None
 
 
 def process_media_deletions(db: Session, *, now: datetime | None = None, limit: int = 100) -> dict[str, int]:

@@ -20,6 +20,7 @@ class ModelConfig(Base):
     label: Mapped[str] = mapped_column(String(256))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     supports_reference_image: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_reference_images: Mapped[int] = mapped_column(Integer, default=5, server_default="5")
     supported_sizes: Mapped[list] = mapped_column(JSON, default=list)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     credit_cost: Mapped[int] = mapped_column(Integer, default=2)

@@ -101,6 +101,9 @@ export function createJob(payload: CreateJobRequest, idempotencyKey: string) {
     model: payload.model,
     size: payload.size,
   }
+  if (payload.reference_image_ids) {
+    body.reference_image_ids = payload.reference_image_ids
+  }
   if (payload.reference_image_id) {
     body.reference_image_id = payload.reference_image_id
   }
@@ -408,6 +411,7 @@ export function adminCreateModel(data: {
   label: string
   enabled?: boolean
   supports_reference_image?: boolean
+  max_reference_images?: number
   supported_sizes?: string[]
   sort_order?: number
   credit_cost?: number

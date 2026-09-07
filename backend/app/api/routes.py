@@ -255,7 +255,7 @@ async def create_job(
     model_config = enabled_models.get(payload.model)
     if not model_config:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="当前模型不可用。")
-    if (parsed_payload.reference_image or payload.reference_image_id) and not model_config.get("supports_reference_image", True):
+    if (parsed_payload.reference_image or payload.ordered_reference_ids) and not model_config.get("supports_reference_image", True):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="当前模型不支持参考图，请切换到支持参考图的模型。",
@@ -267,30 +267,38 @@ async def create_job(
             detail="当前模型不支持该尺寸，请切换尺寸或模型。",
         )
 
+    reference_ids = payload.ordered_reference_ids
+    reference_count = len(reference_ids) + int(parsed_payload.reference_image is not None)
+    if reference_count > int(model_config.get("max_reference_images", 5)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"当前模型单次最多支持 {model_config.get('max_reference_images', 5)} 张参考图。",
+        )
     current_user, group_policy = resolve_user_policy(db, current_user, lock_user=True)
-    staged_reference_image = None
-    if (parsed_payload.reference_image or payload.reference_image_id) and group_policy.max_reference_images == 0:
+    staged_reference_images = []
+    if (parsed_payload.reference_image or payload.ordered_reference_ids) and group_policy.max_reference_images == 0:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="当前用户组未开放参考图功能。",
         )
-    if payload.reference_image_id:
+    for reference_id in reference_ids:
         staged_reference_image = db.scalar(
             select(ReferenceImage).where(
-                ReferenceImage.id == payload.reference_image_id,
+                ReferenceImage.id == reference_id,
                 ReferenceImage.user_id == current_user.id,
                 ReferenceImage.media_state == MediaState.AVAILABLE,
                 or_(
                     ReferenceImage.media_expires_at.is_(None),
                     ReferenceImage.media_expires_at > utcnow(),
                 ),
-            )
+            ).with_for_update()
         )
         if not staged_reference_image:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="参考图不存在或已删除。",
             )
+        staged_reference_images.append(staged_reference_image)
 
     raw_credit_cost = model_config.get("credit_cost", 2)
     base_credit_cost = raw_credit_cost if isinstance(raw_credit_cost, int) and raw_credit_cost >= 0 else 2
@@ -321,7 +329,7 @@ async def create_job(
         request_fingerprint=request_fingerprint,
     )
     db.add(job)
-    copied_reference_key: str | None = None
+    copied_reference_keys: list[str] = []
     try:
         # Flush the idempotency row before any side effects. Concurrent replays
         # block on the unique key and never consume rate-limit quota or copy an
@@ -353,28 +361,40 @@ async def create_job(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="参考图保存失败，请稍后重试。",
                 ) from None
+            copied_reference_keys.append(copied_reference_key)
             job.reference_image_key = copied_reference_key
             job.reference_image_content_type = parsed_payload.reference_image.content_type
             job.reference_image_filename = parsed_payload.reference_image.filename
-        elif staged_reference_image:
-            try:
-                copied_reference_key = MinioStorageService().copy_reference_image_to_job(
-                    staged_reference_image.object_key,
-                    job_id=job.id,
-                    filename=staged_reference_image.filename,
-                    content_type=staged_reference_image.content_type,
-                )
-            except StorageError:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="参考图保存失败，请稍后重试。",
-                ) from None
-            job.reference_image_key = copied_reference_key
-            job.reference_image_content_type = staged_reference_image.content_type
-            job.reference_image_filename = staged_reference_image.filename
-            staged_reference_image.used_count = (staged_reference_image.used_count or 0) + 1
-            staged_reference_image.last_used_at = utcnow()
+        elif staged_reference_images:
+            references = []
+            for index, staged_reference_image in enumerate(staged_reference_images):
+                try:
+                    # Separate object paths preserve even identical filenames and order.
+                    copy_job_id = job.id if len(staged_reference_images) == 1 else f"{job.id}/{index + 1}"
+                    copied_reference_key = MinioStorageService().copy_reference_image_to_job(
+                        staged_reference_image.object_key,
+                        job_id=copy_job_id,
+                        filename=staged_reference_image.filename,
+                        content_type=staged_reference_image.content_type,
+                    )
+                except StorageError:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="参考图保存失败，请稍后重试。",
+                    ) from None
+                copied_reference_keys.append(copied_reference_key)
+                references.append({
+                    "object_key": copied_reference_key,
+                    "content_type": staged_reference_image.content_type,
+                    "filename": staged_reference_image.filename,
+                })
+                staged_reference_image.used_count = (staged_reference_image.used_count or 0) + 1
+                staged_reference_image.last_used_at = utcnow()
+            job.reference_images = references
+            # Keep legacy single-image metadata readable for existing admin views.
+            job.reference_image_key = references[0]["object_key"]
+            job.reference_image_content_type = references[0]["content_type"]
+            job.reference_image_filename = references[0]["filename"]
         _, balance_after = reserve_job_credits(
             db,
             job=job,
@@ -397,7 +417,7 @@ async def create_job(
         db.commit()
     except IntegrityError:
         db.rollback()
-        if copied_reference_key:
+        for copied_reference_key in copied_reference_keys:
             _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         existing_job = db.scalar(
             select(GenerationJob).where(
@@ -416,7 +436,7 @@ async def create_job(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该请求已被其他操作占用。") from None
     except InsufficientCreditsError as exc:
         db.rollback()
-        if copied_reference_key:
+        for copied_reference_key in copied_reference_keys:
             _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -427,12 +447,13 @@ async def create_job(
             },
         ) from None
     except HTTPException:
-        if copied_reference_key:
+        db.rollback()
+        for copied_reference_key in copied_reference_keys:
             _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         raise
     except Exception:
         db.rollback()
-        if copied_reference_key:
+        for copied_reference_key in copied_reference_keys:
             _cleanup_or_track_reference(db, copied_reference_key, resource_id=job.id)
         raise
 
@@ -447,7 +468,8 @@ async def create_job(
 
 def _job_request_fingerprint(parsed_payload: ParsedCreateJobPayload, prompt: str) -> str:
     payload = parsed_payload.request
-    reference_value = payload.reference_image_id
+    reference_ids = payload.ordered_reference_ids
+    reference_value = reference_ids if len(reference_ids) > 1 else (reference_ids[0] if reference_ids else None)
     if parsed_payload.reference_image:
         reference_value = hashlib.sha256(parsed_payload.reference_image.image_bytes).hexdigest()
     canonical = json.dumps(
@@ -502,8 +524,10 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
         try:
             payload = CreateJobRequest.model_validate(raw_payload)
         except ValidationError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors()) from exc
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors(include_context=False)) from exc
 
+        if len(form.getlist("reference_image")) > 1:
+            raise HTTPException(status_code=422, detail="多张参考图请先预上传，再通过 reference_image_ids 提交。")
         upload = form.get("reference_image")
         reference_image = None
         if isinstance(upload, StarletteUploadFile):
@@ -521,7 +545,7 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
     try:
         payload = CreateJobRequest.model_validate(await request.json())
     except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors()) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors(include_context=False)) from exc
     return ParsedCreateJobPayload(request=payload)
 
 

@@ -272,6 +272,7 @@ async def test_upload_evicts_oldest_images_beyond_limit(monkeypatch):
     remaining = reference_routes.list_staged_reference_images(db=db, current_user=user, page=1, page_size=50)
     assert len(remaining.items) == reference_routes.MAX_REFERENCE_IMAGES_PER_USER
     remaining_ids = {entry.id for entry in remaining.items}
+    assert item.evicted_image_ids == ["old-0"]
     assert "old-0" not in remaining_ids
     assert item.id in remaining_ids
     assert storage.deleted == ["references/2026/05/07/staging/old-0.png"]
@@ -548,4 +549,149 @@ def test_file_endpoint_rejects_other_users_image(monkeypatch):
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "图片不存在。"
+    db.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('count,limit', [(2, 2), (5, 5), (12, 12)])
+async def test_multiple_references_preserve_order_and_same_filename(monkeypatch, count, limit):
+    import json
+
+    db = make_session_factory()()
+    user = make_user(db)
+    storage = FakeStorage()
+    ids = [f'img-{index}' for index in range(count)]
+    for index, image_id in enumerate(ids):
+        key = f'staging/{image_id}.png'
+        storage.objects[key] = PNG_BYTES + str(index).encode()
+        db.add(ReferenceImage(id=image_id, user_id=user.id, object_key=key,
+                              content_type='image/png', filename='same.png'))
+    db.commit()
+    monkeypatch.setattr(routes, 'MinioStorageService', lambda: storage)
+    monkeypatch.setattr(routes, 'load_models_from_db', lambda db: [dict(MODEL_DICT, max_reference_images=limit)])
+    monkeypatch.setattr(routes, 'GenerationRateLimiter', FakeRateLimiter)
+    response = await routes.create_job(
+        make_json_request(json.dumps(dict(prompt='combine', model=MODEL_DICT['id'], reference_image_ids=ids)).encode()),
+        db=db, redis_client=object(), settings=Settings(), current_user=user,
+    )
+    job = db.get(GenerationJob, response.job_id)
+    assert len(job.reference_images) == count
+    assert len({item['object_key'] for item in job.reference_images}) == count
+    assert [storage.objects[item['object_key']] for item in job.reference_images] == [PNG_BYTES + str(i).encode() for i in range(count)]
+    assert all(item['filename'] == 'same.png' for item in job.reference_images)
+    assert all(db.get(ReferenceImage, image_id).used_count == 1 for image_id in ids)
+    db.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('limit,count', [(2, 3), (5, 6), (12, 13)])
+async def test_multiple_references_limit_rejected_before_copies_or_charges(monkeypatch, limit, count):
+    import json
+
+    monkeypatch.setattr(routes, 'load_models_from_db', lambda db: [dict(MODEL_DICT, max_reference_images=limit)])
+    with pytest.raises(HTTPException) as error:
+        await routes.create_job(
+            make_json_request(json.dumps(dict(prompt='test', model=MODEL_DICT['id'], reference_image_ids=[str(i) for i in range(count)])).encode()),
+            db=object(), redis_client=object(), settings=Settings(),
+        )
+    assert error.value.status_code == 422
+    assert str(limit) in error.value.detail
+
+
+@pytest.mark.anyio
+async def test_partial_multi_reference_copy_failure_cleans_all_copies(monkeypatch):
+    import json
+
+    db = make_session_factory()()
+    user = make_user(db)
+    storage = FakeStorage()
+    for index in range(3):
+        key = f'staging/{index}.png'
+        storage.objects[key] = PNG_BYTES
+        db.add(ReferenceImage(id=str(index), user_id=user.id, object_key=key,
+                              content_type='image/png', filename='same.png'))
+    db.commit()
+    original_copy = storage.copy_reference_image_to_job
+    def copy(src_key, **kwargs):
+        if src_key == 'staging/2.png':
+            raise StorageError('copy failed')
+        return original_copy(src_key, **kwargs)
+    storage.copy_reference_image_to_job = copy
+    monkeypatch.setattr(routes, 'MinioStorageService', lambda: storage)
+    monkeypatch.setattr(routes, 'load_models_from_db', lambda db: [MODEL_DICT])
+    monkeypatch.setattr(routes, 'GenerationRateLimiter', FakeRateLimiter)
+    with pytest.raises(HTTPException) as error:
+        await routes.create_job(
+            make_json_request(json.dumps(dict(prompt='test', model=MODEL_DICT['id'], reference_image_ids=['0', '1', '2'])).encode()),
+            db=db, redis_client=object(), settings=Settings(), current_user=user,
+        )
+    assert error.value.status_code == 503
+    assert len(storage.deleted) == 2
+    assert set(storage.objects) == {f'staging/{i}.png' for i in range(3)}
+    assert db.scalar(select(func.count()).select_from(GenerationJob)) == 0
+    assert all(db.get(ReferenceImage, str(i)).used_count == 0 for i in range(3))
+    db.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('invalid_kind', ['other_user', 'expired', 'deleted', 'missing'])
+async def test_all_multi_reference_ids_are_validated_before_copy(monkeypatch, invalid_kind):
+    import json
+    from app.models.media import MediaState
+
+    db = make_session_factory()()
+    user = make_user(db)
+    db.add(ReferenceImage(id='valid', user_id=user.id, object_key='valid.png', content_type='image/png', filename='valid.png'))
+    if invalid_kind != 'missing':
+        db.add(ReferenceImage(
+            id='invalid', user_id='someone-else' if invalid_kind == 'other_user' else user.id,
+            object_key='invalid.png', content_type='image/png', filename='invalid.png',
+            media_expires_at=datetime.now(timezone.utc) - timedelta(hours=1) if invalid_kind == 'expired' else None,
+            media_state=MediaState.DELETE_PENDING if invalid_kind == 'deleted' else MediaState.AVAILABLE,
+        ))
+    db.commit()
+    monkeypatch.setattr(routes, 'load_models_from_db', lambda db: [MODEL_DICT])
+    monkeypatch.setattr(routes, 'MinioStorageService', lambda: pytest.fail('must validate all IDs before copying'))
+    with pytest.raises(HTTPException) as error:
+        await routes.create_job(
+            make_json_request(json.dumps(dict(prompt='test', model=MODEL_DICT['id'], reference_image_ids=['valid', 'invalid'])).encode()),
+            db=db, redis_client=object(), settings=Settings(), current_user=user,
+        )
+    assert error.value.status_code == 422
+    assert db.scalar(select(func.count()).select_from(GenerationJob)) == 0
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_multi_reference_replay_does_not_copy_or_charge_twice(monkeypatch):
+    import json
+    from app.models.job_charge import JobCharge
+
+    db = make_session_factory()()
+    user = make_user(db)
+    user.credits = 10
+    storage = FakeStorage()
+    for image_id in ['a', 'b']:
+        storage.objects[image_id] = PNG_BYTES
+        db.add(ReferenceImage(id=image_id, user_id=user.id, object_key=image_id, content_type='image/png', filename='same.png'))
+    db.commit()
+    monkeypatch.setattr(routes, 'MinioStorageService', lambda: storage)
+    monkeypatch.setattr(routes, 'load_models_from_db', lambda db: [dict(MODEL_DICT, credit_cost=2)])
+    monkeypatch.setattr(routes, 'GenerationRateLimiter', FakeRateLimiter)
+    async def submit(ids):
+        return await routes.create_job(
+            make_json_request(json.dumps(dict(prompt='test', model=MODEL_DICT['id'], reference_image_ids=ids)).encode()),
+            idempotency_key='multi-replay', db=db, redis_client=object(), settings=Settings(), current_user=user,
+        )
+    first = await submit(['a', 'b'])
+    second = await submit(['a', 'b'])
+    assert first.job_id == second.job_id
+    assert len(storage.copies) == 2
+    assert db.scalar(select(func.count()).select_from(JobCharge)) == 1
+    db.refresh(user)
+    assert user.credits == 8
+    with pytest.raises(HTTPException) as error:
+        await submit(['b', 'a'])
+    assert error.value.status_code == 409
+    assert len(storage.copies) == 2
     db.close()

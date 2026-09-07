@@ -55,11 +55,13 @@ const form = reactive({
   provider_id: '',
   enabled: true,
   supports_reference_image: true,
+  max_reference_images: 5,
   credit_cost: 2,
   supported_sizes: '',
 })
 
 const rules: FormRules = {
+  max_reference_images: { type: 'integer', required: true, min: 1, message: '请输入至少为 1 的整数', trigger: ['change', 'blur'] },
   id: { required: true, message: '请输入模型 ID', trigger: ['input', 'blur'] },
   label: { required: true, message: '请输入显示名称', trigger: ['input', 'blur'] },
   provider_id: { required: true, message: '请选择上游', trigger: ['change', 'blur'] },
@@ -104,6 +106,7 @@ function resetForm() {
   form.provider_id = providers.value[0]?.id ?? ''
   form.enabled = true
   form.supports_reference_image = true
+  form.max_reference_images = 5
   form.credit_cost = 2
   form.supported_sizes = ''
   formRef.value?.restoreValidation()
@@ -122,6 +125,7 @@ function openEdit(model: ModelConfig) {
   form.provider_id = model.provider_id
   form.enabled = model.enabled
   form.supports_reference_image = model.supports_reference_image
+  form.max_reference_images = model.max_reference_images
   form.credit_cost = model.credit_cost
   form.supported_sizes = model.supported_sizes.join(', ')
   formRef.value?.restoreValidation()
@@ -144,6 +148,7 @@ async function saveModel() {
     label: form.label,
     enabled: form.enabled,
     supports_reference_image: form.supports_reference_image,
+    max_reference_images: form.max_reference_images,
     supported_sizes: parseSizes(),
     credit_cost: form.credit_cost,
   }
@@ -358,7 +363,7 @@ const columns = computed<DataTableColumns<ModelConfig>>(() => [
   { title: '上游', key: 'provider_id', minWidth: 130, render: (row) => providerNameMap.value.get(row.provider_id) ?? row.provider_id },
   {
     title: '参考图', key: 'supports_reference_image', width: 90,
-    render: (row) => h(NTag, { size: 'small', type: row.supports_reference_image ? 'success' : 'default', bordered: false }, { default: () => row.supports_reference_image ? '支持' : '不支持' }),
+    render: (row) => h(NTag, { size: 'small', type: row.supports_reference_image ? 'success' : 'default', bordered: false }, { default: () => row.supports_reference_image ? `最多 ${row.max_reference_images} 张` : '不支持' }),
   },
   { title: '丝/张', key: 'credit_cost', width: 75 },
   {
@@ -417,6 +422,7 @@ onBeforeUnmount(clearDragState)
         <NFormItem label="支持尺寸（逗号分隔，留空不限制）"><NInput v-model:value="form.supported_sizes" placeholder="1024x1024, 1280x720" /></NFormItem>
         <div class="form-grid-2">
           <NFormItem label="丝/张" path="credit_cost"><NInputNumber v-model:value="form.credit_cost" :min="1" /></NFormItem>
+          <NFormItem label="单次参考图上限" path="max_reference_images"><NInputNumber v-model:value="form.max_reference_images" :min="1" :precision="0" :disabled="!form.supports_reference_image" /></NFormItem>
           <NFormItem label="支持参考图"><NSwitch v-model:value="form.supports_reference_image" /></NFormItem>
           <NFormItem label="启用模型"><NSwitch v-model:value="form.enabled" /></NFormItem>
         </div>

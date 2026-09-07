@@ -45,6 +45,7 @@ class UpstreamImageClient:
         size: str | None = None,
         aspect_ratio: str | None = None,
         reference_image: ReferenceImageForUpstream | None = None,
+        reference_images: list[ReferenceImageForUpstream] | None = None,
     ) -> GeneratedImageResult:
         base_url = self.config.get("base_url", "")
         api_key = self.config.get("api_key", "")
@@ -58,7 +59,12 @@ class UpstreamImageClient:
         }
         endpoint = f"{base_url.rstrip('/')}/images/generations"
         request_kwargs: dict[str, Any] = {"json": request_payload, "headers": headers}
-        if reference_image:
+        if reference_image and reference_images:
+            raise ValueError("Pass either reference_image or reference_images, not both.")
+        images = reference_images or ([reference_image] if reference_image else [])
+        if images:
+            field_name = "image[]" if self._is_doubao_seedream(model) and len(images) > 1 else "image"
+            files = [(field_name, (item.filename, BytesIO(item.image_bytes), item.content_type)) for item in images]
             endpoint = f"{base_url.rstrip('/')}/images/edits"
             request_kwargs = {
                 "data": {
@@ -66,13 +72,7 @@ class UpstreamImageClient:
                     for key, value in self._edit_payload(request_payload, model=model).items()
                 },
                 "headers": {"Authorization": headers["Authorization"]},
-                "files": {
-                    "image": (
-                        reference_image.filename,
-                        BytesIO(reference_image.image_bytes),
-                        reference_image.content_type,
-                    )
-                },
+                "files": files if len(files) > 1 else dict(files),
             }
 
         timeout = self.config.get("timeout_seconds", 700)

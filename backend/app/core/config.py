@@ -15,7 +15,7 @@ DEFAULT_EXAMPLE_PROMPTS = [
 
 MODEL_REFERENCE_IMAGE_SUPPORT = {
     "gpt-image-2-b": True,
-    "gpt-image-2-c": False,
+    "gpt-image-2-c": True,
     "grok-4.1-image": True,
     "grok-imagine-image": True,
     "doubao-seedream-5-0-260128": True,
@@ -30,9 +30,10 @@ MODEL_SUPPORTED_SIZES = {
 DEFAULT_PUBLIC_MODELS = [
     {
         "id": "gpt-image-2-c",
-        "label": "GPT-Image-2 C（文字生成）",
+        "label": "GPT-Image-2 C（支持参考图）",
         "enabled": True,
-        "supports_reference_image": False,
+        "supports_reference_image": True,
+        "max_reference_images": 5,
         "supported_sizes": [],
         "credit_cost": 2,
     },
@@ -41,6 +42,7 @@ DEFAULT_PUBLIC_MODELS = [
         "label": "GPT-Image-2 B（支持参考图）",
         "enabled": True,
         "supports_reference_image": True,
+        "max_reference_images": 5,
         "supported_sizes": [],
         "credit_cost": 2,
     },
@@ -49,6 +51,7 @@ DEFAULT_PUBLIC_MODELS = [
         "label": "Grok 4.1 Image",
         "enabled": True,
         "supports_reference_image": True,
+        "max_reference_images": 5,
         "supported_sizes": GROK_SUPPORTED_SIZES,
         "credit_cost": 2,
     },
@@ -57,6 +60,7 @@ DEFAULT_PUBLIC_MODELS = [
         "label": "Grok Imagine",
         "enabled": True,
         "supports_reference_image": True,
+        "max_reference_images": 5,
         "supported_sizes": GROK_SUPPORTED_SIZES,
         "credit_cost": 2,
     },
@@ -65,6 +69,7 @@ DEFAULT_PUBLIC_MODELS = [
         "label": "豆包 Seedream 5.0",
         "enabled": True,
         "supports_reference_image": True,
+        "max_reference_images": 5,
         "supported_sizes": [],
         "credit_cost": 2,
     },
@@ -176,6 +181,7 @@ class Settings(BaseSettings):
                         str(size)
                         for size in item.get("supported_sizes", MODEL_SUPPORTED_SIZES.get(item["id"], []))
                     ],
+                    "max_reference_images": max(1, int(item.get("max_reference_images", 5))),
                     "credit_cost": max(1, int(item.get("credit_cost", 2))),
                 }
                 for item in data

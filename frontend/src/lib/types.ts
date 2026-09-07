@@ -5,6 +5,7 @@ export interface PublicModel {
   label: string
   enabled: boolean
   supports_reference_image: boolean
+  max_reference_images: number
   supported_sizes: string[]
   base_credit_cost: number
   credit_cost: number
@@ -44,9 +45,11 @@ export interface CreateJobRequest {
   model: string
   size: ImageSize
   reference_image_id?: string | null
+  reference_image_ids?: string[]
 }
 
 export interface ReferenceImageItem {
+  evicted_image_ids?: string[]
   id: string
   filename: string
   content_type: string
@@ -293,6 +296,7 @@ export interface ModelConfig {
   label: string
   enabled: boolean
   supports_reference_image: boolean
+  max_reference_images: number
   supported_sizes: string[]
   sort_order: number
   credit_cost: number

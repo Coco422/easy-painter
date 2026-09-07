@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue'
+import { reactive, ref, watch } from 'vue'
 
 import {
   deleteReferenceImage,
@@ -6,10 +6,11 @@ import {
   fetchReferenceImages,
   uploadReferenceImage,
 } from '@/lib/api'
+import { authState } from '@/lib/auth'
 import type { ReferenceImageItem } from '@/lib/types'
 
 // 模块级单例：GeneratePanel 与历史抽屉、CreatePage 共享同一份状态。
-const selected = ref<ReferenceImageItem | null>(null)
+const selected = ref<ReferenceImageItem[]>([])
 const uploading = ref(false)
 const history = ref<ReferenceImageItem[]>([])
 const historyLoading = ref(false)
@@ -63,7 +64,9 @@ function releaseObjectUrl(id: string) {
   objectUrls.delete(id)
 }
 
-async function uploadAndSelect(file: File, confirmEvictOldest = false) {
+async function uploadAndSelect(file: File, confirmEvictOldest: boolean, limit: number) {
+  if (selected.value.length >= limit) throw new Error(`当前模型单次最多支持 ${limit} 张参考图。`)
+  const ownerToken = authState.token
   if (uploading.value) {
     throw new Error('已有参考图正在上传，请稍候。')
   }
@@ -72,6 +75,11 @@ async function uploadAndSelect(file: File, confirmEvictOldest = false) {
   pendingPreviewUrl.value = URL.createObjectURL(file)
   try {
     const item = await uploadReferenceImage(file, confirmEvictOldest)
+    if (ownerToken !== authState.token) throw new Error('登录状态已变化，请重新选择参考图。')
+    for (const id of item.evicted_image_ids ?? []) {
+      deselect(id)
+      releaseObjectUrl(id)
+    }
     const previewUrl = pendingPreviewUrl.value
     if (previewUrl) {
       const previousUrl = objectUrls.get(item.id)
@@ -79,9 +87,10 @@ async function uploadAndSelect(file: File, confirmEvictOldest = false) {
       objectUrls.set(item.id, previewUrl)
       pendingPreviewUrl.value = null
     }
-    selected.value = item
-    history.value = [item, ...history.value.filter((entry) => entry.id !== item.id)]
-    await loadHistory()
+    select(item, limit)
+    const evictedIds = new Set(item.evicted_image_ids ?? [])
+    history.value = [item, ...history.value.filter((entry) => entry.id !== item.id && !evictedIds.has(entry.id))]
+    await loadHistory().catch(() => undefined)
     return item
   } finally {
     if (pendingPreviewUrl.value) {
@@ -93,13 +102,26 @@ async function uploadAndSelect(file: File, confirmEvictOldest = false) {
   }
 }
 
-function select(item: ReferenceImageItem) {
-  selected.value = item
+function select(item: ReferenceImageItem, limit: number) {
+  if (selected.value.some((entry) => entry.id === item.id)) return
+  if (selected.value.length >= limit) throw new Error(`当前模型单次最多支持 ${limit} 张参考图。`)
+  selected.value = [...selected.value, item]
+}
+
+function deselect(id: string) {
+  selected.value = selected.value.filter((item) => item.id !== id)
 }
 
 function clearSelected() {
-  selected.value = null
+  selected.value = []
 }
+
+watch(() => authState.token, () => {
+  clearSelected()
+  history.value = []
+  historyTotal.value = 0
+  releaseObjectUrls()
+})
 
 async function remove(item: ReferenceImageItem) {
   if (deletingIds.has(item.id)) return
@@ -108,9 +130,7 @@ async function remove(item: ReferenceImageItem) {
     await deleteReferenceImage(item.id)
     history.value = history.value.filter((entry) => entry.id !== item.id)
     historyTotal.value = Math.max(0, historyTotal.value - 1)
-    if (selected.value?.id === item.id) {
-      selected.value = null
-    }
+    deselect(item.id)
     releaseObjectUrl(item.id)
   } finally {
     deletingIds.delete(item.id)
@@ -118,10 +138,12 @@ async function remove(item: ReferenceImageItem) {
 }
 
 async function loadHistory(reset = true) {
+  const ownerToken = authState.token
   historyLoading.value = true
   try {
     const nextPage = reset ? 1 : historyPage.value + 1
     const response = await fetchReferenceImages(nextPage)
+    if (ownerToken !== authState.token) return
     history.value = reset
       ? response.items
       : [...history.value, ...response.items.filter((item) => !history.value.some((entry) => entry.id === item.id))]
@@ -147,6 +169,7 @@ export function useReferenceImages() {
     uploadAndSelect,
     select,
     clearSelected,
+    deselect,
     remove,
     loadHistory,
   }

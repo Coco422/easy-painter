@@ -26,6 +26,7 @@ class PublicModel(BaseModel):
     label: str
     enabled: bool = True
     supports_reference_image: bool = True
+    max_reference_images: int = Field(default=5, ge=1)
     supported_sizes: list[str] = Field(default_factory=list)
     credit_cost: int = 2
     base_credit_cost: int = 2
@@ -48,6 +49,21 @@ class CreateJobRequest(BaseModel):
     size: str = "auto"
     aspect_ratio: ImageAspectRatio | None = None
     reference_image_id: str | None = None
+    reference_image_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_references(self) -> "CreateJobRequest":
+        if self.reference_image_id and self.reference_image_ids:
+            raise ValueError("不能同时传入 reference_image_id 和 reference_image_ids。")
+        if any(not image_id.strip() for image_id in self.reference_image_ids):
+            raise ValueError("参考图 ID 不能为空。")
+        if len(set(self.reference_image_ids)) != len(self.reference_image_ids):
+            raise ValueError("不能重复选择同一张参考图。")
+        return self
+
+    @property
+    def ordered_reference_ids(self) -> list[str]:
+        return self.reference_image_ids or ([self.reference_image_id] if self.reference_image_id else [])
 
     @model_validator(mode="before")
     @classmethod

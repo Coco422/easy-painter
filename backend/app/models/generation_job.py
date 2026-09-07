@@ -48,6 +48,7 @@ class GenerationJob(Base):
     generated_retention_hours_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size: Mapped[str] = mapped_column(String(32), default="auto")
     aspect_ratio: Mapped[str] = mapped_column(String(16), default="auto")
+    reference_images: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
     reference_image_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     reference_image_content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reference_image_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

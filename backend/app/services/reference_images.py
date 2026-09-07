@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.generation_job import GenerationJob
 
 
 ALLOWED_REFERENCE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
@@ -33,3 +37,16 @@ def validate_reference_image(*, filename: str | None, content_type: str | None, 
         content_type=normalized_content_type,
         image_bytes=image_bytes,
     )
+
+
+def job_reference_images(job: GenerationJob) -> list[dict[str, str]]:
+    """Read ordered multi-image snapshots, with fallback for pre-migration jobs."""
+    if getattr(job, "reference_images", None):
+        return job.reference_images
+    if job.reference_image_key and getattr(job, "reference_image_content_type", None):
+        return [{
+            "object_key": job.reference_image_key,
+            "content_type": job.reference_image_content_type,
+            "filename": job.reference_image_filename or "reference",
+        }]
+    return []

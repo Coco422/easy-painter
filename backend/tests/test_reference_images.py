@@ -320,3 +320,56 @@ def test_upstream_uses_generations_endpoint_without_reference_image(monkeypatch)
     assert "json" in captured["kwargs"]
     assert "files" not in captured["kwargs"]
     assert captured["kwargs"]["json"]["size"] == "auto"
+
+
+@pytest.mark.parametrize('model,field', [('gpt-image-2-b', 'image'), ('gpt-image-2-c', 'image'), ('doubao-seedream-5-0-260128', 'image[]')])
+def test_multiple_reference_files_are_encoded_as_repeated_multipart_fields(monkeypatch, model, field):
+    import httpx
+
+    captured = []
+    class FakeClient:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def post(self, endpoint, **kwargs):
+            request = httpx.Request('POST', endpoint, **kwargs)
+            captured.append(request.read())
+            assert request.headers['content-type'].startswith('multipart/form-data; boundary=')
+            assert endpoint.endswith('/images/edits')
+            return httpx.Response(200, json={'data': [{'b64_json': 'iVBORw0KGgpzYW1wbGU='}]})
+    monkeypatch.setattr('app.services.upstream.httpx.Client', FakeClient)
+    UpstreamImageClient({'base_url': 'https://test.example.com/v1', 'api_key': 'test-key'}).generate_image(
+        prompt='combine images in order', model=model,
+        reference_images=[ReferenceImageForUpstream('same.png', 'image/png', data) for data in (b'FIRST_IMAGE', b'SECOND_IMAGE')],
+    )
+    [body] = captured
+    assert body.count(f'name="{field}"; filename="same.png"'.encode()) == 2
+    assert body.index(b'FIRST_IMAGE') < body.index(b'SECOND_IMAGE')
+
+
+def test_reference_ids_reject_duplicates_and_mixed_legacy_fields():
+    from pydantic import ValidationError
+    from app.schemas.job import CreateJobRequest
+    for fields in ({'reference_image_ids': ['a', 'a']}, {'reference_image_ids': [' ']}, {'reference_image_id': 'a', 'reference_image_ids': ['b']}):
+        with pytest.raises(ValidationError):
+            CreateJobRequest(prompt='test', model='test', **fields)
+
+
+def test_reference_fingerprint_preserves_legacy_and_multi_image_order():
+    from app.api.routes import ParsedCreateJobPayload, _job_request_fingerprint
+    from app.schemas.job import CreateJobRequest
+    def fingerprint(**kwargs):
+        return _job_request_fingerprint(ParsedCreateJobPayload(request=CreateJobRequest(prompt='test', model='test', **kwargs)), 'test')
+    assert fingerprint(reference_image_id='a') == fingerprint(reference_image_ids=['a'])
+    assert fingerprint() == fingerprint(reference_image_ids=[])
+    assert fingerprint(reference_image_ids=['a', 'b']) != fingerprint(reference_image_ids=['b', 'a'])
+
+
+@pytest.mark.anyio
+async def test_invalid_reference_ids_return_json_serializable_validation_error():
+    import json
+    request = make_request(content_type='application/json', body=b'{"prompt":"test","model":"test","reference_image_ids":["a","a"]}')
+    with pytest.raises(HTTPException) as error:
+        await _parse_create_job_payload(request)
+    assert error.value.status_code == 422
+    assert json.dumps(error.value.detail)

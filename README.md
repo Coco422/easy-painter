@@ -53,10 +53,23 @@ cp .env.example .env
 ```
 
 将 `.env` 中的 `UPSTREAM_BASE_URL` 和 `UPSTREAM_API_KEY` 配置为实际使用的私有上游地址与密钥，不要把真实值写进前端或提交到仓库。
-模型下拉列表、参考图能力和尺寸限制由 `PUBLIC_MODELS_JSON` 控制；如果生产环境要开放新模型，需要同步更新服务器上的 `.env`。
+模型下拉列表、参考图能力、单次参考图上限和尺寸限制以管理后台的模型配置为准。`PUBLIC_MODELS_JSON` 用于首次初始化与数据库读取失败时的回退；修改它不会覆盖已经入库的模型。
 部分绘图模型生成时间可能达到 30 到 600 秒，生产环境的 `UPSTREAM_TIMEOUT_SECONDS` 应保持在 700 左右。
 提示词输入不在前端截断，后端通过 `PROMPT_MAX_LENGTH` 做硬限制，默认 4000 字符。
 `GENERATION_JOB_STALE_SECONDS` 与 `GENERATION_QUEUE_STALE_SECONDS` 分别控制执行中、排队中任务的 watchdog 超时。Dispatcher 每 2 秒投递 transactional outbox，并周期执行卡单退款和账务对账；这些间隔可通过 `OUTBOX_*`、`WATCHDOG_INTERVAL_SECONDS` 与 `RECONCILIATION_INTERVAL_SECONDS` 调整。
+
+### 多参考图与数量配置
+
+在「管理后台 → 模型管理 → 编辑」中设置 **单次参考图上限**（`max_reference_images`），默认 5，可调整为 2、12 等正整数。保存后新任务按新配置校验，无需重启；已打开的创作页刷新后同步显示。已入队任务使用提交时的参考图快照，不受之后限额变更影响。
+
+- 创作台支持多选上传、拖放、粘贴和从历史中追加选择，按显示的“参考图 1、2…”顺序提交；超过当前模型上限时阻止生成，不自动丢弃已选图片。
+- 模型的“支持参考图”开关仍独立生效。新安装的 GPT Image B/C 默认开启；已有数据库中的开关和名称保留，如 C 以前关闭了参考图，需要在模型管理中开启。
+- 用户组的“参考图上限”是**图库保存配额**，与模型单次输入上限独立。若要同时选择 5 或 12 张，用户组保存配额也需至少为对应数量；达到配额时仍按原流程确认后淘汰最旧图片，被淘汰的已选图会从创作框移除。
+- `POST /api/v1/jobs` 接受有序 `reference_image_ids` 数组；旧 `reference_image_id` 和单图 multipart 继续兼容。不能同时提交新旧 ID 字段，也不能重复引用同一张图片。每个 ID 均检查归属、有效期和可用状态。
+- GPT Image B/C 使用 `/images/edits` 的重复 `image` 文件字段；豆包多图使用 `image[]`。每张图复制到独立任务路径，失败回滚会清理已复制对象，终态清理覆盖全部参考图。
+- 升级包含 Flyway `V8__multiple_job_reference_images.sql`，增加模型数量限制和任务多图快照列。按正常流程先迁移，再同步升级 API、worker 与前端。此功能不代表已验证上游的真实最大输入数量；生产上游实测需另行进行。
+
+首次初始化也可以在 `PUBLIC_MODELS_JSON` 的模型条目中指定 `"max_reference_images": 12`。
 
 ### SMTP、注册、忘记密码与邮箱绑定
 

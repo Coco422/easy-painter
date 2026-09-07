@@ -404,3 +404,65 @@ def test_get_job_requires_ownership():
         routes.get_job(job_id=job.id, db=db, current_user=stranger)
     assert exc_info.value.status_code == 404
     db.close()
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('outcome', ['success', 'failure', 'retry'])
+def test_worker_loads_ordered_reference_snapshots_and_cleans_only_terminal_jobs(monkeypatch, legacy, outcome):
+    from sqlalchemy import select
+    from app.models.media import MediaDeletionTask
+    from app.services.storage import StoredReferenceImage
+
+    session_factory = make_session_factory()
+    db = session_factory()
+    refs = [{'object_key': f'references/{i}.png', 'content_type': 'image/png', 'filename': 'same.png'} for i in range(1 if legacy else 3)]
+    job = GenerationJob(prompt='combine', model='gpt-image-2-b', status=JobStatus.QUEUED,
+                        reference_image_key=refs[0]['object_key'], reference_image_content_type='image/png',
+                        reference_image_filename='same.png', reference_images=None if legacy else refs)
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+    received = []
+    class Provider:
+        def as_dict(self): return {}
+    class Client:
+        def __init__(self, config): pass
+        def generate_image(self, **kwargs):
+            received.extend(kwargs['reference_images'])
+            if outcome != 'success':
+                raise tasks.UpstreamServiceError('test upstream failure', retryable=outcome == 'retry')
+            return GeneratedImageResult(b'output', 'image/png', None, {})
+    class Storage:
+        def download_reference_image(self, key, content_type):
+            return StoredReferenceImage(key, key.encode(), content_type)
+        def upload_generated_image(self, **kwargs):
+            return StoredImage('generated/output.png', '')
+    monkeypatch.setattr(tasks, 'SessionLocal', session_factory)
+    monkeypatch.setattr(tasks, 'load_provider_for_model', lambda db, model: Provider())
+    monkeypatch.setattr(tasks, 'UpstreamImageClient', Client)
+    monkeypatch.setattr(tasks, 'MinioStorageService', Storage)
+    tasks.generate_image_task.push_request(retries=0, id='multi-test')
+    try:
+        if outcome == 'retry':
+            with pytest.raises(tasks.UpstreamServiceError):
+                tasks.generate_image_task.run(job_id)
+        else:
+            tasks.generate_image_task.run(job_id)
+    finally:
+        tasks.generate_image_task.pop_request()
+    assert [item.image_bytes for item in received] == [item['object_key'].encode() for item in refs]
+    db = session_factory()
+    job = db.get(GenerationJob, job_id)
+    deletions = db.scalars(select(MediaDeletionTask)).all()
+    if outcome == 'retry':
+        assert job.status == JobStatus.PROCESSING
+        assert not deletions
+        assert job.reference_image_key == refs[0]['object_key']
+        assert job.reference_images == (None if legacy else refs)
+    else:
+        assert job.status == (JobStatus.SUCCEEDED if outcome == 'success' else JobStatus.FAILED)
+        assert job.reference_images is None
+        assert job.reference_image_key is None
+        assert {item.object_key for item in deletions} == {item['object_key'] for item in refs}
+    db.close()

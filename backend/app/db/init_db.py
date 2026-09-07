@@ -98,6 +98,7 @@ def _seed_providers_and_models() -> None:
                 label=model_dict.get("label", model_dict["id"]),
                 enabled=bool(model_dict.get("enabled", True)),
                 supports_reference_image=bool(model_dict.get("supports_reference_image", True)),
+                max_reference_images=int(model_dict.get("max_reference_images", 5)),
                 supported_sizes=list(model_dict.get("supported_sizes", [])),
                 sort_order=index,
                 credit_cost=max(1, int(model_dict.get("credit_cost", 2))),

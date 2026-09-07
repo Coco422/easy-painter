@@ -38,7 +38,7 @@ from app.schemas.pagination import PageResponse
 from app.services.storage import MinioStorageService, StorageError
 from app.services.billing import adjust_user_credits
 from app.services.job_lifecycle import mark_generation_failed
-from app.services.media_lifecycle import enqueue_deletion
+from app.services.media_lifecycle import enqueue_deletion, enqueue_job_reference_cleanup
 from app.services.health import collect_admin_health
 from app.services.redis_client import get_redis
 from app.services.reference_images import ReferenceImageValidationError, validate_reference_image
@@ -304,15 +304,7 @@ def _mark_job_deleted(db: Session, job: GenerationJob) -> None:
             resource_type="generation_job",
             resource_id=job.id,
         )
-    if job.reference_image_key:
-        enqueue_deletion(
-            db,
-            bucket_type="reference",
-            object_key=job.reference_image_key,
-            resource_type="job_reference",
-            resource_id=job.id,
-        )
-        job.reference_image_key = None
+    enqueue_job_reference_cleanup(db, job)
 
 
 @admin_router.delete("/admin/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -561,6 +553,7 @@ class ModelResponse(BaseModel):
     label: str
     enabled: bool
     supports_reference_image: bool
+    max_reference_images: int = Field(default=5, ge=1)
     supported_sizes: list[str]
     sort_order: int
     credit_cost: int = 2
@@ -572,6 +565,7 @@ class CreateModelRequest(BaseModel):
     label: str
     enabled: bool = True
     supports_reference_image: bool = True
+    max_reference_images: int = Field(default=5, ge=1)
     supported_sizes: list[str] = []
     sort_order: int = 0
     credit_cost: int = Field(default=2, ge=1)
@@ -582,6 +576,7 @@ class UpdateModelRequest(BaseModel):
     label: str | None = None
     enabled: bool | None = None
     supports_reference_image: bool | None = None
+    max_reference_images: int | None = Field(default=None, ge=1)
     supported_sizes: list[str] | None = None
     sort_order: int | None = None
     credit_cost: int | None = Field(default=None, ge=1)
@@ -591,6 +586,7 @@ def _model_response(m: ModelConfig) -> ModelResponse:
     return ModelResponse(
         id=m.id, provider_id=m.provider_id, label=m.label,
         enabled=m.enabled, supports_reference_image=m.supports_reference_image,
+        max_reference_images=m.max_reference_images if m.max_reference_images is not None else 5,
         supported_sizes=list(m.supported_sizes) if m.supported_sizes else [],
         sort_order=m.sort_order, credit_cost=m.credit_cost if m.credit_cost is not None else 2,
     )
@@ -687,6 +683,7 @@ def admin_create_model(
     model = ModelConfig(
         id=body.id, provider_id=body.provider_id, label=body.label,
         enabled=body.enabled, supports_reference_image=body.supports_reference_image,
+        max_reference_images=body.max_reference_images,
         supported_sizes=body.supported_sizes, sort_order=body.sort_order,
         credit_cost=body.credit_cost,
     )
@@ -710,7 +707,7 @@ def admin_update_model(
         provider = db.get(UpstreamProvider, body.provider_id)
         if not provider:
             raise HTTPException(status_code=404, detail="关联的上游不存在。")
-    for field in body.model_fields:
+    for field in type(body).model_fields:
         value = getattr(body, field)
         if value is not None:
             setattr(model, field, value)

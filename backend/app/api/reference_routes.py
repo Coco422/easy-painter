@@ -158,7 +158,9 @@ async def upload_staged_reference_image(
             storage.delete_reference_image(old_image.object_key)
         except StorageError:
             logger.warning("Failed to eagerly delete evicted reference %s", old_image.object_key)
-    return _build_reference_image_item(image)
+    result = _build_reference_image_item(image)
+    result.evicted_image_ids = [old.id for old in oldest_images]
+    return result
 
 
 @reference_router.get("/reference-images", response_model=PageResponse[ReferenceImageItem])

@@ -65,7 +65,7 @@ async function refreshJobMedia(job: JobDetailResponse) {
 }
 
 function supportsCurrentReferenceInput(model: PublicModel | undefined) {
-  return Boolean(model?.enabled) && (!selectedReferenceImage.value || model?.supports_reference_image !== false)
+  return Boolean(model?.enabled) && (selectedReferenceImage.value.length === 0 || model?.supports_reference_image !== false)
 }
 
 function supportsCurrentSize(model: PublicModel | undefined, size: ImageSize) {
@@ -242,15 +242,19 @@ async function submitJobs(options: {
   model: string
   size: ImageSize
   batchCount: BatchCount
-  referenceImageId: string | null
+  referenceImageIds: string[]
 }) {
+  const model = availableModels.value.find((item) => item.id === options.model)
+  if (options.referenceImageIds.length > (model?.max_reference_images ?? 5)) {
+    throw new Error(`当前模型单次最多支持 ${model?.max_reference_images ?? 5} 张参考图，请移除多余图片。`)
+  }
   const submissions = Array.from({ length: options.batchCount }, () => {
     const idempotencyKey = crypto.randomUUID()
     const payload = {
       prompt: options.promptText,
       model: options.model,
       size: options.size,
-      reference_image_id: options.referenceImageId,
+      reference_image_ids: options.referenceImageIds,
     }
     const submit = () => createJob(payload, idempotencyKey)
     return submit().catch((error) => {
@@ -298,7 +302,7 @@ async function submitPrompt() {
       model: selectedModel.value,
       size: selectedSize.value,
       batchCount: selectedBatchCount.value,
-      referenceImageId: selectedReferenceImage.value?.id ?? null,
+      referenceImageIds: selectedReferenceImage.value.map((item) => item.id),
     })
   } catch (error) {
     if (error instanceof ApiError && error.status === 402) {
@@ -325,7 +329,7 @@ async function retryJob(job: JobDetailResponse) {
       model: job.model,
       size: job.size as ImageSize,
       batchCount: 1,
-      referenceImageId: selectedReferenceImage.value?.id ?? null,
+      referenceImageIds: selectedReferenceImage.value.map((item) => item.id),
     })
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '提交失败，请稍后重试。'

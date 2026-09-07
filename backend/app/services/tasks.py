@@ -19,6 +19,7 @@ from app.services.job_lifecycle import (
 )
 from app.services.model_service import load_provider_by_id, load_provider_for_model
 from app.services.media_lifecycle import enqueue_deletion
+from app.services.reference_images import job_reference_images
 from app.services.storage import MinioStorageService, StorageError
 from app.services.upstream import ReferenceImageForUpstream, UpstreamImageClient, UpstreamServiceError
 
@@ -83,24 +84,23 @@ def generate_image_task(self, job_id: str) -> None:
                 return
 
             storage = MinioStorageService()
-            reference_image = None
-            if job.reference_image_key and job.reference_image_content_type:
+            reference_images = []
+            for reference in job_reference_images(job):
                 stored_reference = storage.download_reference_image(
-                    job.reference_image_key,
-                    job.reference_image_content_type,
+                    reference["object_key"], reference["content_type"],
                 )
-                reference_image = ReferenceImageForUpstream(
-                    filename=job.reference_image_filename or "reference",
+                reference_images.append(ReferenceImageForUpstream(
+                    filename=reference["filename"],
                     content_type=stored_reference.content_type,
                     image_bytes=stored_reference.image_bytes,
-                )
+                ))
 
             result = UpstreamImageClient(provider_config.as_dict()).generate_image(
                 prompt=job.prompt,
                 model=job.model,
                 size=job.size,
                 aspect_ratio=job.aspect_ratio,
-                reference_image=reference_image,
+                reference_images=reference_images,
             )
             stored = storage.upload_generated_image(
                 job_id=job.id,

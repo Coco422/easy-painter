@@ -45,6 +45,7 @@ def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str] | 
             "label": m.label,
             "enabled": m.enabled,
             "supports_reference_image": m.supports_reference_image,
+            "max_reference_images": m.max_reference_images if m.max_reference_images is not None else 5,
             "supported_sizes": list(m.supported_sizes) if m.supported_sizes else [],
             "credit_cost": m.credit_cost if m.credit_cost is not None else 2,
         }

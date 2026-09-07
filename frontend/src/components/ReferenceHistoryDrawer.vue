@@ -8,6 +8,8 @@ import type { ReferenceImageItem } from '@/lib/types'
 
 const props = defineProps<{
   open: boolean
+  selectionLimit: number
+  selectionDisabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -17,6 +19,7 @@ const emit = defineEmits<{
 
 const {
   selected,
+  deselect,
   uploading,
   history,
   historyLoading,
@@ -62,8 +65,11 @@ function close() {
 }
 
 function handleSelect(item: ReferenceImageItem) {
-  emit('select', item)
-  close()
+  if (props.selectionDisabled) return
+  loadError.value = ''
+  if (selected.value.some((entry) => entry.id === item.id)) deselect(item.id)
+  else if (selected.value.length < props.selectionLimit) emit('select', item)
+  else loadError.value = `当前模型单次最多支持 ${props.selectionLimit} 张参考图，请先取消一张。`
 }
 
 function handleItemKeydown(event: KeyboardEvent, item: ReferenceImageItem) {
@@ -97,6 +103,7 @@ async function handleRemove(item: ReferenceImageItem) {
           <p class="reference-drawer-hint">
             当前组最多保留 {{ referenceLimit ?? '—' }} 张；达到上限时上传会先征求确认，再淘汰最早的图片。创作框中的 × 只取消本次使用。
           </p>
+          <p class="reference-drawer-hint">本次已选 {{ selected.length }} / {{ selectionLimit }} 张；点击图片可选择或取消。</p>
           <p v-if="loadError" class="reference-drawer-error">{{ loadError }}</p>
           <div v-if="historyLoading && !hasItems" class="reference-drawer-loading">
             <Loader2 :size="22" />
@@ -115,10 +122,13 @@ async function handleRemove(item: ReferenceImageItem) {
               v-for="item in history"
               :key="item.id"
               class="reference-drawer-item"
-              :class="{ selected: selected?.id === item.id }"
+              :class="{ selected: selected.some((entry) => entry.id === item.id) }"
               role="button"
               tabindex="0"
               :title="item.filename"
+              :aria-pressed="selected.some((entry) => entry.id === item.id)"
+              :aria-disabled="selectionDisabled"
+              :data-selection-full="!selected.some((entry) => entry.id === item.id) && selected.length >= selectionLimit"
               @click="handleSelect(item)"
               @keydown="handleItemKeydown($event, item)"
             >
@@ -131,7 +141,7 @@ async function handleRemove(item: ReferenceImageItem) {
                 class="reference-drawer-delete"
                 title="删除参考图"
                 aria-label="删除参考图"
-                :disabled="deletingIds.has(item.id)"
+                :disabled="selectionDisabled || deletingIds.has(item.id)"
                 @click.stop="handleRemove(item)"
               >
                 <Loader2 v-if="deletingIds.has(item.id)" :size="14" />

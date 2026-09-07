@@ -55,7 +55,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 ### Request Flow
 
-1. Frontend submits `POST /api/v1/jobs` with prompt, model, optional staged reference image, JWT, and a stable `Idempotency-Key`
+1. Frontend submits `POST /api/v1/jobs` with prompt, model, optional ordered staged reference image IDs, JWT, and a stable `Idempotency-Key`
 2. API atomically creates `GenerationJob`, `JobCharge`, the negative credit transaction, and an `OutboxEvent`; the balance update is conditional and cannot go below zero
 3. The dispatcher publishes due outbox events to Celery and maintains the heartbeat used by readiness checks
 4. A worker conditionally claims the queued job, calls the configured upstream, and uploads a successful result to MinIO
@@ -133,7 +133,8 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 ## Key Design Decisions
 
 - Upstream API credentials never reach the frontend — only stored in `.env` and backend container env vars
-- Model list, reference image support, and size constraints are configured via `PUBLIC_MODELS_JSON` in `.env` and fallback to defaults in `config.py`
+- Model capabilities live in `model_configs` and are editable in admin; `PUBLIC_MODELS_JSON` is only a seed/fallback. Per-model `max_reference_images` defaults to 5 and is independent of the user-group reference library quota.
+- Jobs accept ordered `reference_image_ids`, preserve legacy single-image inputs, and snapshot private copies in `generation_jobs.reference_images` (V8). Worker reads snapshots with a legacy-column fallback; cleanup must cover all copies. GPT Image uses repeated `image` multipart fields, while multi-image Seedream uses `image[]`.
 - The `api` and `worker` services share the same Docker image (`backend/Dockerfile`)
 - Dev mode (`make backend`) rewrites DB/Redis/MinIO connection strings to use localhost ports
 - `backend/.env` is a symlink to the project root `.env`
