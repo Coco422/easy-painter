@@ -40,6 +40,11 @@ export interface PublicMetaResponse {
   viewer_group?: UserGroupSummary | null
 }
 
+export interface PublicGenerationStats {
+  today_images: number
+  total_images: number
+}
+
 export interface CreateJobRequest {
   prompt: string
   model: string

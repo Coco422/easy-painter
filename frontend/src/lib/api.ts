@@ -15,6 +15,7 @@ import type {
   JobDetailResponse,
   ModelConfig,
   PageResponse,
+  PublicGenerationStats,
   PublicMetaResponse,
   RedemptionCodeItem,
   ReferenceImageItem,
@@ -93,6 +94,10 @@ export function fetchPublicMeta() {
 
 export function fetchAnnouncements() {
   return apiRequest<AnnouncementItem[]>('/api/v1/announcements')
+}
+
+export function fetchPublicGenerationStats(signal?: AbortSignal) {
+  return apiRequest<PublicGenerationStats>('/api/v1/stats/public', { signal })
 }
 
 export function createJob(payload: CreateJobRequest, idempotencyKey: string) {

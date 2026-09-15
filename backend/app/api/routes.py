@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import uuid4
 
@@ -36,6 +36,7 @@ from app.schemas.job import (
     GalleryPageResponse,
     HealthResponse,
     JobDetailResponse,
+    PublicGenerationStatsResponse,
     PublicMetaResponse,
     TogglePublicRequest,
 )
@@ -182,6 +183,31 @@ def get_public_meta(
         models=_models_for_policy(_load_models(db, settings), policy),
         viewer_group=_policy_response(policy),
     )
+
+
+@router.get("/stats/public", response_model=PublicGenerationStatsResponse)
+def get_public_generation_stats(
+    response: Response,
+    db: Session = Depends(get_db),
+) -> PublicGenerationStatsResponse:
+    # Count successful deliveries across all users, including deleted/expired media.
+    # A batch creates one job per image, so each succeeded job contributes one image.
+    day_start = utcnow().astimezone(timezone(timedelta(hours=8))).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    ).astimezone(timezone.utc)
+    today_images, total_images = db.execute(
+        select(
+            func.count().filter(
+                GenerationJob.finished_at >= day_start,
+                GenerationJob.finished_at < day_start + timedelta(days=1),
+            ),
+            func.count(),
+        )
+        .select_from(GenerationJob)
+        .where(GenerationJob.status == JobStatus.SUCCEEDED)
+    ).one()
+    response.headers["Cache-Control"] = "public, max-age=30"
+    return PublicGenerationStatsResponse(today_images=today_images, total_images=total_images)
 
 
 @router.get("/meta/releases/latest")

@@ -43,6 +43,11 @@ class PublicMetaResponse(BaseModel):
     viewer_group: UserGroupPolicyResponse | None = None
 
 
+class PublicGenerationStatsResponse(BaseModel):
+    today_images: int = Field(ge=0)
+    total_images: int = Field(ge=0)
+
+
 class CreateJobRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=32000)
     model: str = Field(min_length=1, max_length=128)
