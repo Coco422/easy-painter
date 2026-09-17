@@ -4,20 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Easy Painter is a text-to-image generation app with user authentication. Users submit prompts via the frontend; the backend atomically creates the job, billing reservation, credit transaction, and transactional outbox event. A dispatcher publishes the Celery task, the worker calls a private upstream image API and stores the result in MinIO, and the frontend polls for completion.
+Easy Painter is a text-to-image generation app with user authentication. Users submit prompts via the frontend; the backend atomically creates the job, billing reservation, credit transaction, and transactional outbox event. A dispatcher publishes the Celery task, the worker calls a private upstream image API and stores the result in RustFS, and the frontend polls for completion.
 
 ## Tech Stack
 
 - **Frontend**: Vue 3 + Vite + TypeScript + vue-router
-- **Backend**: FastAPI + SQLAlchemy + Celery + Redis + PostgreSQL + MinIO
+- **Backend**: FastAPI + SQLAlchemy + Celery + Redis + PostgreSQL + RustFS
 - **Auth**: JWT (bcrypt password hashing, PyJWT tokens)
 - **Python tooling**: `uv` (dependency management), `pytest` (testing)
-- **Infra**: Docker Compose (Flyway migrate, nginx, api, dispatcher, worker, redis, postgres, minio, minio-init)
+- **Infra**: Docker Compose (Flyway migrate, nginx, api, dispatcher, worker, redis, postgres, rustfs, storage-init)
 
 ## Common Commands
 
 ```bash
-# Start infrastructure (postgres, redis, minio, worker) — runs in foreground, Ctrl+C to stop
+# Start infrastructure (postgres, redis, rustfs, worker) — runs in foreground, Ctrl+C to stop
 make deps
 
 # Start backend API server (auto-reload on port 8000)
@@ -58,7 +58,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 1. Frontend submits `POST /api/v1/jobs` with prompt, model, optional ordered staged reference image IDs, JWT, and a stable `Idempotency-Key`
 2. API atomically creates `GenerationJob`, `JobCharge`, the negative credit transaction, and an `OutboxEvent`; the balance update is conditional and cannot go below zero
 3. The dispatcher publishes due outbox events to Celery and maintains the heartbeat used by readiness checks
-4. A worker conditionally claims the queued job, calls the configured upstream, and uploads a successful result to MinIO
+4. A worker conditionally claims the queued job, calls the configured upstream, and uploads a successful result to RustFS
 5. Success settles the reserved charge; final failure or watchdog timeout uses the same idempotent path to mark the job failed and refund it in full
 6. Frontend polls `GET /api/v1/jobs/{job_id}` until a final state and refreshes balance and billing status
 
@@ -111,7 +111,8 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - `services/health.py` — Public readiness and detailed admin dependency health
 - `services/tasks.py` — Idempotent Celery worker execution and result handling
 - `services/upstream.py` — HTTP client to upstream image API
-- `services/storage.py` — MinIO upload/download/delete
+- `services/storage.py` — RustFS upload/download/delete via the compatible MinIO S3 SDK
+- `services/storage_init.py` — Private bucket initialization; failures block service startup
 - `services/rate_limit.py` — Redis-based rate limiting
 - `db/init_db.py` — Default user, upstream, and model seed data only; schema changes live in `backend/db/migration/`
 
@@ -136,7 +137,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - Model capabilities live in `model_configs` and are editable in admin; `PUBLIC_MODELS_JSON` is only a seed/fallback. Per-model `max_reference_images` defaults to 5 and is independent of the user-group reference library quota.
 - Jobs accept ordered `reference_image_ids`, preserve legacy single-image inputs, and snapshot private copies in `generation_jobs.reference_images` (V8). Worker reads snapshots with a legacy-column fallback; cleanup must cover all copies. GPT Image uses repeated `image` multipart fields, while multi-image Seedream uses `image[]`.
 - The `api` and `worker` services share the same Docker image (`backend/Dockerfile`)
-- Dev mode (`make backend`) rewrites DB/Redis/MinIO connection strings to use localhost ports
+- Dev mode (`make backend`) rewrites DB/Redis/RustFS connection strings to use localhost ports
 - `backend/.env` is a symlink to the project root `.env`
 - Admin uses a separate JWT (not a user account) — verified via `ADMIN_SECRET_KEY` env var
 - No frontend state management library — auth state is a simple Vue `reactive()` object in `lib/auth.ts`

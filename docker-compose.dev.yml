@@ -7,7 +7,7 @@ services:
     ports:
       - "${REDIS_PORT:-6379}:6379"
 
-  minio:
+  rustfs:
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -18,7 +18,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: rustfs:9000
       MINIO_REFERENCE_BUCKET: ${MINIO_REFERENCE_BUCKET:-easy-painter-references}
 
   dispatcher:
@@ -27,5 +27,5 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: rustfs:9000
       MINIO_REFERENCE_BUCKET: ${MINIO_REFERENCE_BUCKET:-easy-painter-references}

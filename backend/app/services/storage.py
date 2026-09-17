@@ -30,6 +30,8 @@ class StorageError(RuntimeError):
 
 
 class MinioStorageService:
+    """S3 operations for RustFS using the MinIO SDK (legacy class name)."""
+
     def __init__(self) -> None:
         settings = get_settings()
         self.bucket = settings.minio_bucket

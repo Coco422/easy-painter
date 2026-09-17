@@ -38,7 +38,7 @@ const healthRows = computed<HealthRow[]>(() => {
     database: 'PostgreSQL',
     schema: 'Flyway Schema',
     redis: 'Redis',
-    minio: 'MinIO',
+    minio: 'RustFS',
     dispatcher: 'Dispatcher',
     worker: 'Celery Worker',
     queue: 'Generation 队列',

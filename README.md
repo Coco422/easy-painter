@@ -5,10 +5,10 @@
 ## 技术栈
 
 - `frontend/`: Vue 3 + Vite + TypeScript 单页应用
-- `backend/`: FastAPI + Celery + SQLAlchemy + Redis + MinIO
+- `backend/`: FastAPI + Celery + SQLAlchemy + Redis + RustFS
 - `backend/db/`: Flyway forward-only SQL migrations 与独立 migrations 镜像
 - `uv`: Python 依赖管理
-- `docker-compose.yml`: `migrate`、`api`、`worker`、`dispatcher`、`nginx`、`redis`、`postgres`、`minio`、`minio-init`
+- `docker-compose.yml`: `migrate`、`api`、`worker`、`dispatcher`、`nginx`、`redis`、`postgres`、`rustfs`、`storage-init`
 
 ## 目录结构
 
@@ -45,6 +45,10 @@ python3 scripts/version.py notes vX.Y.Z
 前端构建时会把当前版本和 changelog 编译进静态资源。所有访客都可以从 Header 打开版本中心；弹窗打开后只读查询官方仓库最新正式 GitHub Release，发现新版时提供 Release 链接，但不会自动下载或升级。正式发布时推送 `vX.Y.Z` tag，GitHub Actions 会先执行一致性检查，再用对应 changelog 章节创建 Release。
 
 ## 本地开发
+
+### v0.18.0 对象存储升级
+
+对象存储已替换为 RustFS 1.0.0，使用独立的 `data/rustfs` 目录；旧 `MINIO_*` 配置名与 S3 SDK 保留兼容。已有部署必须先按 [MinIO → RustFS 迁移指南](docs/minio-to-rustfs.md) 复制并校验两个私有 bucket，再启动新版业务。不能直接套用常规升级命令或复用 `data/minio`。备份脚本默认备份 RustFS，旧环境升级前备份需设置 `EASY_PAINTER_STORAGE_ENGINE=minio`。
 
 ### 1. 准备环境变量
 
@@ -147,7 +151,7 @@ make migrate
 - 新版前端为每张生成任务发送稳定 `Idempotency-Key`；网络重试不会重复扣费。
 - 任务只有成功交付图片才结算，入队超时、上游失败、存储失败或执行超时均全额退款。
 - `credit_transactions` 在 PostgreSQL 中为 append-only；Dispatcher 会以不可变流水重算并修复余额缓存。
-- Flyway 迁移仅向前执行。生产升级前应同时备份 PostgreSQL 与 MinIO，回滚依赖备份恢复。
+- Flyway 迁移仅向前执行。生产升级前应同时备份 PostgreSQL 与 RustFS，回滚依赖备份恢复。
 - 生产备份内容、快照校验和新环境恢复步骤见 [`docs/backup-and-disaster-recovery.md`](docs/backup-and-disaster-recovery.md)。
 
 ### 3. 启动依赖服务和 Celery
@@ -156,7 +160,7 @@ make migrate
 make deps
 ```
 
-这个命令会以前台方式启动 `postgres`、`redis`、`minio`、`minio-init`、`migrate`、`worker` 和 `dispatcher`，便于调试日志；退出命令时会自动把这些容器关掉。迁移失败时 Worker 与 Dispatcher 不会继续启动。
+这个命令会以前台方式启动 `postgres`、`redis`、`rustfs`、`storage-init`、`migrate`、`worker` 和 `dispatcher`，便于调试日志；退出命令时会自动把这些容器关掉。迁移失败时 Worker 与 Dispatcher 不会继续启动。
 
 ### 4. 启动后端 API
 
@@ -174,7 +178,7 @@ make frontend
 
 - 前端会把 `/api` 转发到 `http://127.0.0.1:8000`
 - `/media` 仍然走 `http://127.0.0.1:8080`
-- `make backend` 会自动把数据库、Redis、MinIO 连接改为宿主机端口，配合 `make deps` 启动的容器使用
+- `make backend` 会自动把数据库、Redis、RustFS 连接改为宿主机端口，配合 `make deps` 启动的容器使用
 
 ## 本地镜像部署
 
@@ -187,7 +191,7 @@ make deploy
 
 - 首页由 `nginx` 提供静态文件
 - `/api/...` 反代到 `api`
-- `/media/...` 反代到 MinIO 公共 bucket
+- 图片通过 `/api/...` 鉴权后读取 RustFS 私有 bucket，`/media/...` 不开放直连
 
 ## 服务器部署（GHCR）
 
@@ -201,7 +205,7 @@ make deploy
 
 - `.env`
 - `compose.yml`（使用仓库中的 `deploy/compose.yml`）
-- `data/postgres`、`data/redis`、`data/minio` 持久化目录
+- `data/postgres`、`data/redis`、`data/rustfs` 持久化目录
 
 首次部署：
 

@@ -5,8 +5,8 @@ FastAPI + Celery + Vue 3 文生图 monorepo. For deep architecture, auth, galler
 ## Commands
 
 ```bash
-make deps       # foreground infra: postgres, redis, minio, migrate, worker, dispatcher (Ctrl+C to stop)
-make backend    # migrate + API on :8000; rewrites DB/Redis/MinIO URLs to localhost ports
+make deps       # foreground infra: postgres, redis, rustfs, migrate, worker, dispatcher (Ctrl+C to stop)
+make backend    # migrate + API on :8000; rewrites DB/Redis/RustFS URLs to localhost ports
 make frontend   # Vite dev server on :5173, proxies /api -> :8000
 make deploy     # full containerized build + up
 cd backend && uv run pytest        # all tests
@@ -15,7 +15,7 @@ cd frontend && npx vue-tsc --noEmit  # typecheck
 ```
 
 - Backend uses `uv` (not pip/venv). Run tests from `backend/` with `uv run pytest`.
-- Backend tests are **pure unit tests** (no conftest; they use `monkeypatch`/fake objects) — no live Postgres/Redis/MinIO needed.
+- Backend tests are **pure unit tests** (no conftest; they use `monkeypatch`/fake objects) — no live Postgres/Redis/RustFS needed.
 - `frontend` has no test/lint script; `npm run build` = `vue-tsc --noEmit && vite build` (typecheck + build).
 - Production backup and disaster recovery use `scripts/backup-production.sh`; read `docs/backup-and-disaster-recovery.md` before changing or running recovery commands.
 
@@ -31,9 +31,15 @@ cd frontend && npx vue-tsc --noEmit  # typecheck
 - Backend services under `backend/app/` (api, core, db, models, services). API/worker share one Docker image (`backend/Dockerfile`).
 - New migrations must also update `EXPECTED_FLYWAY_VERSION` in `backend/app/services/health.py`; the health tests check it against the latest migration filename.
 - **DB schema is Flyway forward-only** migrations in `backend/db/migration/`. API startup must never run `create_all` or ad-hoc `ALTER TABLE`; schema changes go in new SQL migration files. `backend/db/init_db.py` only seeds (default user, models) — no schema.
-- Never rsync a live `data/postgres` directory. Production backups use a transaction-consistent `pg_dump`; only MinIO uses rsync hard-link incrementals, and Redis is intentionally not restored.
+- Never rsync a live `data/postgres` directory. Production backups use a transaction-consistent `pg_dump`; only RustFS uses rsync hard-link incrementals, and Redis is intentionally not restored.
 - Job creation atomically writes job + precharge + negative credit tx + outbox event in one DB transaction; charges settle only on successful image delivery, refund fully otherwise.
 - Frontend has **no state-management library** — auth is a plain Vue `reactive()` in `lib/auth.ts`. Admin and selected shared components use naive-ui; public UI styling lives in `frontend/src/style.css`.
+
+## Object storage
+
+- RustFS uses `data/rustfs`; never mount the old `data/minio` into the new service. Follow `docs/minio-to-rustfs.md` for migration and rollback.
+- `MINIO_*` settings, `MinioStorageService`, and the health component key `minio` remain for compatibility; they use the MinIO S3 SDK against RustFS. Compose retains a `minio` DNS alias.
+- `rustfs-permissions` prepares the new data directory for UID 10001; `storage-init` uses the backend image and must succeed before application services start.
 
 ## Versioning / release
 

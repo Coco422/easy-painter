@@ -17,6 +17,7 @@
 #   EASY_PAINTER_BACKUP_ROOT=/data/backups/easy-painter \
 #   EASY_PAINTER_KEEP_SNAPSHOTS=30 \
 #   ./backup-production.sh
+# Set EASY_PAINTER_STORAGE_ENGINE=minio only for a pre-v0.18.0 deployment.
 
 set -Eeuo pipefail
 umask 077
@@ -27,6 +28,7 @@ readonly SSH_IDENTITY_FILE="${EASY_PAINTER_SSH_KEY:-${HOME}/.ssh/easy_painter_ba
 readonly BACKUP_ROOT="${EASY_PAINTER_BACKUP_ROOT:-${HOME}/backups/easy-painter}"
 readonly KEEP_SNAPSHOTS="${EASY_PAINTER_KEEP_SNAPSHOTS:-30}"
 readonly MIN_FREE_KB="${EASY_PAINTER_MIN_FREE_KB:-2097152}"
+readonly STORAGE_ENGINE="${EASY_PAINTER_STORAGE_ENGINE:-rustfs}"
 readonly SNAPSHOT_ROOT="${BACKUP_ROOT}/snapshots"
 readonly LOCK_DIR="${BACKUP_ROOT}/.backup.lock"
 readonly SNAPSHOT_ID="$(date -u +%Y-%m-%dT%H%M%SZ)"
@@ -86,6 +88,12 @@ if [[ ! "${MIN_FREE_KB}" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+case "${STORAGE_ENGINE}" in
+  rustfs) storage_health_path="/health/ready" ;;
+  minio) storage_health_path="/minio/health/live" ;;
+  *) log "ERROR: EASY_PAINTER_STORAGE_ENGINE must be rustfs or minio."; exit 1 ;;
+esac
+
 if [[ ! -r "${SSH_IDENTITY_FILE}" ]]; then
   log "ERROR: SSH key is missing or unreadable: ${SSH_IDENTITY_FILE}"
   log "Create it with: ssh-keygen -t ed25519 -f '${SSH_IDENTITY_FILE}' -N ''"
@@ -122,7 +130,7 @@ mkdir -m 700 "${STAGING_DIR}"
 mkdir -m 700 \
   "${STAGING_DIR}/database" \
   "${STAGING_DIR}/config" \
-  "${STAGING_DIR}/minio"
+  "${STAGING_DIR}/${STORAGE_ENGINE}"
 
 ssh_args=(
   ssh
@@ -142,7 +150,7 @@ log "Checking production services."
 "${ssh_args[@]}" \
   "cd '${REMOTE_APP_DIR}' && test -r compose.yml && test -r .env && docker compose -f compose.yml exec -T postgres sh -c 'exec pg_isready -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\"' >/dev/null"
 "${ssh_args[@]}" \
-  "cd '${REMOTE_APP_DIR}' && docker compose -f compose.yml exec -T minio curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null"
+  "cd '${REMOTE_APP_DIR}' && docker compose -f compose.yml exec -T ${STORAGE_ENGINE} curl -fsS http://127.0.0.1:9000${storage_health_path} >/dev/null"
 
 log "Creating a transaction-consistent PostgreSQL dump."
 remote_dump_command="cd '${REMOTE_APP_DIR}' && exec docker compose -f compose.yml exec -T postgres sh -c 'exec pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" --format=custom --compress=9 --no-owner --no-acl --serializable-deferrable'"
@@ -174,30 +182,30 @@ previous_snapshot=""
 if [[ -L "${BACKUP_ROOT}/latest" ]]; then
   latest_target=$(readlink "${BACKUP_ROOT}/latest")
   candidate="${BACKUP_ROOT}/${latest_target}"
-  if [[ "${candidate}" == "${SNAPSHOT_ROOT}/"* && -d "${candidate}/minio" ]]; then
+  if [[ "${candidate}" == "${SNAPSHOT_ROOT}/"* && -d "${candidate}/${STORAGE_ENGINE}" ]]; then
     previous_snapshot="${candidate}"
   fi
 fi
 
 # Database comes first. The application uploads an object before marking a job as
 # succeeded in PostgreSQL, so every object referenced by this database snapshot is
-# expected to exist by the time this copy begins. MinIO temporary/multipart data is
-# excluded; only completed object data is useful for recovery.
-log "Creating the MinIO incremental snapshot."
+# expected to exist by the time this copy begins, unless concurrently deleted.
+# This is not an atomic filesystem snapshot; recovery must be verified separately.
+log "Creating the ${STORAGE_ENGINE} incremental snapshot."
 rsync_args=(
   -rlpt
   --delete
   --partial
-  --exclude=.minio.sys/tmp/
-  --exclude=.minio.sys/multipart/
+  "--exclude=.${STORAGE_ENGINE}.sys/tmp/"
+  "--exclude=.${STORAGE_ENGINE}.sys/multipart/"
   -e "${rsync_ssh}"
 )
 if [[ -n "${previous_snapshot}" ]]; then
-  rsync_args+=(--link-dest="${previous_snapshot}/minio")
+  rsync_args+=(--link-dest="${previous_snapshot}/${STORAGE_ENGINE}")
 fi
 rsync "${rsync_args[@]}" \
-  "${REMOTE_HOST}:${REMOTE_APP_DIR}/data/minio/" \
-  "${STAGING_DIR}/minio/"
+  "${REMOTE_HOST}:${REMOTE_APP_DIR}/data/${STORAGE_ENGINE}/" \
+  "${STAGING_DIR}/${STORAGE_ENGINE}/"
 
 log "Recording snapshot metadata."
 {
@@ -205,11 +213,12 @@ log "Recording snapshot metadata."
   printf 'created_at_utc=%s\n' "$(date -u +%FT%TZ)"
   printf 'database_format=PostgreSQL custom archive\n'
   printf 'database_consistency=single transaction serializable deferrable\n'
-  printf 'minio_mode=rsync link-dest incremental snapshot\n'
+  printf 'storage_engine=%s\n' "${STORAGE_ENGINE}"
+  printf 'storage_mode=rsync link-dest incremental snapshot\n'
   printf 'previous_snapshot=%s\n' "${previous_snapshot:-none}"
   printf 'database_bytes=%s\n' "$(stat -c %s "${STAGING_DIR}/database/easy_painter.dump")"
-  printf 'minio_files=%s\n' "$(find "${STAGING_DIR}/minio" -type f | wc -l | tr -d ' ')"
-  printf 'minio_apparent_kb=%s\n' "$(du -sk --apparent-size "${STAGING_DIR}/minio" | awk '{ print $1 }')"
+  printf 'storage_files=%s\n' "$(find "${STAGING_DIR}/${STORAGE_ENGINE}" -type f | wc -l | tr -d ' ')"
+  printf 'storage_apparent_kb=%s\n' "$(du -sk --apparent-size "${STAGING_DIR}/${STORAGE_ENGINE}" | awk '{ print $1 }')"
 } > "${STAGING_DIR}/manifest.txt"
 chmod 600 "${STAGING_DIR}/manifest.txt"
 

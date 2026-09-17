@@ -11,7 +11,7 @@ migrate:
 deps:
 	@test -f .env || { echo "Missing .env. Run: cp .env.example .env"; exit 1; }
 	@trap 'status=$$?; $(DEV_COMPOSE) down --remove-orphans >/dev/null 2>&1 || true; exit $$status' EXIT INT TERM; \
-	$(DEV_COMPOSE) up --remove-orphans postgres redis minio minio-init migrate worker dispatcher
+	$(DEV_COMPOSE) up --remove-orphans postgres redis rustfs storage-init migrate worker dispatcher
 
 backend: migrate
 	@test -f .env || { echo "Missing .env. Run: cp .env.example .env"; exit 1; }

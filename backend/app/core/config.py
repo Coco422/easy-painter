@@ -94,7 +94,8 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://redis:6379/1"
     celery_result_backend: str = "redis://redis:6379/2"
 
-    minio_endpoint: str = "minio:9000"
+    # Legacy MINIO_* names remain compatible; the server is now RustFS.
+    minio_endpoint: str = "rustfs:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "easy-painter-media"

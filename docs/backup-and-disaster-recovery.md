@@ -9,15 +9,17 @@
 | 数据 | 备份方式 | 恢复用途 |
 | --- | --- | --- |
 | PostgreSQL | 每次生成一份 custom-format `pg_dump` 全量逻辑快照 | 恢复账号、任务、账务、配置和业务状态 |
-| MinIO | rsync `--link-dest` 硬链接增量快照 | 恢复生成图片、参考图和对象元数据 |
+| RustFS | rsync `--link-dest` 硬链接增量快照 | 恢复生成图片、参考图和对象元数据 |
 | `.env`、`compose.yml` | 每个快照独立保存，文件权限为 `600` | 还原服务配置和容器编排 |
 | Redis | 不备份 | 恢复时使用空 Redis，避免重复执行旧队列任务 |
 
-### 一致性保证
+本文恢复步骤适用于 v0.18.0 起的 RustFS 快照。旧 `minio/` 快照应先配套恢复旧 Compose、旧版本镜像和 MinIO，再按 [迁移指南](minio-to-rustfs.md) 升级；不能直接当作 RustFS 快照使用。升级前备份旧服务时设置 `EASY_PAINTER_STORAGE_ENGINE=minio`，升级后默认使用 `rustfs`，两种快照不共享增量硬链接。
+
+### 一致性边界
 
 - PostgreSQL 使用单事务一致性视图和 `--serializable-deferrable`，不复制运行中的 `data/postgres`。
-- 脚本先完成并校验数据库快照，再复制 MinIO。应用先把图片写入 MinIO，随后才把任务标记为成功，因此数据库已引用的成功图片应包含在后续对象快照中。
-- MinIO 临时上传目录和未完成 multipart 数据不会进入快照。
+- 脚本先完成并校验数据库快照，再复制 RustFS。应用先把图片写入 RustFS，随后才把任务标记为成功，在对象未被并发删除的前提下，数据库已引用的成功图片应包含在后续对象快照中。在线 rsync 并非原子文件系统快照，不能保证并发覆盖、删除与内部元数据完全一致；升级前停写并等待任务结束，恢复后核验图片。
+- RustFS 临时上传目录和未完成 multipart 数据不会进入快照。
 - 数据库归档会完整交给 `pg_restore` 解压解析到 `/dev/null`，再生成 SHA-256 校验文件；验证过程不会修改生产数据库。
 - 所有步骤成功后，临时目录才会原子改名为正式快照并更新 `latest`。`.partial-*` 不是可恢复快照。
 - 默认保留最新 30 个成功快照；开始备份前要求至少还有 2 GiB 可用空间。
@@ -36,10 +38,10 @@
         ├── database/
         │   ├── easy_painter.dump
         │   └── easy_painter.dump.sha256
-        └── minio/
+        └── rustfs/
 ```
 
-每个 `<snapshot-id>` 目录在逻辑上都是一份完整快照。MinIO 文件可能与其他快照共享硬链接，因此不要在快照内部编辑文件。
+每个 `<snapshot-id>` 目录在逻辑上都是一份完整快照。RustFS 文件可能与其他快照共享硬链接，因此不要在快照内部编辑文件。
 
 ### 如何确认现有备份可用
 
@@ -53,7 +55,7 @@ test -f "$SNAPSHOT_DIR/manifest.txt"
 test -f "$SNAPSHOT_DIR/config/.env"
 test -f "$SNAPSHOT_DIR/config/compose.yml"
 test -f "$SNAPSHOT_DIR/database/easy_painter.dump"
-test -d "$SNAPSHOT_DIR/minio"
+test -d "$SNAPSHOT_DIR/rustfs"
 
 cat "$SNAPSHOT_DIR/manifest.txt"
 (
@@ -67,7 +69,7 @@ cat "$SNAPSHOT_DIR/manifest.txt"
 - `SNAPSHOT_DIR` 指向正式快照目录，而不是 `.partial-*`。
 - SHA-256 返回 `OK`。
 - `manifest.txt` 的创建时间符合期望 RPO。
-- `config/`、`database/` 和 `minio/` 都存在且可读。
+- `config/`、`database/` 和 `rustfs/` 都存在且可读。
 - 持有备份的文件系统没有 I/O 或容量告警。
 
 如果每日任务持续成功，计划 RPO 不超过约 24 小时。RTO 尚未经过正式隔离恢复演练，不能仅依据文档估算。
@@ -105,13 +107,13 @@ SSH_KEY=/path/to/recovery-key
 )
 ```
 
-### 2.2 恢复配置与 MinIO
+### 2.2 恢复配置与 RustFS
 
 在恢复目标创建空目录：
 
 ```bash
 ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$RECOVERY_HOST" \
-  "mkdir -p '$RECOVERY_DIR/data/minio' '$RECOVERY_DIR/data/redis'"
+  "mkdir -p '$RECOVERY_DIR/data/rustfs' '$RECOVERY_DIR/data/redis'"
 ```
 
 复制 `.env` 和 `compose.yml`。`.env` 包含真实密钥，传输完成后必须保持 `600`：
@@ -126,16 +128,23 @@ ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$RECOVERY_HOST" \
   "chmod 600 '$RECOVERY_DIR/.env' '$RECOVERY_DIR/compose.yml'"
 ```
 
-确保恢复目标的 MinIO 尚未启动，再把对象快照复制到已确认的空目录：
+确保恢复目标的 RustFS 尚未启动，再把对象快照复制到已确认的空目录：
 
 ```bash
 rsync -rlpt --delete \
   -e "ssh -i $SSH_KEY -o IdentitiesOnly=yes" \
-  "$SNAPSHOT_DIR/minio/" \
-  "$RECOVERY_HOST:$RECOVERY_DIR/data/minio/"
+  "$SNAPSHOT_DIR/rustfs/" \
+  "$RECOVERY_HOST:$RECOVERY_DIR/data/rustfs/"
 ```
 
-`--delete` 会删除目标目录中源快照不存在的文件。只有在 `RECOVERY_DIR` 和 `data/minio` 已确认属于新恢复环境时才能执行。
+`--delete` 会删除目标目录中源快照不存在的文件。只有在 `RECOVERY_DIR` 和 `data/rustfs` 已确认属于新恢复环境时才能执行。
+
+RustFS 以 UID/GID `10001:10001` 运行。复制完成后，在**已确认的新恢复目录**上修正全部文件归属（日常启动的 `rustfs-permissions` 只修正目录本身）：
+
+```bash
+ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$RECOVERY_HOST" \
+  "sudo chown -R 10001:10001 '$RECOVERY_DIR/data/rustfs'"
+```
 
 ### 2.3 恢复 PostgreSQL
 
@@ -172,13 +181,13 @@ ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$RECOVERY_HOST" \
 
 ### 2.4 运行迁移并启动其余服务
 
-先启动恢复后的 MinIO，再执行 bucket 初始化和 Flyway forward-only migration：
+先启动恢复后的 RustFS，再执行 bucket 初始化和 Flyway forward-only migration：
 
 ```bash
 ssh -i "$SSH_KEY" -o IdentitiesOnly=yes "$RECOVERY_HOST" \
   "cd '$RECOVERY_DIR' && \
-   docker compose -f compose.yml up -d minio && \
-   docker compose -f compose.yml run --rm --no-deps minio-init && \
+   docker compose -f compose.yml up -d --wait rustfs && \
+   docker compose -f compose.yml run --rm --no-deps storage-init && \
    docker compose -f compose.yml run --rm --no-deps migrate && \
    docker compose -f compose.yml up -d --remove-orphans"
 ```
@@ -204,7 +213,7 @@ curl -fsS "$BASE_URL/api/v1/health/ready"
 - 核对用户数量、余额、流水和成功/失败任务数量。
 - 随机打开多张历史成图和参考图，确认对象存在且内容正确。
 - 检查管理后台的依赖健康、outbox 积压和账务对账。
-- 新建一张低成本测试任务，确认提交、生成、MinIO 落盘和结算完整。
+- 新建一张低成本测试任务，确认提交、生成、RustFS 落盘和结算完整。
 - 记录恢复点时间、恢复开始时间和完成时间，得到实际 RPO 与 RTO。
 
 ## 3. 当前未覆盖的风险
