@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Eye, EyeOff } from 'lucide-vue-next'
 
 import { AuthApiError, login, register, requestEmailCode, resetPassword } from '@/lib/auth'
 import { fetchPublicMeta } from '@/lib/api'
@@ -22,6 +23,13 @@ let countdownTimer: number | null = null
 const loginForm = reactive({ identifier: '', password: '' })
 const registerForm = reactive({ username: '', displayName: '', email: '', code: '', password: '', confirmPassword: '' })
 const forgotForm = reactive({ email: '', code: '', password: '', confirmPassword: '' })
+const passwordVisible = reactive({
+  login: false,
+  register: false,
+  registerConfirm: false,
+  forgot: false,
+  forgotConfirm: false,
+})
 
 function switchMode(nextMode: AuthMode) {
   mode.value = nextMode
@@ -183,7 +191,13 @@ onMounted(async () => {
         </label>
         <label class="auth-label">
           密码
-          <input v-model="loginForm.password" type="password" class="auth-input" autocomplete="current-password" maxlength="128" />
+          <span class="auth-password-field">
+            <input v-model="loginForm.password" :type="passwordVisible.login ? 'text' : 'password'" class="auth-input" autocomplete="current-password" maxlength="128" />
+            <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.login ? '隐藏密码' : '显示密码'" :title="passwordVisible.login ? '隐藏密码' : '显示密码'" @click="passwordVisible.login = !passwordVisible.login">
+              <EyeOff v-if="passwordVisible.login" :size="18" aria-hidden="true" />
+              <Eye v-else :size="18" aria-hidden="true" />
+            </button>
+          </span>
         </label>
         <div class="auth-inline-actions">
           <button type="button" class="auth-text-button" @click="switchMode('forgot')">忘记密码</button>
@@ -224,11 +238,23 @@ onMounted(async () => {
         <div class="auth-field-grid">
           <label class="auth-label">
             密码
-            <input v-model="registerForm.password" type="password" class="auth-input" autocomplete="new-password" maxlength="128" placeholder="至少 6 个字符" />
+            <span class="auth-password-field">
+              <input v-model="registerForm.password" :type="passwordVisible.register ? 'text' : 'password'" class="auth-input" autocomplete="new-password" maxlength="128" placeholder="至少 6 个字符" />
+              <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.register ? '隐藏密码' : '显示密码'" :title="passwordVisible.register ? '隐藏密码' : '显示密码'" @click="passwordVisible.register = !passwordVisible.register">
+                <EyeOff v-if="passwordVisible.register" :size="18" aria-hidden="true" />
+                <Eye v-else :size="18" aria-hidden="true" />
+              </button>
+            </span>
           </label>
           <label class="auth-label">
             确认密码
-            <input v-model="registerForm.confirmPassword" type="password" class="auth-input" autocomplete="new-password" maxlength="128" />
+            <span class="auth-password-field">
+              <input v-model="registerForm.confirmPassword" :type="passwordVisible.registerConfirm ? 'text' : 'password'" class="auth-input" autocomplete="new-password" maxlength="128" />
+              <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.registerConfirm ? '隐藏密码' : '显示密码'" :title="passwordVisible.registerConfirm ? '隐藏密码' : '显示密码'" @click="passwordVisible.registerConfirm = !passwordVisible.registerConfirm">
+                <EyeOff v-if="passwordVisible.registerConfirm" :size="18" aria-hidden="true" />
+                <Eye v-else :size="18" aria-hidden="true" />
+              </button>
+            </span>
           </label>
         </div>
         <p v-if="error" class="auth-error">{{ error }}</p>
@@ -255,11 +281,23 @@ onMounted(async () => {
         <div class="auth-field-grid">
           <label class="auth-label">
             新密码
-            <input v-model="forgotForm.password" type="password" class="auth-input" autocomplete="new-password" maxlength="128" placeholder="至少 6 个字符" />
+            <span class="auth-password-field">
+              <input v-model="forgotForm.password" :type="passwordVisible.forgot ? 'text' : 'password'" class="auth-input" autocomplete="new-password" maxlength="128" placeholder="至少 6 个字符" />
+              <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.forgot ? '隐藏密码' : '显示密码'" :title="passwordVisible.forgot ? '隐藏密码' : '显示密码'" @click="passwordVisible.forgot = !passwordVisible.forgot">
+                <EyeOff v-if="passwordVisible.forgot" :size="18" aria-hidden="true" />
+                <Eye v-else :size="18" aria-hidden="true" />
+              </button>
+            </span>
           </label>
           <label class="auth-label">
             确认新密码
-            <input v-model="forgotForm.confirmPassword" type="password" class="auth-input" autocomplete="new-password" maxlength="128" />
+            <span class="auth-password-field">
+              <input v-model="forgotForm.confirmPassword" :type="passwordVisible.forgotConfirm ? 'text' : 'password'" class="auth-input" autocomplete="new-password" maxlength="128" />
+              <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.forgotConfirm ? '隐藏密码' : '显示密码'" :title="passwordVisible.forgotConfirm ? '隐藏密码' : '显示密码'" @click="passwordVisible.forgotConfirm = !passwordVisible.forgotConfirm">
+                <EyeOff v-if="passwordVisible.forgotConfirm" :size="18" aria-hidden="true" />
+                <Eye v-else :size="18" aria-hidden="true" />
+              </button>
+            </span>
           </label>
         </div>
         <p v-if="error" class="auth-error">{{ error }}</p>
@@ -280,6 +318,26 @@ onMounted(async () => {
 .auth-code-button { border: 1px solid var(--border-accent); border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 700; transition: background 160ms, border-color 160ms; }
 .auth-code-button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-glow); }
 .auth-code-button:disabled { cursor: not-allowed; opacity: .55; }
+.auth-password-field { position: relative; display: block; width: 100%; }
+.auth-password-field .auth-input { width: 100%; padding-right: 46px; }
+.auth-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: transparent;
+  transition: color 160ms ease, background 160ms ease;
+  transform: translateY(-50%);
+}
+.auth-password-toggle:hover { color: var(--accent-strong); background: var(--accent-glow); }
+.auth-password-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 .auth-inline-actions { display: flex; justify-content: flex-end; margin-top: -4px; }
 .auth-text-button { padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 13px; }
 .auth-text-button:hover { color: var(--accent-strong); }

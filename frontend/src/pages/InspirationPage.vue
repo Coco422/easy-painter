@@ -130,11 +130,11 @@ onMounted(() => {
       <p class="inspiration-subtitle">探索管理员导入或精选收录的永久创作提示词，一键复用</p>
       <div class="source-explainer" aria-label="内容来源说明">
         <div>
-          <strong>管理员精选</strong>
+          <strong>社区精选</strong>
           <span>从公开作品中审核收录，独立保存，不受原作清理影响。</span>
         </div>
         <div>
-          <strong>导入灵感</strong>
+          <strong>灵感收录</strong>
           <span>由管理员导入并保存至本站的提示词和创作示例。</span>
         </div>
       </div>
@@ -166,17 +166,19 @@ onMounted(() => {
             class="source-pill"
             :class="{ active: selectedSource === 'imported' }"
             @click="handleSourceChange('imported')"
-          >导入</button>
+          >收录</button>
         </div>
         <div class="sort-toggle">
           <button
             class="sort-btn"
             :class="{ active: sortMode === 'recent' }"
+            :aria-pressed="sortMode === 'recent'"
             @click="handleSortChange('recent')"
           >最近</button>
           <button
             class="sort-btn"
             :class="{ active: sortMode === 'featured' }"
+            :aria-pressed="sortMode === 'featured'"
             @click="handleSortChange('featured')"
           >精选</button>
         </div>
@@ -237,7 +239,6 @@ onMounted(() => {
 .inspiration-page {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 16px;
 }
 
 .inspiration-header {
@@ -316,8 +317,8 @@ onMounted(() => {
   padding: 8px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm, 6px);
-  background: var(--bg-card);
-  color: var(--text);
+  background: var(--bg-input);
+  color: var(--text-primary);
   font-size: 14px;
   outline: none;
   transition: border-color 200ms;
@@ -356,15 +357,19 @@ onMounted(() => {
 
 .sort-toggle {
   display: flex;
-  gap: 2px;
+  gap: 3px;
+  padding: 3px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
-  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .sort-btn {
-  padding: 4px 12px;
-  border: none;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   font-size: 13px;
@@ -373,12 +378,15 @@ onMounted(() => {
 }
 
 .sort-btn:hover {
-  color: var(--text);
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .sort-btn.active {
-  background: var(--accent);
-  color: var(--accent-foreground, #fff);
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
 }
 
 .category-filter {
