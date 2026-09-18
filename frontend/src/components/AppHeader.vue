@@ -141,9 +141,23 @@ async function handleLogout() {
 .header-nav { flex-wrap: wrap; }
 .header-nav > *, .primary-nav-link { white-space: nowrap; }
 @media (max-width: 600px) {
+  .site-header { align-items: center; column-gap: 10px; }
+  .brand { flex: 1 1 auto; }
+  .brand-logo { width: 42px; height: 42px; }
+  .brand-title { font-size: 20px; }
   .primary-nav-link { padding: 6px 8px; }
-  .header-primary-nav { gap: 0; }
-  .header-nav { gap: 10px; }
+  .header-primary-nav {
+    order: 3;
+    width: 100%;
+    gap: 2px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
+    scrollbar-width: none;
+  }
+  .header-primary-nav::-webkit-scrollbar { display: none; }
+  .header-nav { margin-left: auto; gap: 10px; }
   .nav-user { max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
   .theme-toggle { flex-shrink: 0; }
 }

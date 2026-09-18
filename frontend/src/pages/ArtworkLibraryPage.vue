@@ -124,7 +124,7 @@ onBeforeUnmount(() => { requestId += 1; controller?.abort(); if (poll) clearTime
   </section>
 </template>
 <style scoped>
-.artwork-library { max-width: 1280px; margin: 0 auto; padding: 24px 0 48px; }
+.artwork-library { max-width: 1200px; margin: 0 auto; padding: 24px 0 48px; }
 .library-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .library-heading h1 { margin: 4px 0 12px; font-size: 32px; font-weight: 600; }
 .library-heading p { margin: 0; color: var(--text-secondary); line-height: 1.7; }

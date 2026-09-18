@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Check, Copy, Download, ExternalLink, Sparkles, X } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { BadgeCheck, Check, Copy, Download, ExternalLink, Layers3, Share2, Sparkles, X } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import ProtectedImage from '@/components/ProtectedImage.vue'
@@ -9,6 +9,7 @@ import { authState } from '@/lib/auth'
 import { fetchArtwork, setFavorite, type Artwork } from '@/lib/artworks'
 import { imageDownloadFilename } from '@/lib/image-download'
 import type { InspirationItem } from '@/lib/types'
+import { artworkShare } from '@/lib/artwork-share'
 
 const props = defineProps<{
   item: InspirationItem | null
@@ -21,10 +22,15 @@ const emit = defineEmits<{
 const router = useRouter()
 const open = computed(() => Boolean(props.item))
 const copied = ref(false)
+const shareCopied = ref(false)
+const sharing = ref(false)
+let shareResetTimer: number | undefined
 const artwork = ref<Artwork | null>(null)
 const saving = ref(false)
 const error = ref('')
 const unavailable = ref(false)
+const shareTarget = computed(() => artwork.value && !unavailable.value ? artworkShare(artwork.value, window.location.origin) : null)
+onBeforeUnmount(() => window.clearTimeout(shareResetTimer))
 async function favorite() {
   if (!authState.token) { closeModal(); void router.push('/login'); return }
   if (!artwork.value || saving.value) return
@@ -41,7 +47,8 @@ function closeModal() {
 watch(
   () => props.item,
   async (item) => {
-    copied.value = false; artwork.value = null; error.value = ''; unavailable.value = false
+    window.clearTimeout(shareResetTimer)
+    copied.value = false; shareCopied.value = false; artwork.value = null; error.value = ''; unavailable.value = false
     if (item) {
       try { const result = await fetchArtwork('inspiration', item.id); if (props.item?.id === item.id) artwork.value = result }
       catch { if (props.item?.id === item.id) error.value = '作品状态读取失败，请重新打开。' }
@@ -85,9 +92,30 @@ async function downloadImage() {
   }
 }
 
+async function shareImage() {
+  const target = shareTarget.value
+  if (!target || sharing.value) return
+  const item = props.item
+  sharing.value = true; error.value = ''
+  try {
+    if (navigator.share) {
+      await navigator.share(target.data)
+      return
+    }
+    await navigator.clipboard.writeText(target.data.url)
+    if (props.item !== item) return
+    shareCopied.value = true
+    window.clearTimeout(shareResetTimer)
+    shareResetTimer = window.setTimeout(() => { shareCopied.value = false }, 1600)
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    if (props.item === item) error.value = '暂时无法分享，请稍后重试。'
+  } finally { sharing.value = false }
+}
+
 function formatSource(source: string) {
-  if (source === 'community-curated') return '管理员精选'
-  if (source === 'admin-imported') return '管理员导入'
+  if (source === 'community-curated') return '社区精选'
+  if (source === 'admin-imported' || source === 'imported') return '灵感收录'
   return source
 }
 </script>
@@ -98,7 +126,10 @@ function formatSource(source: string) {
       <div class="modal-toolbar">
         <div class="modal-toolbar-left">
           <span class="inspiration-source-badge" :class="{ 'source-gallery': item.source === 'community-curated' }">
-            {{ formatSource(item.source) }}
+            <BadgeCheck v-if="item.source === 'community-curated'" :size="14" :stroke-width="1.9" aria-hidden="true" />
+            <Layers3 v-else :size="14" :stroke-width="1.9" aria-hidden="true" />
+            <span class="source-caption">来源</span>
+            <strong>{{ formatSource(item.source) }}</strong>
           </span>
           <a
             v-if="item.source_url"
@@ -113,6 +144,10 @@ function formatSource(source: string) {
           </a>
         </div>
         <div class="modal-toolbar-right">
+          <button class="icon-button" type="button" :title="shareCopied ? '链接已复制' : '分享图片'" :aria-label="shareCopied ? '链接已复制' : '分享图片'" :disabled="sharing || !shareTarget" @click="shareImage">
+            <Check v-if="shareCopied" :size="20" />
+            <Share2 v-else :size="20" />
+          </button>
           <button class="icon-button" type="button" title="下载图片" aria-label="下载图片" :disabled="unavailable" @click="downloadImage">
             <Download :size="20" />
           </button>
@@ -172,17 +207,36 @@ function formatSource(source: string) {
 
 <style scoped>
 .inspiration-source-badge {
-  padding: 2px 10px;
-  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 9px 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 600;
-  background: rgba(168, 85, 247, 0.15);
-  color: #a855f7;
 }
 
 .inspiration-source-badge.source-gallery {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
+  border-color: var(--border-accent);
+  background: var(--accent-glow);
+  color: var(--accent-strong);
+}
+
+.inspiration-source-badge strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.source-caption {
+  padding-right: 6px;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .inspiration-title {

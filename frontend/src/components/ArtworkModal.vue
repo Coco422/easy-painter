@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { Check, Share2 } from 'lucide-vue-next'
 import ProtectedImage from '@/components/ProtectedImage.vue'
 import MediaExpiry from '@/components/MediaExpiry.vue'
 import { authState, getAuthHeader } from '@/lib/auth'
@@ -9,15 +10,20 @@ import { setGallery, setFavorite, submitCommunity, withdrawCommunity, type Artwo
 import { mediaAvailable } from '@/lib/media-state'
 import { useMediaClock } from '@/composables/useMediaClock'
 import { imageDownloadFilename } from '@/lib/image-download'
+import { artworkShare } from '@/lib/artwork-share'
 
 const props = defineProps<{ item: Artwork; initialAction?: 'gallery' }>()
 const emit = defineEmits<{ close: []; updated: [item: Artwork]; deleted: [item: Artwork]; invalid: [] }>()
 const router = useRouter()
 const now = useMediaClock()
 const available = computed(() => mediaAvailable(props.item.media_state, props.item.media_expires_at, now.value))
+const shareTarget = computed(() => artworkShare(props.item, window.location.origin, now.value))
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
+const shareCopied = ref(false)
+const sharing = ref(false)
+let shareResetTimer: number | undefined
 const action = ref<'gallery' | 'community' | null>(null)
 const promptPublic = ref(true)
 const tags = ref('')
@@ -62,6 +68,25 @@ async function download() {
   } catch (e) { if (!downloadController.signal.aborted) error.value = e instanceof Error ? e.message : '下载失败。' }
   finally { busy.value = false }
 }
+async function share() {
+  const target = shareTarget.value
+  if (!target || busy.value || sharing.value) return
+  sharing.value = true; error.value = ''; notice.value = ''
+  try {
+    if (navigator.share) {
+      await navigator.share(target.data)
+      return
+    }
+    await navigator.clipboard.writeText(target.data.url)
+    shareCopied.value = true
+    notice.value = target.copyNotice
+    window.clearTimeout(shareResetTimer)
+    shareResetTimer = window.setTimeout(() => { shareCopied.value = false }, 1600)
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
+    error.value = '暂时无法分享，请稍后重试。'
+  } finally { sharing.value = false }
+}
 async function remove() {
   if (!confirm('删除这条生成记录和原始图片？已经收录的社区版本将继续保留。')) return
   busy.value = true
@@ -84,7 +109,7 @@ function keydown(event: KeyboardEvent) {
 }
 watch(available, value => { if (!value) { action.value = null; downloadController?.abort() } })
 onMounted(async () => { if (props.initialAction === 'gallery' && !props.item.is_in_gallery) gallery(); document.addEventListener('keydown', keydown); await nextTick(); panel.value?.querySelector('button')?.focus() })
-onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); downloadController?.abort(); previousFocus?.focus() })
+onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); downloadController?.abort(); window.clearTimeout(shareResetTimer); previousFocus?.focus() })
 </script>
 <template>
   <div class="modal-backdrop" @click.self="close">
@@ -97,11 +122,17 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); downlo
         <p v-if="error" class="feedback-banner" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
         <div class="dialog-actions">
           <button class="ghost-button" :disabled="busy || !available" @click="download">下载原图</button>
+          <button class="ghost-button share-action" :disabled="busy || sharing || !shareTarget" @click="share">
+            <Check v-if="shareCopied" :size="16" aria-hidden="true" />
+            <Share2 v-else :size="16" aria-hidden="true" />
+            {{ shareCopied ? '已复制' : '分享' }}
+          </button>
           <button class="ghost-button" :disabled="busy || (!available && !item.is_favorite)" @click="perform(() => setFavorite(item, !item.is_favorite))">{{ item.is_favorite ? '取消收藏' : '收藏' }}</button>
           <button v-if="item.is_owner" class="ghost-button" :disabled="busy || (!available && !item.is_in_gallery)" @click="gallery">{{ item.is_in_gallery ? '移出画廊' : '加入画廊' }}</button>
           <button v-if="item.is_owner && item.submission_status === 'pending'" class="ghost-button" :disabled="busy" @click="perform(() => withdrawCommunity(item))">撤回投稿</button>
           <button v-else-if="item.is_owner && item.submission_status !== 'approved'" class="ghost-button" :disabled="busy || !available" @click="publish">投稿社区</button>
         </div>
+        <p v-if="available && !shareTarget && item.is_owner" class="dialog-note">分享前请先加入画廊，并在个人中心开启公开总开关。</p>
         <form v-if="action === 'gallery'" class="action-panel" @submit.prevent="perform(() => setGallery(item, true, tags.split(/[,，]/).map(t => t.trim()).filter(Boolean).slice(0, 5), promptPublic))">
           <h3>加入个人画廊</h3><p>画廊用于展示作品，不会延长保存时间。</p>
           <p v-if="!authState.user?.is_public">当前画廊尚未公开。加入后仅你可见，可前往<router-link to="/profile" @click="emit('close')">个人中心</router-link>开启公开总开关。</p>
@@ -134,6 +165,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); downlo
 .dialog-image :deep(img) { max-height: 52vh; }
 .dialog-body { padding: 24px; }
 .dialog-actions, .dialog-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; }
+.share-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .dialog-note, .dialog-meta { font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
 .dialog-prompt { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
 .action-panel { padding: 20px; border: 1px solid var(--border-accent); border-radius: var(--radius-md); margin: 16px 0; background: var(--bg-elevated); }

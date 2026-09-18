@@ -34,14 +34,88 @@ function loaded(event: Event) {
   </article>
 </template>
 <style scoped>
-.artwork-card { min-width: 0; break-inside: avoid; margin-bottom: 24px; }
-.artwork-preview { display: block; width: 100%; padding: 0; border: 0; border-radius: var(--radius-md); overflow: hidden; cursor: pointer; background: var(--bg-elevated); }
-.artwork-preview:hover { outline: 1px solid var(--border-accent); }
-.artwork-caption { padding: 12px 2px 0; }
-.artwork-badges { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--text-muted); }
-.artwork-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 8px 0; line-height: 1.6; font-size: 14px; }
-.artwork-actions { display: flex; justify-content: space-between; margin-top: 10px; }
-.artwork-actions button { color: var(--text-secondary); border: 0; background: none; padding: 6px 0; cursor: pointer; font: inherit; font-size: 13px; }
-.artwork-actions button[aria-pressed='true'], .artwork-actions button:hover { color: var(--accent); }
-.artwork-actions button:disabled { color: var(--text-muted); cursor: default; }
+.artwork-card {
+  min-width: 0;
+  margin-bottom: 24px;
+  overflow: hidden;
+  break-inside: avoid;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+.artwork-card:hover,
+.artwork-card:focus-within {
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-4px);
+}
+.artwork-preview {
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  cursor: pointer;
+  background: var(--bg-elevated);
+}
+.artwork-preview :deep(img) { transition: transform 300ms ease; }
+.artwork-card:hover .artwork-preview :deep(img) { transform: scale(1.025); }
+.artwork-preview:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.artwork-caption { padding: 13px 14px 10px; }
+.artwork-badges { display: flex; gap: 5px; flex-wrap: wrap; font-size: 10px; color: var(--text-muted); }
+.artwork-badges span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+.artwork-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 10px 0 7px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.artwork-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px -2px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.artwork-actions button {
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition: color 160ms ease, background 160ms ease;
+}
+.artwork-actions button[aria-pressed='true'],
+.artwork-actions button:hover { color: var(--accent-strong); background: var(--accent-glow); }
+.artwork-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.artwork-actions button:disabled { color: var(--text-muted); background: transparent; cursor: default; opacity: .55; }
+@media (prefers-reduced-motion: reduce) {
+  .artwork-card,
+  .artwork-preview :deep(img) { transition: none; }
+}
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { BadgeCheck, Heart, Layers3 } from 'lucide-vue-next'
 
 import ProtectedImage from '@/components/ProtectedImage.vue'
 import MediaExpiry from '@/components/MediaExpiry.vue'
@@ -46,23 +47,32 @@ const columns = computed(() => {
             type="button"
             @click="emit('select', item)"
           >
-            <ProtectedImage :src="item.thumbnail_url" :alt="item.title" />
-            <div class="inspiration-card-overlay">
-              <span v-if="item.source === 'community-curated'" class="inspiration-source-tag source-gallery">管理员精选</span>
-              <span v-else class="inspiration-source-tag source-external">灵感库</span>
-              <div class="inspiration-card-info">
-                <div v-if="item.categories && item.categories.length > 0" class="inspiration-card-tags">
-                  <span v-for="cat in item.categories.slice(0, 3)" :key="cat" class="inspiration-card-tag">{{ cat }}</span>
-                </div>
-                <p class="inspiration-card-title">{{ item.title }}</p>
-                <div class="inspiration-card-meta">
-                  <span v-if="item.author_name" class="inspiration-card-author">{{ item.author_name }}</span>
-                  <span v-if="item.like_count > 0" class="inspiration-card-likes">{{ item.like_count }}</span>
-                </div>
-              </div>
-            </div>
+            <span class="inspiration-card-media">
+              <ProtectedImage :src="item.thumbnail_url" :alt="item.title" />
+              <span v-if="item.source === 'community-curated'" class="inspiration-source-tag source-gallery">
+                <BadgeCheck :size="13" :stroke-width="1.9" aria-hidden="true" />
+                社区精选
+              </span>
+              <span v-else class="inspiration-source-tag source-external">
+                <Layers3 :size="13" :stroke-width="1.9" aria-hidden="true" />
+                灵感收录
+              </span>
+            </span>
+            <span class="inspiration-card-info">
+              <span v-if="item.categories && item.categories.length > 0" class="inspiration-card-tags">
+                <span v-for="cat in item.categories.slice(0, 3)" :key="cat" class="inspiration-card-tag">{{ cat }}</span>
+              </span>
+              <span class="inspiration-card-title">{{ item.title }}</span>
+              <span class="inspiration-card-meta">
+                <span v-if="item.author_name" class="inspiration-card-author">{{ item.author_name }}</span>
+                <span v-if="item.like_count > 0" class="inspiration-card-likes" :aria-label="`${item.like_count} 次喜欢`">
+                  <Heart :size="12" :stroke-width="1.8" aria-hidden="true" />
+                  {{ item.like_count }}
+                </span>
+                <MediaExpiry state="available" permanent />
+              </span>
+            </span>
           </button>
-          <MediaExpiry state="available" permanent />
         </div>
       </div>
     </div>
@@ -97,71 +107,92 @@ const columns = computed(() => {
 .inspiration-card {
   display: block;
   width: 100%;
-  border: none;
+  border: 1px solid var(--border);
   padding: 0;
-  background: none;
+  background: var(--bg-surface);
+  color: var(--text-primary);
   cursor: pointer;
   border-radius: var(--radius-md, 10px);
   overflow: hidden;
   position: relative;
-  transition: transform 200ms ease, box-shadow 200ms ease;
+  text-align: left;
+  box-shadow: var(--shadow-sm);
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
 }
 
-.inspiration-card:hover {
+.inspiration-card:hover,
+.inspiration-card:focus-visible {
   transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-md);
+}
+
+.inspiration-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.inspiration-card-media {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: var(--bg-elevated);
 }
 
 .inspiration-card :deep(img) {
   width: 100%;
   display: block;
   object-fit: cover;
+  transition: transform 300ms ease;
 }
 
-.inspiration-card-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, transparent 60%);
-  opacity: 0;
-  transition: opacity 200ms ease;
-  padding: 12px;
-}
-
-.inspiration-card:hover .inspiration-card-overlay, .inspiration-card:focus-visible .inspiration-card-overlay {
-  opacity: 1;
+.inspiration-card:hover :deep(img),
+.inspiration-card:focus-visible :deep(img) {
+  transform: scale(1.025);
 }
 
 .inspiration-source-tag {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 8px 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
   font-size: 11px;
-  font-weight: 600;
-  color: #fff;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(10px) saturate(0.8);
 }
 
 .source-gallery {
-  background: rgba(59, 130, 246, 0.85);
+  border-color: rgba(205, 220, 180, 0.32);
+  background: rgba(35, 43, 35, 0.86);
+  color: #eef4e6;
 }
 
 .source-external {
-  background: rgba(168, 85, 247, 0.85);
+  background: rgba(35, 36, 34, 0.8);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .inspiration-card-info {
-  color: #fff;
+  display: grid;
+  gap: 10px;
+  padding: 13px 14px 14px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .inspiration-card-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.55;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -173,27 +204,49 @@ const columns = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 4px;
 }
 
 .inspiration-card-tag {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.25);
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-glow);
   font-size: 10px;
-  font-weight: 500;
-  color: #fff;
-  backdrop-filter: blur(4px);
+  font-weight: 600;
+  color: var(--accent-strong);
 }
 
 .inspiration-card-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 10px;
+  min-width: 0;
   font-size: 11px;
-  opacity: 0.8;
+  color: var(--text-muted);
+}
+
+.inspiration-card-author {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspiration-card-likes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.inspiration-card-meta :deep(.media-expiry) {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .inspiration-loading,
@@ -202,5 +255,16 @@ const columns = computed(() => {
   padding: 32px 0;
   color: var(--text-secondary);
   font-size: 14px;
+}
+
+@media (max-width: 767px) {
+  .inspiration-grid,
+  .inspiration-column { gap: 16px; }
+  .inspiration-card-info { padding: 11px 12px 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspiration-card,
+  .inspiration-card :deep(img) { transition: none; }
 }
 </style>

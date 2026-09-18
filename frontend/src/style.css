@@ -930,6 +930,9 @@ a {
 
 /* ---- Primary Button ---- */
 .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: var(--radius-md);
   padding: 0 32px;
