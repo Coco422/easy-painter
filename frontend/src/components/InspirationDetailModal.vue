@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BadgeCheck, Check, Copy, Download, ExternalLink, Layers3, Share2, Sparkles, X } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import ProtectedImage from '@/components/ProtectedImage.vue'
@@ -9,6 +9,7 @@ import { authState } from '@/lib/auth'
 import { fetchArtwork, setFavorite, type Artwork } from '@/lib/artworks'
 import { imageDownloadFilename } from '@/lib/image-download'
 import type { InspirationItem } from '@/lib/types'
+import { artworkShare } from '@/lib/artwork-share'
 
 const props = defineProps<{
   item: InspirationItem | null
@@ -22,10 +23,14 @@ const router = useRouter()
 const open = computed(() => Boolean(props.item))
 const copied = ref(false)
 const shareCopied = ref(false)
+const sharing = ref(false)
+let shareResetTimer: number | undefined
 const artwork = ref<Artwork | null>(null)
 const saving = ref(false)
 const error = ref('')
 const unavailable = ref(false)
+const shareTarget = computed(() => artwork.value && !unavailable.value ? artworkShare(artwork.value, window.location.origin) : null)
+onBeforeUnmount(() => window.clearTimeout(shareResetTimer))
 async function favorite() {
   if (!authState.token) { closeModal(); void router.push('/login'); return }
   if (!artwork.value || saving.value) return
@@ -42,6 +47,7 @@ function closeModal() {
 watch(
   () => props.item,
   async (item) => {
+    window.clearTimeout(shareResetTimer)
     copied.value = false; shareCopied.value = false; artwork.value = null; error.value = ''; unavailable.value = false
     if (item) {
       try { const result = await fetchArtwork('inspiration', item.id); if (props.item?.id === item.id) artwork.value = result }
@@ -87,22 +93,24 @@ async function downloadImage() {
 }
 
 async function shareImage() {
-  if (!props.item || unavailable.value) return
+  const target = shareTarget.value
+  if (!target || sharing.value) return
   const item = props.item
-  const url = new URL(item.image_url, window.location.origin).href
-  const data = { title: item.title, text: item.description || `分享灵感：${item.title}`, url }
+  sharing.value = true; error.value = ''
   try {
     if (navigator.share) {
-      await navigator.share(data)
+      await navigator.share(target.data)
       return
     }
-    await navigator.clipboard.writeText(url)
+    await navigator.clipboard.writeText(target.data.url)
+    if (props.item !== item) return
     shareCopied.value = true
-    window.setTimeout(() => { shareCopied.value = false }, 1600)
+    window.clearTimeout(shareResetTimer)
+    shareResetTimer = window.setTimeout(() => { shareCopied.value = false }, 1600)
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return
-    error.value = '暂时无法分享，请稍后重试。'
-  }
+    if (props.item === item) error.value = '暂时无法分享，请稍后重试。'
+  } finally { sharing.value = false }
 }
 
 function formatSource(source: string) {
@@ -136,7 +144,7 @@ function formatSource(source: string) {
           </a>
         </div>
         <div class="modal-toolbar-right">
-          <button class="icon-button" type="button" :title="shareCopied ? '链接已复制' : '分享图片'" :aria-label="shareCopied ? '链接已复制' : '分享图片'" :disabled="unavailable" @click="shareImage">
+          <button class="icon-button" type="button" :title="shareCopied ? '链接已复制' : '分享图片'" :aria-label="shareCopied ? '链接已复制' : '分享图片'" :disabled="sharing || !shareTarget" @click="shareImage">
             <Check v-if="shareCopied" :size="20" />
             <Share2 v-else :size="20" />
           </button>

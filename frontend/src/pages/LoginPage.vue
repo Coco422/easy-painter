@@ -33,6 +33,7 @@ const passwordVisible = reactive({
 
 function switchMode(nextMode: AuthMode) {
   mode.value = nextMode
+  for (const key of Object.keys(passwordVisible) as (keyof typeof passwordVisible)[]) passwordVisible[key] = false
   error.value = ''
   notice.value = ''
   codeCountdown.value = 0
