@@ -34,8 +34,8 @@ class CreateUserGroupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: str = Field(default="", max_length=1000)
     billing_multiplier_bps: int = Field(default=10_000, ge=0, le=100_000)
-    generated_retention_hours: int = Field(default=24, ge=1, le=87_600)
-    reference_retention_hours: int = Field(default=24, ge=1, le=87_600)
+    generated_retention_hours: int = Field(default=48, ge=1, le=87_600)
+    reference_retention_hours: int = Field(default=48, ge=1, le=87_600)
     max_reference_images: int = Field(default=3, ge=0, le=10_000)
     is_enabled: bool = True
     is_default: bool = False

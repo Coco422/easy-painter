@@ -43,6 +43,13 @@ class MinioStorageService:
             secure=settings.minio_secure,
         )
 
+    def upload_thumbnail(self, key: str, data: bytes, *, reference: bool = False) -> None:
+        try:
+            self.client.put_object(self.reference_bucket if reference else self.bucket,
+                                   key, BytesIO(data), len(data), content_type="image/webp")
+        except Exception as exc:
+            raise StorageError("Failed to store thumbnail.") from exc
+
     def upload_generated_image(self, job_id: str, image_bytes: bytes, content_type: str) -> StoredImage:
         timestamp = datetime.now(timezone.utc)
         extension = self._guess_extension(content_type)

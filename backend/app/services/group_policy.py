@@ -23,8 +23,8 @@ STANDARD_POLICY = UserGroupPolicy(
     code=STANDARD_GROUP_CODE,
     name="普通用户",
     billing_multiplier_bps=10_000,
-    generated_retention_hours=24,
-    reference_retention_hours=24,
+    generated_retention_hours=48,
+    reference_retention_hours=48,
     max_reference_images=3,
 )
 

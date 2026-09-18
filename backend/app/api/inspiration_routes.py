@@ -15,6 +15,7 @@ from app.models.inspiration import Inspiration
 from app.models.media import MediaState
 from app.models.user import User
 from app.schemas.inspiration import InspirationFeedResponse, InspirationItemResponse
+from app.services.artworks import media_url
 from app.services.storage import MinioStorageService, StorageError
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ def _inspiration_to_response(item: Inspiration) -> InspirationItemResponse:
         description=item.description,
         prompt=item.prompt,
         image_url=f"/api/v1/inspirations/{item.id}/file" if item.image_object_key else item.image_url,
+        thumbnail_url=media_url('inspiration', item.id, item, 'thumbnail') if item.thumbnail_key else None,
         source=item.source,
         source_url=item.source_url,
         author_name=item.author_name,

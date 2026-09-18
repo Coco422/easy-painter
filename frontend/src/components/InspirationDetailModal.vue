@@ -3,6 +3,10 @@ import { Check, Copy, Download, ExternalLink, Sparkles, X } from 'lucide-vue-nex
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import ProtectedImage from '@/components/ProtectedImage.vue'
+import MediaExpiry from '@/components/MediaExpiry.vue'
+import { authState } from '@/lib/auth'
+import { fetchArtwork, setFavorite, type Artwork } from '@/lib/artworks'
 import { imageDownloadFilename } from '@/lib/image-download'
 import type { InspirationItem } from '@/lib/types'
 
@@ -17,6 +21,18 @@ const emit = defineEmits<{
 const router = useRouter()
 const open = computed(() => Boolean(props.item))
 const copied = ref(false)
+const artwork = ref<Artwork | null>(null)
+const saving = ref(false)
+const error = ref('')
+const unavailable = ref(false)
+async function favorite() {
+  if (!authState.token) { closeModal(); void router.push('/login'); return }
+  if (!artwork.value || saving.value) return
+  saving.value = true; error.value = ''
+  try { artwork.value = await setFavorite(artwork.value, !artwork.value.is_favorite) }
+  catch (e) { error.value = e instanceof Error ? e.message : '收藏失败。' }
+  finally { saving.value = false }
+}
 
 function closeModal() {
   emit('close')
@@ -24,9 +40,14 @@ function closeModal() {
 
 watch(
   () => props.item,
-  () => {
-    copied.value = false
+  async (item) => {
+    copied.value = false; artwork.value = null; error.value = ''; unavailable.value = false
+    if (item) {
+      try { const result = await fetchArtwork('inspiration', item.id); if (props.item?.id === item.id) artwork.value = result }
+      catch { if (props.item?.id === item.id) error.value = '作品状态读取失败，请重新打开。' }
+    }
   },
+  { immediate: true },
 )
 
 async function copyPrompt() {
@@ -45,11 +66,11 @@ function goToCreate() {
 }
 
 async function downloadImage() {
-  if (!props.item) return
+  if (!props.item || unavailable.value) return
   const item = props.item
   try {
     const response = await fetch(item.image_url)
-    if (!response.ok) throw new Error('download failed')
+    if (!response.ok) { if ([401,403,404,410].includes(response.status)) unavailable.value = true; throw new Error('download failed') }
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -60,7 +81,7 @@ async function downloadImage() {
     anchor.remove()
     URL.revokeObjectURL(url)
   } catch {
-    window.open(item.image_url, '_blank', 'noopener,noreferrer')
+    error.value = '图片暂时无法下载。'
   }
 }
 
@@ -92,7 +113,7 @@ function formatSource(source: string) {
           </a>
         </div>
         <div class="modal-toolbar-right">
-          <button class="icon-button" type="button" title="下载图片" aria-label="下载图片" @click="downloadImage">
+          <button class="icon-button" type="button" title="下载图片" aria-label="下载图片" :disabled="unavailable" @click="downloadImage">
             <Download :size="20" />
           </button>
           <button class="icon-button" type="button" title="关闭" aria-label="关闭" @click="closeModal">
@@ -102,10 +123,13 @@ function formatSource(source: string) {
       </div>
 
       <div class="modal-image-frame">
-        <img :src="item.image_url" :alt="item.title" class="modal-image" />
+        <ProtectedImage :src="item.image_url" :alt="item.title" :state="unavailable ? 'unavailable' : 'available'" eager @invalid="unavailable = true" />
       </div>
 
       <div class="modal-copy">
+        <MediaExpiry :state="unavailable ? 'unavailable' : 'available'" permanent />
+        <p v-if="error" role="alert">{{ error }}</p>
+        <button class="ghost-button" :disabled="saving || (!!authState.token && !artwork) || (unavailable && !artwork?.is_favorite)" @click="favorite">{{ artwork?.is_favorite ? '取消收藏' : '收藏' }}</button>
         <h3 class="inspiration-title">{{ item.title }}</h3>
 
         <div v-if="item.categories && item.categories.length > 0" class="inspiration-categories">

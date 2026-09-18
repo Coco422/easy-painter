@@ -8,6 +8,7 @@ from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum as SqlEnum, Int
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.media_derivative import MediaDerivativeMixin
 from app.models.media import MediaState
 
 
@@ -22,7 +23,7 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
-class GenerationJob(Base):
+class GenerationJob(MediaDerivativeMixin, Base):
     __tablename__ = "generation_jobs"
     __table_args__ = (
         UniqueConstraint("user_id", "idempotency_key", name="uq_generation_job_user_idempotency"),

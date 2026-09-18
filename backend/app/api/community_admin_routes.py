@@ -11,13 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin
 from app.db.session import get_db
+from app.models.artwork import CommunitySubmission
+from app.services.community import review_submission
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
 from app.models.media import MediaState
 from app.models.user import User
 from app.schemas.inspiration import AdminInspirationItem
 from app.schemas.pagination import PageResponse
-from app.api.media_routes import job_media_url
 from app.services.media_lifecycle import enqueue_deletion
 from app.services.storage import MinioStorageService, StorageError
 
@@ -51,18 +52,6 @@ class CommunityCandidate(BaseModel):
     finished_at: datetime | None = None
 
 
-def _eligible(job: GenerationJob, user: User | None) -> bool:
-    now = datetime.now(timezone.utc)
-    expires = job.media_expires_at
-    if expires and expires.tzinfo is None:
-        expires = expires.replace(tzinfo=timezone.utc)
-    return bool(
-        user and user.is_public and job.status == JobStatus.SUCCEEDED and job.is_public and job.is_prompt_public
-        and job.deleted_at is None and job.media_state == MediaState.AVAILABLE and job.object_key
-        and (expires is None or expires > now)
-    )
-
-
 def _admin_response(item: Inspiration) -> AdminInspirationItem:
     return AdminInspirationItem(
         id=item.id,
@@ -70,6 +59,7 @@ def _admin_response(item: Inspiration) -> AdminInspirationItem:
         description=item.description,
         prompt=item.prompt,
         image_url=f"/api/v1/inspirations/{item.id}/file",
+        thumbnail_url=f'/api/v1/artworks/inspiration/{item.id}/file?variant=thumbnail&v={item.thumbnail_hash}' if item.thumbnail_key else None,
         image_object_key=item.image_object_key,
         external_id=item.external_id,
         source=item.source,
@@ -96,10 +86,9 @@ def list_community_candidates(
     already_curated = select(Inspiration.id).where(
         Inspiration.source_job_id == GenerationJob.id
     ).exists()
-    base = select(GenerationJob, User).join(User, GenerationJob.user_id == User.id).where(
+    base = select(GenerationJob, User).join(User, GenerationJob.user_id == User.id).join(CommunitySubmission, CommunitySubmission.job_id == GenerationJob.id).where(
+        CommunitySubmission.status == "pending",
         GenerationJob.status == JobStatus.SUCCEEDED,
-        GenerationJob.is_public.is_(True),
-        GenerationJob.is_prompt_public.is_(True),
         User.is_public.is_(True),
         GenerationJob.deleted_at.is_(None),
         GenerationJob.media_state == MediaState.AVAILABLE,
@@ -118,7 +107,7 @@ def list_community_candidates(
             "job_id": job.id,
             "prompt": job.prompt,
             "revised_prompt": job.revised_prompt,
-            "image_url": job_media_url(job_id=job.id, user_id=None),
+            "image_url": f"/api/v1/admin/community-submissions/{job.id}/file",
             "username": user.username,
             "display_name": user.display_name,
             "tags": job.tags or [],
@@ -140,52 +129,15 @@ def curate_job(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
 ) -> AdminInspirationItem:
-    job = db.scalar(select(GenerationJob).where(GenerationJob.id == job_id).with_for_update())
-    user = db.get(User, job.user_id) if job else None
-    if not job or not _eligible(job, user):
-        raise HTTPException(status_code=409, detail="该作品不再满足社区收录条件。")
-    existing = db.scalar(select(Inspiration).where(Inspiration.source == "community-curated", Inspiration.external_id == job.id))
-    if existing:
-        raise HTTPException(status_code=409, detail="该作品已被收录。")
-    inspiration_id = str(uuid4())
-    try:
-        key = MinioStorageService().copy_generated_image_to_inspiration(job.object_key, inspiration_id=inspiration_id)
-    except StorageError:
-        raise HTTPException(status_code=503, detail="精选图片复制失败。") from None
-    title = body.title or (job.prompt[:80] + ("..." if len(job.prompt) > 80 else ""))
-    item = Inspiration(
-        id=inspiration_id, title=title, description=body.description, prompt=job.prompt,
-        image_url=f"/api/v1/inspirations/{inspiration_id}/file", image_object_key=key,
-        source="community-curated", external_id=job.id,
-        author_name=(user.display_name or user.username) if user else None,
-        categories=job.tags if isinstance(job.tags, list) else None, is_featured=body.is_featured,
-        source_job_id=job.id, source_user_id=job.user_id, curated_at=datetime.now(timezone.utc),
-        media_state=MediaState.AVAILABLE,
-        media_content_type=job.media_content_type,
-        media_size_bytes=job.media_size_bytes,
-    )
-    db.add(item)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        try:
-            MinioStorageService().delete_object(key)
-        except StorageError:
-            try:
-                enqueue_deletion(
-                    db,
-                    bucket_type="media",
-                    object_key=key,
-                    resource_type="orphan_inspiration_copy",
-                    resource_id=inspiration_id,
-                )
-                db.commit()
-            except Exception:
-                db.rollback()
-                logger.exception("Failed to track orphaned curated object %s", key)
-        raise
-    db.refresh(item)
+    sub = db.get(CommunitySubmission, job_id)
+    if sub and sub.status == "approved":
+        raise HTTPException(409, "该作品已被收录。")
+    reviewed = review_submission(db, job_id, "approve", storage=MinioStorageService())
+    item = db.get(Inspiration, reviewed.inspiration_id)
+    if body.title:
+        item.title = body.title
+    item.description, item.is_featured = body.description, body.is_featured
+    db.commit()
     return _admin_response(item)
 
 

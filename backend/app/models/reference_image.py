@@ -7,6 +7,7 @@ from sqlalchemy import BigInteger, DateTime, Enum as SqlEnum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.media_derivative import MediaDerivativeMixin
 from app.models.media import MediaState
 
 
@@ -14,7 +15,7 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class ReferenceImage(Base):
+class ReferenceImage(MediaDerivativeMixin, Base):
     __tablename__ = "reference_images"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))

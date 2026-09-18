@@ -9,6 +9,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.models.generation_job import GenerationJob, JobStatus
+from app.models.artwork import CommunitySubmission
+from app.models.user import User
 from app.models.inspiration import Inspiration
 from app.models.media import MediaDeletionStatus, MediaDeletionTask, MediaState
 from app.models.reference_image import ReferenceImage
@@ -145,6 +147,7 @@ def process_media_deletions(db: Session, *, now: datetime | None = None, limit: 
         if task.resource_type == "generation_job" and task.resource_id:
             job = db.get(GenerationJob, task.resource_id)
             if job:
+                enqueue_thumbnail_cleanup(db, job, now=now)
                 job.object_key = None
                 job.public_url = None
                 job.media_state = MediaState.DELETED
@@ -152,14 +155,36 @@ def process_media_deletions(db: Session, *, now: datetime | None = None, limit: 
         elif task.resource_type == "reference_image" and task.resource_id:
             ref = db.get(ReferenceImage, task.resource_id)
             if ref:
+                enqueue_thumbnail_cleanup(db, ref, now=now)
                 ref.media_state = MediaState.DELETED
                 ref.media_deleted_at = now
         elif task.resource_type == "inspiration" and task.resource_id:
             inspiration = db.get(Inspiration, task.resource_id)
             if inspiration:
+                enqueue_thumbnail_cleanup(db, inspiration, now=now)
                 inspiration.image_object_key = None
                 inspiration.image_url = ""
                 inspiration.media_state = MediaState.DELETED
         counts["completed"] += 1
     db.commit()
     return counts
+
+
+def enqueue_thumbnail_cleanup(db: Session, source, *, now: datetime | None = None) -> None:
+    if source.thumbnail_key:
+        enqueue_deletion(db, bucket_type='reference' if isinstance(source, ReferenceImage) else 'media',
+                         object_key=source.thumbnail_key, resource_type='thumbnail', resource_id=source.id, now=now)
+        source.thumbnail_key = None
+        source.thumbnail_hash = None
+
+
+def refresh_submission_states(db: Session) -> int:
+    from app.services.artworks import effective_submission
+    changed = 0
+    for sub in db.scalars(select(CommunitySubmission).where(CommunitySubmission.status == 'pending').with_for_update(skip_locked=True)).all():
+        state = effective_submission(sub, db.get(GenerationJob, sub.job_id), db.get(User, sub.user_id))
+        if state != 'pending':
+            sub.status, sub.reviewed_at = state, utcnow()
+            changed += 1
+    db.commit()
+    return changed

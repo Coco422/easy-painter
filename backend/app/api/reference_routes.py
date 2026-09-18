@@ -18,6 +18,7 @@ from app.schemas.pagination import PageResponse
 from app.services.reference_images import ReferenceImageValidationError, validate_reference_image
 from app.services.group_policy import resolve_user_policy
 from app.services.media_lifecycle import enqueue_deletion
+from app.services.artworks import timestamp
 from app.services.storage import MinioStorageService, StorageError
 
 
@@ -44,18 +45,13 @@ def _build_reference_image_item(image: ReferenceImage) -> ReferenceImageItem:
         used_count=image.used_count,
         created_at=image.created_at,
         last_used_at=image.last_used_at,
-        media_expires_at=image.media_expires_at,
+        media_expires_at=timestamp(image.media_expires_at),
+        thumbnail_url=f'/api/v1/reference-images/{image.id}/preview?v={image.thumbnail_hash}' if image.thumbnail_key else None,
     )
 
 
 def _reference_cache_control(image: ReferenceImage) -> str:
-    if image.media_expires_at is None:
-        return "private, max-age=3600"
-    expires_at = image.media_expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    remaining = max(0, min(3600, int((expires_at - datetime.now(timezone.utc)).total_seconds())))
-    return f"private, max-age={remaining}"
+    return "private, no-cache, must-revalidate"
 
 
 @reference_router.post("/reference-images", response_model=ReferenceImageItem, status_code=status.HTTP_201_CREATED)

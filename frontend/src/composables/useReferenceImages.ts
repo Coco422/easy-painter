@@ -2,10 +2,11 @@ import { reactive, ref, watch } from 'vue'
 
 import {
   deleteReferenceImage,
-  fetchReferenceImageObjectUrl,
   fetchReferenceImages,
   uploadReferenceImage,
 } from '@/lib/api'
+import { mediaAvailable } from '@/lib/media-state'
+import { useMediaClock } from '@/composables/useMediaClock'
 import { authState } from '@/lib/auth'
 import type { ReferenceImageItem } from '@/lib/types'
 
@@ -20,33 +21,12 @@ const pendingPreviewUrl = ref<string | null>(null)
 const pendingFilename = ref('')
 
 const objectUrls = reactive(new Map<string, string>())
-const pendingObjectUrls = new Set<string>()
 const deletingIds = reactive(new Set<string>())
-let objectUrlGeneration = 0
 
-function getObjectUrl(id: string): string | undefined {
-  const cached = objectUrls.get(id)
-  if (cached) return cached
-  if (pendingObjectUrls.has(id)) return undefined
-  pendingObjectUrls.add(id)
-  const generation = objectUrlGeneration
-  void fetchReferenceImageObjectUrl(id)
-    .then((url) => {
-      if (generation !== objectUrlGeneration) {
-        URL.revokeObjectURL(url)
-        return
-      }
-      objectUrls.set(id, url)
-    })
-    .catch(() => {})
-    .finally(() => {
-      pendingObjectUrls.delete(id)
-    })
-  return undefined
-}
+// Pure lookup: rendering never starts or retries an image request.
+function getObjectUrl(id: string): string | undefined { return objectUrls.get(id) }
 
 function releaseObjectUrls() {
-  objectUrlGeneration += 1
   for (const url of objectUrls.values()) {
     URL.revokeObjectURL(url)
   }
@@ -103,6 +83,7 @@ async function uploadAndSelect(file: File, confirmEvictOldest: boolean, limit: n
 }
 
 function select(item: ReferenceImageItem, limit: number) {
+  if (!mediaAvailable('available', item.media_expires_at, Date.now())) throw new Error('这张参考图已到期，请重新上传。')
   if (selected.value.some((entry) => entry.id === item.id)) return
   if (selected.value.length >= limit) throw new Error(`当前模型单次最多支持 ${limit} 张参考图。`)
   selected.value = [...selected.value, item]
@@ -155,6 +136,12 @@ async function loadHistory(reset = true) {
 }
 
 export function useReferenceImages() {
+  const now = useMediaClock()
+  watch(now, value => {
+    for (const item of selected.value) {
+      if (!mediaAvailable('available', item.media_expires_at, value)) { deselect(item.id); releaseObjectUrl(item.id) }
+    }
+  })
   return {
     selected,
     uploading,

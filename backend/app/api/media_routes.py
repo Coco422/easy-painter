@@ -94,17 +94,7 @@ def stream_job_media(job_id: str, request: Request, token: str = Query(...)):
                 raise _media_error(status.HTTP_404_NOT_FOUND, "图片不存在或已过期。")
         elif subject != job.user_id:
             raise _media_error(status.HTTP_403_FORBIDDEN, "无权访问该图片。")
-        expires_at = payload.get("exp", int(now.timestamp()))
-        media_expires_at = job.media_expires_at
-        if media_expires_at is not None and media_expires_at.tzinfo is None:
-            media_expires_at = media_expires_at.replace(tzinfo=timezone.utc)
-        resource_ttl = (
-            int((media_expires_at - now).total_seconds())
-            if media_expires_at is not None
-            else 3600
-        )
-        max_age = max(0, min(3600, resource_ttl, int(expires_at - now.timestamp())))
-        headers = {"Cache-Control": f"private, max-age={max_age}", "X-Content-Type-Options": "nosniff"}
+        headers = {"Cache-Control": "private, no-cache, must-revalidate", "X-Content-Type-Options": "nosniff"}
         if request.method == "HEAD":
             return StreamingResponse(iter(()), media_type=job.media_content_type or "image/jpeg", headers=headers)
         try:

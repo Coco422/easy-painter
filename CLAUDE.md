@@ -70,13 +70,19 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - Users can also be created by admin or auto-created from `DEFAULT_USERNAME`/`DEFAULT_PASSWORD`/optional `DEFAULT_EMAIL` on first startup
 - JWT tokens stored in `localStorage`, sent as `Authorization: Bearer <token>` header
 - Admin access via secret key (`ADMIN_SECRET_KEY` env var), produces a separate JWT with `role=admin` claim
-- Frontend uses vue-router with routes: `/` (home), `/login`, `/gallery/:username` (public gallery), `/admin`
+- Frontend routes: `/` (community), `/create`, `/history`, `/gallery`, `/gallery/:username` (shared portfolio), `/favorites`, `/profile`, `/login`, `/admin`
 
-### Gallery Logic
+### Artwork, Portfolio and Community Logic
 
-- Logged-in users see only their own succeeded jobs
-- Anonymous visitors see explicitly published succeeded jobs from users with `is_public=True` plus legacy anonymous jobs (`user_id IS NULL`)
-- Public user gallery accessible to anonymous and logged-in visitors at `/gallery/{username}`; only jobs explicitly published with `is_public=True` are included
+- `/history` lists all owned jobs except soft-deleted records, retaining text and billing after media expiry. `/gallery` lists only explicitly joined works; public sharing also requires the user's `is_public` master switch.
+- Favorites are viewer-owned references in `favorites`, never permission grants or retention extensions. Curated inspiration targets canonicalize to their source job to prevent duplicate favorites; inaccessible bookmarks expose only tombstones.
+- Community publication requires explicit `consent_public_prompt: true`, the owner's public master switch and an unexpired original. Admin approval creates an independent permanent copy; simply joining a portfolio never creates a submission. Master switch off withdraws pending submissions, not approved copies.
+- Lock the owner before the job when submitting/reviewing; re-read with `populate_existing` after locking. Recheck expiry after object copy. Pending review never extends retention.
+- Ordinary new generated/reference media defaults to 48h, VIP remains 720h. V9 resets still-live non-VIP existing deadlines to migration +48h and preserves expired/deleting/VIP/pricing records. Later group changes still affect future operations only.
+- Portfolio/favorite media prefer a live independent community copy; original deletion cannot delete the curated object or its thumbnail.
+- Lists use stored 640px WebP thumbnails; `artwork_media_routes` authorizes before conditional 304/HEAD. Private media use stable URLs and `private, no-cache, must-revalidate`; metadata uses `private, no-store`.
+- `ProtectedImage` gates requests on expiry, aborts when invalid, and retries only transient errors once. Never fetch from a template/render helper. `useMediaClock` shares the timer. Old gallery components remain for compatibility but are not routed.
+- See `docs/v0.19.0-release.md` for rollout, bounded thumbnail warmup, and verification evidence.
 
 ### Announcement Logic
 
@@ -94,6 +100,10 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 ### Backend Structure (`backend/app/`)
 
+- `api/artwork_routes.py` — History, portfolio, reference favorites, explicit submissions and review
+- `api/artwork_media_routes.py` — Stable authorized original/thumbnail and reference preview streams
+- `services/artworks.py` — Central access resolution, permanent-copy precedence and batched list metadata
+- `services/thumbnails.py` — Bounded WebP derivatives, failure backoff, skip-locked backfill
 - `api/routes.py` — Job endpoints (meta, idempotent creation, jobs CRUD, gallery, liveness/readiness)
 - `api/auth_routes.py` — Login, registration, email-code, password-reset, and admin verify endpoints
 - `api/user_routes.py` — User profile, email binding, redemption, and credit history
@@ -120,11 +130,14 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 - `App.vue` — Router shell with persistent header
 - `router.ts` — Vue Router config
-- `pages/HomePage.vue` — Generate panel + gallery (main page)
+- `pages/CreatePage.vue` — Generation panel and active jobs
+- `pages/InspirationPage.vue` — Permanent community feed
+- `pages/ArtworkLibraryPage.vue` — History, personal/shared portfolio and favorites
+- `components/ArtworkModal.vue` — Gallery membership, favorites, explicit community consent and lifecycle actions
 - `pages/LoginPage.vue` — Login, registration, and email-code password reset
 - `components/AnnouncementBanner.vue` — Audience-filtered system banners
 - `components/VersionReleaseDialog.vue` — Build version, changelog timeline, and read-only GitHub Release check
-- `pages/PublicGalleryPage.vue` — Per-user public gallery view
+- `pages/admin/sections/AdminCommunitySubmissions.vue` — Explicit user submission review queue
 - `pages/admin/AdminPage.vue` — Naive UI admin shell with lazy-loaded overview, upstream, model, user, job, billing, and announcement sections
 - `components/AppHeader.vue` — Header with auth-aware navigation
 - `lib/auth.ts` — Reactive auth state, login/logout/admin-verify functions

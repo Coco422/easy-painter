@@ -39,6 +39,7 @@ from app.services.mailer import EmailDeliveryError, SmtpEmailSender
 from app.services.billing import redeem_credits
 from app.services.redis_client import get_redis
 from app.services.group_policy import STANDARD_POLICY, resolve_user_policy
+from app.services.community import withdraw_pending
 
 logger = logging.getLogger(__name__)
 user_router = APIRouter()
@@ -81,10 +82,13 @@ def update_me(
     current_user: User = Depends(require_current_user),
     db: Session = Depends(get_db),
 ) -> UserResponse:
+    current_user = db.scalar(select(User).where(User.id == current_user.id).with_for_update().execution_options(populate_existing=True))
     if body.display_name is not None:
         current_user.display_name = body.display_name
     if body.is_public is not None:
         current_user.is_public = body.is_public
+        if not body.is_public:
+            withdraw_pending(db, current_user.id)
     db.commit()
     db.refresh(current_user)
     return _user_response(current_user, db)

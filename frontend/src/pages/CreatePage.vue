@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { useRoute, useRouter } from 'vue-router'
 
+import ArtworkModal from '@/components/ArtworkModal.vue'
+import { fetchArtwork, type Artwork } from '@/lib/artworks'
 import CurrentJobCard from '@/components/CurrentJobCard.vue'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
@@ -34,6 +36,8 @@ const selectedModel = ref('')
 const selectedSize = ref<ImageSize>('auto')
 const selectedBatchCount = ref<BatchCount>(1)
 const { selected: selectedReferenceImage } = useReferenceImages()
+const selectedArtwork = ref<Artwork | null>(null)
+const artworkAction = ref<'gallery' | undefined>()
 const activeJobs = ref<JobDetailResponse[]>([])
 const loading = ref(true)
 const submitting = ref(false)
@@ -338,10 +342,11 @@ async function retryJob(job: JobDetailResponse) {
   }
 }
 
-function handleAddToGallery(job: JobDetailResponse) {
-  removeActiveJob(job.job_id)
-  feedback.value = '作品已加入画廊。'
+async function openArtwork(job: JobDetailResponse, action?: 'gallery') {
+  try { selectedArtwork.value = await fetchArtwork('job', job.job_id); artworkAction.value = action }
+  catch (error) { feedback.value = error instanceof Error ? error.message : '作品读取失败。' }
 }
+function handleAddToGallery(job: JobDetailResponse) { void openArtwork(job, 'gallery') }
 
 async function bootstrap() {
   try {
@@ -398,6 +403,7 @@ onMounted(() => {
   <p v-if="feedback" class="feedback-banner">{{ feedback }}</p>
 
   <div v-if="activeJobs.length > 0" class="current-jobs-stack">
+    <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
     <CurrentJobCard
       v-for="job in activeJobs"
       :key="job.job_id"
@@ -406,6 +412,7 @@ onMounted(() => {
       @retry="retryJob"
       @dismiss="removeActiveJob"
       @add-to-gallery="handleAddToGallery"
+      @details="openArtwork($event)"
       @refresh-media="refreshJobMedia"
     />
   </div>

@@ -27,6 +27,12 @@
 └── .env.example
 ```
 
+## 作品管理与图片保留期
+
+v0.19.0 将生图历史、个人画廊、收藏和社区投稿分开：历史保存全部任务与过期后的文字记录；个人画廊由用户主动加入作品；收藏仅保存引用。社区投稿需要开启个人中心公开总开关、确认公开图片与提示词，并由管理员审核通过。已收录内容使用独立长期副本，原作到期或撤回不影响社区版本。
+
+非 VIP 生成图与参考图默认保留 48 小时，卡片和详情显示实际截止时间；VIP 保留原用户组策略。**升级时仍有效的非 VIP 存量图片将统一改为迁移后 48 小时**，不会恢复已过期或删除中的图片。升级涉及 V9、缩略图补齐和 API/worker/dispatcher/前端同步，操作前阅读 [v0.19.0 升级说明与验收](docs/v0.19.0-release.md)。
+
 ## 版本与发布
 
 项目使用标准语义化版本 `vX.Y.Z`。根目录 [`VERSION`](VERSION) 是当前版本号的唯一来源，[`CHANGELOG.md`](CHANGELOG.md) 是发布说明的唯一来源；维护者在发布时用中文人工概括两个版本之间的用户可感知变化。产品方向记录在 [`ROADMAP.md`](ROADMAP.md)。
@@ -278,7 +284,15 @@ docker buildx build --platform linux/amd64 -f deploy/nginx/Dockerfile -t your-re
 - `GET /api/v1/jobs/{job_id}`
 - `GET /api/v1/health/live`
 - `GET /api/v1/health/ready`
-- `GET /api/v1/gallery`
+- `GET /api/v1/history`（全部生成记录，分页、状态、提示词与日期筛选）
+- `GET /api/v1/portfolios/{username}`（个人作品集）
+- `PUT/DELETE /api/v1/jobs/{job_id}/gallery`（加入或移出画廊）
+- `GET /api/v1/favorites`（全部、可用或失效收藏）
+- `PUT/DELETE /api/v1/favorites/{job|inspiration}/{id}`（引用收藏）
+- `POST/DELETE /api/v1/jobs/{job_id}/community-submission`（主动投稿与撤回）
+- `GET /api/v1/admin/community-submissions`、`PUT /api/v1/admin/community-submissions/{job_id}`（审核）
+- `GET/HEAD /api/v1/artworks/{job|inspiration}/{id}/file?variant=thumbnail|original`（鉴权图片）
+- `GET /api/v1/gallery`（旧版兼容接口）
 - `GET /api/v1/healthz`
 
 Admin 通知接口保持独立管理员令牌认证：

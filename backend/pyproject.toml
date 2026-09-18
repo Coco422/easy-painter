@@ -1,6 +1,6 @@
 [project]
 name = "easy-painter-backend"
-version = "0.18.0"
+version = "0.19.0"
 description = "FastAPI backend for the Easy Painter public image generation site."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.28.1",
     "minio>=7.2.15",
     "orjson>=3.10.16",
+    "pillow>=11.3.0",
     "psycopg[binary]>=3.2.6",
     "pydantic-settings>=2.8.1",
     "PyJWT>=2.8.0",

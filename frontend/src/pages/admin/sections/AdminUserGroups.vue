@@ -21,7 +21,7 @@ const editingCode = ref<string | null>(null)
 const formRef = ref<FormInst | null>(null)
 const form = reactive({
   code: '', name: '', description: '', billing_multiplier_bps: 10000,
-  generated_retention_hours: 24, reference_retention_hours: 24, max_reference_images: 3,
+  generated_retention_hours: 48, reference_retention_hours: 48, max_reference_images: 3,
   is_enabled: true, is_default: false,
 })
 const rules: FormRules = {
@@ -38,7 +38,7 @@ async function loadGroups() {
   loading.value = true
   try { groups.value = await adminFetchUserGroups() } catch (error) { handleError(error, '用户组加载失败。') } finally { loading.value = false }
 }
-function resetForm() { Object.assign(form, { code: '', name: '', description: '', billing_multiplier_bps: 10000, generated_retention_hours: 24, reference_retention_hours: 24, max_reference_images: 3, is_enabled: true, is_default: false }) }
+function resetForm() { Object.assign(form, { code: '', name: '', description: '', billing_multiplier_bps: 10000, generated_retention_hours: 48, reference_retention_hours: 48, max_reference_images: 3, is_enabled: true, is_default: false }) }
 function openCreate() { editingCode.value = null; resetForm(); formRef.value?.restoreValidation(); modalOpen.value = true }
 function openEdit(group: UserGroup) { editingCode.value = group.code; Object.assign(form, group); formRef.value?.restoreValidation(); modalOpen.value = true }
 async function saveGroup() {

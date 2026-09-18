@@ -132,6 +132,16 @@ def generate_image_task(self, job_id: str) -> None:
                 return
             stored_object_key = None
             logger.info("Generation job %s succeeded object_key=%s.", job.id, stored.object_key)
+            # The delivered image and charge are already committed. Preview
+            # failures must never enter the generation/refund error path.
+            try:
+                from app.services.thumbnails import prepare_thumbnail
+                source = db.scalar(select(GenerationJob).where(GenerationJob.id == job.id)
+                                   .with_for_update().execution_options(populate_existing=True))
+                prepare_thumbnail(db, source, data=result.image_bytes, storage=storage)
+            except Exception:
+                db.rollback()
+                logger.warning("Preview deferred for delivered job %s.", job.id)
         except UpstreamServiceError as exc:
             logger.warning(
                 "Upstream generation error for job %s retryable=%s: %s",
@@ -242,3 +252,10 @@ def _can_retry(task) -> bool:
     if max_retries is None:
         return True
     return task.request.retries < max_retries
+
+
+@celery_app.task(name="app.backfill_media_thumbnails", ignore_result=True)
+def backfill_media_thumbnails() -> None:
+    from app.services.thumbnails import backfill_thumbnails
+    with SessionLocal() as db:
+        backfill_thumbnails(db)

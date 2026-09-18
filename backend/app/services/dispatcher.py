@@ -15,9 +15,9 @@ from app.models.outbox_event import OutboxEvent, OutboxEventStatus
 from app.services.billing import reconcile_job_billing, reconcile_user_balances
 from app.services.health import DISPATCHER_HEARTBEAT_KEY
 from app.services.job_lifecycle import mark_generation_failed
-from app.services.media_lifecycle import process_media_deletions, scan_expired_media
+from app.services.media_lifecycle import process_media_deletions, scan_expired_media, refresh_submission_states
 from app.services.redis_client import redis_client
-from app.services.tasks import generate_image_task
+from app.services.tasks import generate_image_task, backfill_media_thumbnails
 
 
 configure_logging()
@@ -156,11 +156,16 @@ def main() -> None:
     last_watchdog = 0.0
     last_reconciliation = 0.0
     last_media_cleanup = 0.0
+    last_submission_refresh = 0.0
     logger.info("Dispatcher started.")
     while not _stopping:
         loop_started = time.monotonic()
         try:
             write_heartbeat()
+            if loop_started - last_submission_refresh >= 30:
+                with SessionLocal() as submission_db:
+                    refresh_submission_states(submission_db)
+                last_submission_refresh = loop_started
             counts = dispatch_pending_events()
             if any(counts.values()):
                 logger.info("Outbox dispatch result=%s", counts)
@@ -186,6 +191,11 @@ def main() -> None:
                 last_media_cleanup = loop_started
         except Exception:
             logger.exception("Dispatcher loop failed.")
+        try:
+            if redis_client.set("easy-painter:thumbnail-backfill", "1", nx=True, ex=60):
+                backfill_media_thumbnails.apply_async(expires=60)
+        except Exception:
+            logger.warning("Could not schedule thumbnail maintenance")
         elapsed = time.monotonic() - loop_started
         time.sleep(max(0.1, settings.outbox_poll_seconds - elapsed))
     logger.info("Dispatcher stopped.")

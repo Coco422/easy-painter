@@ -19,29 +19,24 @@ import {
   useMessage,
   type DataTableColumns,
 } from 'naive-ui'
-import { Check, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 
 import {
   ApiError,
   adminCreateInspiration,
-  adminCreateInspirationFromJob,
   adminDeleteInspiration,
-  adminFetchInspirationCandidates,
   adminFetchInspirations,
   adminUpdateInspiration,
 } from '@/lib/api'
-import type { AdminInspirationCandidate, AdminInspirationItem } from '@/lib/types'
+import AdminCommunitySubmissions from './AdminCommunitySubmissions.vue'
+import ProtectedImage from '@/components/ProtectedImage.vue'
+import type { AdminInspirationItem } from '@/lib/types'
 
 const emit = defineEmits<{ 'auth-expired': [] }>()
 const message = useMessage()
 const dialog = useDialog()
 const loading = ref(false)
-const candidates = ref<AdminInspirationCandidate[]>([])
 const inspirations = ref<AdminInspirationItem[]>([])
-const collectingId = ref('')
-const candidatePage = ref(1)
-const candidatePageSize = ref(25)
-const candidateTotal = ref(0)
 const inspirationPage = ref(1)
 const inspirationPageSize = ref(25)
 const inspirationTotal = ref(0)
@@ -92,12 +87,7 @@ function parseCategories(value: string) {
 async function load() {
   loading.value = true
   try {
-    const [candidateData, permanent] = await Promise.all([
-      adminFetchInspirationCandidates({ page: candidatePage.value, pageSize: candidatePageSize.value }),
-      adminFetchInspirations({ page: inspirationPage.value, pageSize: inspirationPageSize.value }),
-    ])
-    candidates.value = candidateData.items
-    candidateTotal.value = candidateData.total
+    const permanent = await adminFetchInspirations({ page: inspirationPage.value, pageSize: inspirationPageSize.value })
     inspirations.value = permanent.items
     inspirationTotal.value = permanent.total
   } catch (error) {
@@ -105,30 +95,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-async function collect(candidate: AdminInspirationCandidate) {
-  collectingId.value = candidate.job_id
-  try {
-    await adminCreateInspirationFromJob(candidate.job_id)
-    await load()
-    message.success('已收录为独立永久社区内容。')
-  } catch (error) {
-    handleError(error, '收录失败。')
-  } finally {
-    collectingId.value = ''
-  }
-}
-
-function changeCandidatePage(nextPage: number) {
-  candidatePage.value = nextPage
-  void load()
-}
-
-function changeCandidatePageSize(nextPageSize: number) {
-  candidatePageSize.value = nextPageSize
-  candidatePage.value = 1
-  void load()
 }
 
 function changeInspirationPage(nextPage: number) {
@@ -242,18 +208,10 @@ function remove(item: AdminInspirationItem) {
   })
 }
 
-const candidateColumns: DataTableColumns<AdminInspirationCandidate> = [
-  { title: '预览', key: 'image_url', width: 78, render: row => row.image_url ? h('img', { src: row.image_url, alt: '', style: 'width:48px;height:48px;object-fit:cover;border-radius:4px' }) : '-' },
-  { title: '提示词', key: 'prompt', minWidth: 280, ellipsis: { tooltip: true } },
-  { title: '作者', key: 'display_name', width: 130, render: row => row.display_name || row.username || '-' },
-  { title: '完成时间', key: 'finished_at', width: 175, render: row => formatDate(row.finished_at) },
-  { title: '操作', key: 'actions', width: 110, fixed: 'right', render: row => h(NButton, { size: 'tiny', type: 'primary', loading: collectingId.value === row.job_id, onClick: () => collect(row) }, { icon: () => h(Check, { size: 14 }), default: () => '收录' }) },
-]
-
 const inspirationColumns: DataTableColumns<AdminInspirationItem> = [
-  { title: '预览', key: 'image_url', width: 78, render: row => h('img', { src: row.image_url, alt: '', style: 'width:48px;height:48px;object-fit:cover;border-radius:4px' }) },
+  { title: '预览', key: 'image_url', width: 78, render: row => h(ProtectedImage, { src: row.thumbnail_url, alt: row.title, style: 'width:64px;height:64px;min-height:0' }) },
   { title: '标题', key: 'title', minWidth: 180 },
-  { title: '来源', key: 'source', width: 150, render: row => h(NTag, { size: 'small', bordered: false }, { default: () => row.source === 'community-curated' ? '管理员精选' : row.source }) },
+  { title: '来源', key: 'source', width: 150, render: row => h(NTag, { size: 'small', bordered: false }, { default: () => row.source === 'community-curated' ? '已审核投稿 · 长期保存' : `${row.source} · 长期保存` }) },
   { title: '收录时间', key: 'created_at', width: 175, render: row => formatDate(row.created_at) },
   {
     title: '操作', key: 'actions', width: 170, fixed: 'right', render: row => h(NSpace, { size: 6, wrap: false }, { default: () => [
@@ -272,7 +230,7 @@ onMounted(load)
       <div>
         <p class="section-kicker">Community</p>
         <h1>社区内容</h1>
-        <span>公开作品通过审核后复制为永久社区资产；原作品到期或删除不会影响收录内容。</span>
+        <span>用户主动投稿，通过审核后复制为永久社区资产；原作品到期或删除不会影响收录内容。</span>
       </div>
       <NSpace>
         <NButton type="primary" @click="importOpen = true"><template #icon><Plus :size="15" /></template>手动导入</NButton>
@@ -282,13 +240,8 @@ onMounted(load)
 
     <NSpin :show="loading">
       <NTabs type="line" animated>
-        <NTabPane name="candidates" :tab="`收录候选（${candidateTotal}）`">
-          <NEmpty v-if="!loading && candidates.length === 0" description="暂无符合收录条件的公开作品" class="section-empty" />
-          <NDataTable v-else :columns="candidateColumns" :data="candidates" :row-key="row => row.job_id" size="small" :single-line="false" :scroll-x="780" :max-height="620" virtual-scroll />
-          <div v-if="candidateTotal > 0" class="table-pagination">
-            <span>共 {{ candidateTotal }} 个候选</span>
-            <NPagination :page="candidatePage" :page-size="candidatePageSize" :item-count="candidateTotal" :page-sizes="pageSizes" show-size-picker @update:page="changeCandidatePage" @update:page-size="changeCandidatePageSize" />
-          </div>
+        <NTabPane name="submissions" tab="社区投稿审核">
+          <AdminCommunitySubmissions @changed="load" @auth-expired="emit('auth-expired')" />
         </NTabPane>
         <NTabPane name="published" :tab="`已收录内容（${inspirationTotal}）`">
           <NEmpty v-if="!loading && inspirations.length === 0" description="还没有永久社区内容" class="section-empty" />

@@ -1,3 +1,4 @@
+from app.models.artwork import Favorite, CommunitySubmission
 from app.models.announcement import Announcement
 from app.models.credit_transaction import CreditTransaction, CreditTransactionType
 from app.models.gallery_like import GalleryLike

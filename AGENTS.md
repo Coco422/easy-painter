@@ -12,10 +12,11 @@ make deploy     # full containerized build + up
 cd backend && uv run pytest        # all tests
 cd backend && uv run pytest tests/test_reference_images.py
 cd frontend && npx vue-tsc --noEmit  # typecheck
+cd frontend && node --experimental-strip-types --test tests/media-state.test.mjs  # Node 22+ media policy tests
 ```
 
 - Backend uses `uv` (not pip/venv). Run tests from `backend/` with `uv run pytest`.
-- Backend tests are **pure unit tests** (no conftest; they use `monkeypatch`/fake objects) — no live Postgres/Redis/RustFS needed.
+- Backend tests use `monkeypatch`/fake objects and in-memory SQLite fixtures — no live Postgres/Redis/RustFS needed. PostgreSQL locking and Flyway migrations need separate isolated rehearsal.
 - `frontend` has no test/lint script; `npm run build` = `vue-tsc --noEmit && vite build` (typecheck + build).
 - Production backup and disaster recovery use `scripts/backup-production.sh`; read `docs/backup-and-disaster-recovery.md` before changing or running recovery commands.
 

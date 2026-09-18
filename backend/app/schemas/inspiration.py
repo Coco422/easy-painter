@@ -12,6 +12,7 @@ class InspirationItemResponse(BaseModel):
     description: str | None = None
     prompt: str
     image_url: str
+    thumbnail_url: str | None = None
     source: str  # "awesome-gpt-image-2", "gallery", etc.
     source_url: str | None = None
     author_name: str | None = None
@@ -47,6 +48,7 @@ class CreateInspirationRequest(BaseModel):
 class CreateInspirationResponse(BaseModel):
     id: str
     image_url: str
+    thumbnail_url: str | None = None
 
 
 class BatchInspirationItem(BaseModel):
@@ -81,6 +83,7 @@ class AdminInspirationItem(BaseModel):
     description: str | None = None
     prompt: str
     image_url: str
+    thumbnail_url: str | None = None
     image_object_key: str | None = None
     external_id: str | None = None
     source: str

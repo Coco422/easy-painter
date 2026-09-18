@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NImage, type ImageInst } from 'naive-ui'
 
-import RetryableImage from '@/components/RetryableImage.vue'
+import ProtectedImage from '@/components/ProtectedImage.vue'
+import MediaExpiry from '@/components/MediaExpiry.vue'
+import { getAuthHeader } from '@/lib/auth'
+import { useMediaClock } from '@/composables/useMediaClock'
+import { mediaAvailable } from '@/lib/media-state'
 import { imageDownloadFilename } from '@/lib/image-download'
 import { resolveImageLayout } from '@/lib/image-layout'
 import type { JobDetailResponse } from '@/lib/types'
@@ -17,13 +20,12 @@ const emit = defineEmits<{
   dismiss: [jobId: string]
   addToGallery: [job: JobDetailResponse]
   refreshMedia: [job: JobDetailResponse]
+  details: [job: JobDetailResponse]
 }>()
 
-const CLOCK_INTERVAL_MS = 1000
 const TYPE_INTERVAL_MS = 54
 const MESSAGE_HOLD_MS = 2200
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
-const RESULT_IMAGE_RETRY_DELAYS_MS = [1500, 5000, 15000, 30000]
 
 const MAIN_LOADING_LINES = [
   '给云层办理临时身份证',
@@ -65,20 +67,22 @@ const LOADING_LOG_LINES = [
 
 const LOADING_STAGES = ['播种轮廓', '驯服光线', '烘焙细节', '封装成图']
 
-const now = ref(Date.now())
+const now = useMediaClock()
 const typedText = ref('')
 const activeMessageIndex = ref(0)
 const prefersReducedMotion = ref(false)
 const actualImageAspectRatio = ref<string | null>(null)
 const resultImageLoaded = ref(false)
 const mediaRefreshRequested = ref(false)
-const imagePreviewRef = ref<ImageInst | null>(null)
+const downloadError = ref('')
+let downloadController: AbortController | undefined
 const downloading = ref(false)
-let clockTimer: number | undefined
 let typingTimer: number | undefined
 let messageTimer: number | undefined
 let reducedMotionQuery: MediaQueryList | null = null
 
+const available = computed(() => !!props.job && mediaAvailable(props.job.media_state ?? 'none', props.job.media_expires_at, now.value))
+watch(available, value => { if (!value) downloadController?.abort() })
 const liveJob = computed(() => (props.job && isLiveStatus(props.job.status) ? props.job : null))
 const loadingSeed = computed(() => {
   if (!liveJob.value) return 0
@@ -161,17 +165,20 @@ function requestMediaRefresh() {
 
 function openImagePreview() {
   if (!resultImageLoaded.value) return
-  imagePreviewRef.value?.showPreview()
+  if (props.job && available.value) emit('details', props.job)
 }
 
 async function downloadImage() {
   const job = props.job
-  if (!job || job.status !== 'succeeded' || !job.image_url || downloading.value) return
+  if (!job || job.status !== 'succeeded' || !job.image_url || !available.value || downloading.value) return
   downloading.value = true
+  downloadError.value = ''
+  downloadController = new AbortController()
   try {
-    const response = await fetch(job.image_url)
+    const response = await fetch(job.image_url, { headers: getAuthHeader(), signal: downloadController.signal })
     if (!response.ok) throw new Error('download failed')
     const blob = await response.blob()
+    if (!available.value) return
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
@@ -181,7 +188,7 @@ async function downloadImage() {
     anchor.remove()
     URL.revokeObjectURL(url)
   } catch {
-    window.open(job.image_url, '_blank', 'noopener,noreferrer')
+    if (!downloadController.signal.aborted) downloadError.value = '图片暂时无法下载。'
   } finally {
     downloading.value = false
   }
@@ -276,11 +283,6 @@ watch(
 )
 
 onMounted(() => {
-  now.value = Date.now()
-  clockTimer = window.setInterval(() => {
-    now.value = Date.now()
-  }, CLOCK_INTERVAL_MS)
-
   reducedMotionQuery = window.matchMedia(REDUCED_MOTION_QUERY)
   prefersReducedMotion.value = reducedMotionQuery.matches
   reducedMotionQuery.addEventListener('change', updateReducedMotion)
@@ -288,9 +290,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (clockTimer !== undefined) {
-    window.clearInterval(clockTimer)
-  }
+  downloadController?.abort()
   clearTypingTimers()
   reducedMotionQuery?.removeEventListener('change', updateReducedMotion)
 })
@@ -311,6 +311,8 @@ onBeforeUnmount(() => {
         <span>{{ job.credit_cost }} 丝 / 张</span>
         <strong :class="`billing-${job.billing_status}`">{{ billingLabel }}</strong>
       </div>
+      <MediaExpiry v-if="job.status === 'succeeded'" :state="job.media_state ?? 'none'" :expires-at="job.media_expires_at" :permanent="job.retention_kind === 'permanent'" />
+      <p v-if="downloadError" class="job-error">{{ downloadError }}</p>
       <p v-if="isLiveStatus(job.status) && job.error_message" class="job-hint">{{ job.error_message }}</p>
       <p v-if="job.status === 'failed'" class="job-error">{{ job.error_message || '任务已失败，请重试或结束。' }}</p>
       <p v-if="job.status === 'failed' && job.billing_status === 'refunded'" class="job-refund-note">
@@ -320,7 +322,7 @@ onBeforeUnmount(() => {
         <button type="button" class="secondary-button" @click="emit('retry', job)">重新生成</button>
         <button type="button" class="ghost-button" @click="emit('dismiss', job.job_id)">结束</button>
       </div>
-      <div v-if="job.status === 'succeeded' && job.image_url" class="current-job-actions">
+      <div v-if="job.status === 'succeeded' && available" class="current-job-actions">
         <button type="button" class="secondary-button" @click="emit('addToGallery', job)">加入画廊</button>
         <button type="button" class="ghost-button" :disabled="downloading" :aria-busy="downloading" @click="downloadImage">
           {{ downloading ? '下载中…' : '下载图片' }}
@@ -334,43 +336,18 @@ onBeforeUnmount(() => {
       :class="{ 'is-landscape': imageLayout.ratio >= 1.45 }"
       :style="{ aspectRatio: displayedImageAspectRatio }"
     >
-      <RetryableImage
-        v-if="job.image_url"
+      <ProtectedImage
+        v-if="job.status === 'succeeded'"
         :src="job.image_url"
-        :retry-delays="RESULT_IMAGE_RETRY_DELAYS_MS"
-        :width="imageLayout.width"
-        :height="imageLayout.height"
+        :state="job.media_state"
+        :expires-at="job.media_expires_at"
         class="current-job-result-image"
-        :class="{ 'is-previewable': resultImageLoaded }"
         alt="当前任务结果图"
-        :role="resultImageLoaded ? 'button' : undefined"
-        :tabindex="resultImageLoaded ? 0 : undefined"
-        :aria-label="resultImageLoaded ? '预览当前任务结果图' : undefined"
-        @load="markResultImageLoaded"
-        @failed="requestMediaRefresh"
+        eager
+        @loaded="markResultImageLoaded"
+        @invalid="requestMediaRefresh"
         @click="openImagePreview"
-        @keydown.enter.prevent="openImagePreview"
-        @keydown.space.prevent="openImagePreview"
-      >
-        <template #status="{ loaded, failed, retrying, retryCount, maxRetries, retry }">
-          <div
-            v-if="!loaded"
-            class="result-image-skeleton"
-            :class="{ 'is-error': failed }"
-            role="status"
-            aria-live="polite"
-          >
-            <span v-if="failed">图片暂时不可用</span>
-            <span v-else-if="retrying">连接不稳定，正在自动重试（{{ retryCount }}/{{ maxRetries }}）</span>
-            <span v-else>成图载入中</span>
-            <small v-if="failed">源站恢复后可直接重新加载，无需重新生成</small>
-            <small v-else-if="!retrying">
-              {{ imageLayout.estimated ? '预估比例' : `${imageLayout.width} × ${imageLayout.height}` }}
-            </small>
-            <button v-if="failed" type="button" class="image-retry-button" @click="retry">重新加载图片</button>
-          </div>
-        </template>
-      </RetryableImage>
+      />
       <div
         v-else-if="!job.image_url && isLiveStatus(job.status)"
         class="loading-ritual-panel"
@@ -407,13 +384,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <NImage
-      v-if="job.image_url"
-      ref="imagePreviewRef"
-      :src="job.image_url"
-      alt=""
-      class="current-job-preview-source"
-      aria-hidden="true"
-    />
+
   </section>
 </template>

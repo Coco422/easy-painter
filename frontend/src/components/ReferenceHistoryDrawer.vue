@@ -2,6 +2,10 @@
 import { ImagePlus, Loader2, X } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import ProtectedImage from '@/components/ProtectedImage.vue'
+import MediaExpiry from '@/components/MediaExpiry.vue'
+import { mediaAvailable } from '@/lib/media-state'
+import { useMediaClock } from '@/composables/useMediaClock'
 import { authState } from '@/lib/auth'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import type { ReferenceImageItem } from '@/lib/types'
@@ -27,7 +31,6 @@ const {
   pendingPreviewUrl,
   pendingFilename,
   deletingIds,
-  getObjectUrl,
   remove,
   loadHistory,
 } = useReferenceImages()
@@ -36,9 +39,7 @@ const loadError = ref('')
 const hasItems = computed(() => uploading.value || history.value.length > 0)
 const referenceLimit = computed(() => authState.user?.group?.max_reference_images)
 
-function formatExpiry(value: string | null | undefined) {
-  return value ? `到期：${new Date(value).toLocaleString()}` : '长期保留'
-}
+const now = useMediaClock()
 
 watch(
   () => props.open,
@@ -65,7 +66,7 @@ function close() {
 }
 
 function handleSelect(item: ReferenceImageItem) {
-  if (props.selectionDisabled) return
+  if (props.selectionDisabled || !mediaAvailable('available', item.media_expires_at, now.value)) return
   loadError.value = ''
   if (selected.value.some((entry) => entry.id === item.id)) deselect(item.id)
   else if (selected.value.length < props.selectionLimit) emit('select', item)
@@ -127,15 +128,14 @@ async function handleRemove(item: ReferenceImageItem) {
               tabindex="0"
               :title="item.filename"
               :aria-pressed="selected.some((entry) => entry.id === item.id)"
-              :aria-disabled="selectionDisabled"
+              :aria-disabled="selectionDisabled || !mediaAvailable('available', item.media_expires_at, now)"
               :data-selection-full="!selected.some((entry) => entry.id === item.id) && selected.length >= selectionLimit"
               @click="handleSelect(item)"
               @keydown="handleItemKeydown($event, item)"
             >
-              <img v-if="getObjectUrl(item.id)" :src="getObjectUrl(item.id)" :alt="item.filename" loading="lazy" />
-              <span v-else class="reference-drawer-placeholder"><Loader2 :size="20" /></span>
+              <ProtectedImage :src="item.thumbnail_url" :expires-at="item.media_expires_at" :alt="item.filename" />
               <span v-if="item.used_count > 0" class="reference-drawer-badge">用过 {{ item.used_count }} 次</span>
-              <span class="reference-drawer-expiry">{{ formatExpiry(item.media_expires_at) }}</span>
+              <MediaExpiry class="reference-drawer-expiry" :expires-at="item.media_expires_at" state="available" />
               <button
                 type="button"
                 class="reference-drawer-delete"

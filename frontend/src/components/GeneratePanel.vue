@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ProtectedImage from '@/components/ProtectedImage.vue'
+import MediaExpiry from '@/components/MediaExpiry.vue'
 import { Check, ChevronDown, History, ImagePlus, Loader2, TriangleAlert, X } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
@@ -240,9 +242,11 @@ watch(sizePickerOpen, (open) => {
 
         <div v-if="selected.length || uploading" class="reference-chips">
           <div v-for="(item, index) in selected" :key="item.id" class="reference-chip">
-            <img v-if="getObjectUrl(item.id)" :src="getObjectUrl(item.id)" :alt="item.filename" />
-            <span v-else class="reference-chip-placeholder" aria-hidden="true"><ImagePlus :size="18" /></span>
-            <span class="reference-chip-name">参考图 {{ index + 1 }} · {{ item.filename }}</span>
+            <ProtectedImage :src="getObjectUrl(item.id) || item.thumbnail_url" :expires-at="item.media_expires_at" :alt="item.filename" />
+            <span class="reference-chip-details">
+              <span class="reference-chip-name">参考图 {{ index + 1 }} · {{ item.filename }}</span>
+              <MediaExpiry class="selected-reference-expiry" state="available" :expires-at="item.media_expires_at" />
+            </span>
             <button type="button" :aria-label="`取消使用参考图 ${index + 1}`" :disabled="submitting || uploadingBatch" @click="deselect(item.id)">
               <X :size="14" />
             </button>
@@ -420,3 +424,10 @@ watch(sizePickerOpen, (open) => {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.reference-chip :deep(.protected-image) { width: 38px; height: 38px; min-height: 0; flex: 0 0 38px; border-radius: var(--radius-sm); }
+.reference-chip :deep(.image-placeholder) { min-height: 0; padding: 2px; font-size: 9px; }
+.reference-chip-details { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.selected-reference-expiry { font-size: 10px; white-space: normal; }
+</style>

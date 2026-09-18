@@ -44,7 +44,7 @@ export class ApiError extends Error {
   }
 }
 
-async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
+export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const auth = getAuthHeader()
   for (const [key, value] of Object.entries(auth)) {
@@ -242,7 +242,7 @@ export function bindEmail(email: string, emailCode: string) {
 }
 
 // Admin APIs use separate admin token
-async function adminApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
+export async function adminApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const auth = getAdminAuthHeader()
   for (const [key, value] of Object.entries(auth)) {

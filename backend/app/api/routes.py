@@ -21,6 +21,7 @@ from app.core.auth import get_current_user_optional, require_current_user
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.gallery_like import GalleryLike
+from app.models.artwork import Favorite
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.job_charge import JobCharge
 from app.models.media import MediaState
@@ -60,6 +61,7 @@ from app.services.reference_images import ReferenceImagePayload, ReferenceImageV
 from app.services.redis_client import get_redis
 from app.services.release_updates import ReleaseLookupError, fetch_latest_release
 from app.services.storage import MinioStorageService, StorageError
+from app.services.artworks import resolve_asset, media_url, timestamp, available_job_clause, artwork_items
 
 
 logger = logging.getLogger(__name__)
@@ -610,10 +612,13 @@ def _build_job_detail_response(
     viewer_user_id: str | None = None,
 ) -> JobDetailResponse:
     charge = db.scalar(select(JobCharge).where(JobCharge.job_id == job.id))
+    asset = resolve_asset(db, 'job', job.id, viewer_user_id)
     return JobDetailResponse(
         job_id=job.id,
         status=job.status.value,
-        image_url=_job_image_url(job, viewer_user_id),
+        image_url=media_url('job', job.id, asset) if asset else None,
+        thumbnail_url=media_url('job', job.id, asset, 'thumbnail') if asset and asset.thumbnail_key else None,
+        retention_kind='permanent' if asset and asset is not job else 'temporary',
         prompt=job.prompt,
         revised_prompt=job.revised_prompt,
         model=job.model,
@@ -631,8 +636,8 @@ def _build_job_detail_response(
         refunded_at=charge.refunded_at if charge else None,
         created_at=job.created_at,
         finished_at=job.finished_at,
-        media_state=job.media_state.value,
-        media_expires_at=job.media_expires_at,
+        media_state='available' if asset else job.media_state.value,
+        media_expires_at=timestamp(job.media_expires_at) if asset is job or not asset else None,
     )
 
 
@@ -679,7 +684,7 @@ def toggle_job_public(
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
     if not job.is_public:
-        if not _job_has_available_media(job):
+        if not resolve_asset(db, 'job', job_id, current_user.id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="只能公开仍在保留期内的已完成作品。",
@@ -729,10 +734,17 @@ def toggle_job_favorite(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user),
 ) -> dict[str, bool]:
-    job = db.get(GenerationJob, job_id)
+    job = db.scalar(select(GenerationJob).where(GenerationJob.id == job_id).with_for_update())
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在。")
-    job.is_favorite = not job.is_favorite
+    favorite = db.scalar(select(Favorite).where(Favorite.user_id == current_user.id, Favorite.job_id == job_id))
+    if favorite:
+        db.delete(favorite)
+    else:
+        if not resolve_asset(db, 'job', job_id, current_user.id):
+            raise HTTPException(409, '图片已过期，不能新增收藏。')
+        db.add(Favorite(user_id=current_user.id, job_id=job_id))
+    job.is_favorite = favorite is None
     db.commit()
     return {"is_favorite": job.is_favorite}
 
@@ -797,8 +809,7 @@ def get_gallery(
         .where(GenerationJob.status == JobStatus.SUCCEEDED)
         .where(GenerationJob.user_id == current_user.id)
         .where(GenerationJob.deleted_at.is_(None))
-        .where(GenerationJob.media_state == MediaState.AVAILABLE)
-        .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
+        .where(available_job_clause())
     )
     if q:
         base = base.where(GenerationJob.prompt.ilike(f"%{q}%"))
@@ -822,7 +833,7 @@ def get_gallery(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
+    jobs = [j for j in db.scalars(stmt).all() if j.finished_at]
     items = _build_gallery_items(db, jobs, current_user.id)
     return GalleryPageResponse(items=items, total=total, page=page, page_size=page_size)
 
@@ -842,9 +853,7 @@ def get_public_gallery(
         .where(GenerationJob.is_public.is_(True))
         .where(or_(GenerationJob.user_id.is_(None), User.is_public.is_(True)))
         .where(GenerationJob.deleted_at.is_(None))
-        .where(GenerationJob.media_state == MediaState.AVAILABLE)
-        .where(GenerationJob.object_key.is_not(None), GenerationJob.finished_at.is_not(None))
-        .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
+        .where(available_job_clause(), GenerationJob.finished_at.is_not(None))
     )
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
     if sort == "liked":
@@ -858,7 +867,7 @@ def get_public_gallery(
     else:
         stmt = stmt.order_by(desc(GenerationJob.finished_at), desc(GenerationJob.id))
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-    jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
+    jobs = [j for j in db.scalars(stmt).all() if j.finished_at]
     return GalleryPageResponse(
         items=_build_gallery_items(db, jobs, current_user.id if current_user else None),
         total=total,
@@ -883,13 +892,11 @@ def get_user_gallery(
         .where(GenerationJob.user_id == user.id)
         .where(GenerationJob.is_public.is_(True))
         .where(GenerationJob.deleted_at.is_(None))
-        .where(GenerationJob.media_state == MediaState.AVAILABLE)
-        .where(GenerationJob.object_key.is_not(None), GenerationJob.finished_at.is_not(None))
-        .where(or_(GenerationJob.media_expires_at.is_(None), GenerationJob.media_expires_at > utcnow()))
+        .where(available_job_clause(), GenerationJob.finished_at.is_not(None))
     )
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     stmt = base.order_by(desc(GenerationJob.finished_at), desc(GenerationJob.id)).offset((page - 1) * page_size).limit(page_size)
-    jobs = [j for j in db.scalars(stmt).all() if j.object_key and j.finished_at]
+    jobs = [j for j in db.scalars(stmt).all() if j.finished_at]
     return GalleryPageResponse(
         items=_build_gallery_items(db, jobs, None),
         total=total,
@@ -931,54 +938,24 @@ def _batch_usernames(db: Session, user_ids: list[str]) -> dict[str, str]:
     return {u.id: u.username for u in users}
 
 
-def _build_gallery_item(
-    job: GenerationJob,
-    username: str | None,
-    like_counts: dict[str, int],
-    liked_job_ids: set[str],
-    viewer_user_id: str | None,
-) -> GalleryItem:
-    can_view_prompt = bool(job.is_prompt_public or (viewer_user_id and viewer_user_id == job.user_id))
-    return GalleryItem(
-        job_id=job.id,
-        image_url=_job_image_url(job, viewer_user_id) or "",
-        prompt=job.prompt if can_view_prompt else "",
-        revised_prompt=job.revised_prompt if can_view_prompt else None,
-        model=job.model,
-        size=job.size,
-        aspect_ratio=job.aspect_ratio,
-        finished_at=job.finished_at,
-        username=username,
-        is_public=job.is_public,
-        is_prompt_public=job.is_prompt_public if job.is_prompt_public is not None else True,
-        is_favorite=job.is_favorite,
-        tags=job.tags,
-        like_count=like_counts.get(job.id, 0),
-        liked_by_me=job.id in liked_job_ids,
-        media_expires_at=job.media_expires_at,
-    )
-
-
-def _build_gallery_items(
-    db: Session,
-    jobs: list[GenerationJob],
-    viewer_user_id: str | None,
-) -> list[GalleryItem]:
+def _build_gallery_items(db: Session, jobs: list[GenerationJob], viewer_user_id: str | None) -> list[GalleryItem]:
     job_ids = [j.id for j in jobs]
-    user_ids = [j.user_id for j in jobs if j.user_id]
     like_counts = _batch_like_counts(db, job_ids)
     liked_job_ids = _batch_user_likes(db, job_ids, viewer_user_id)
-    usernames = _batch_usernames(db, user_ids)
-    return [
-        _build_gallery_item(
-            job=job,
-            username=usernames.get(job.user_id) if job.user_id else None,
-            like_counts=like_counts,
-            liked_job_ids=liked_job_ids,
-            viewer_user_id=viewer_user_id,
-        )
-        for job in jobs
-    ]
+    artworks = artwork_items(db, [('job', j.id) for j in jobs], viewer_user_id)
+    return [GalleryItem(
+        job_id=job.id,
+        # Old clients use <img> without an Authorization header. Keep the
+        # scoped capability for originals; independent community copies are public.
+        image_url=(f"/api/v1/inspirations/{item['inspiration_id']}/file" if item['retention_kind'] == 'permanent'
+                   else _job_image_url(job, viewer_user_id)) or '',
+        prompt=item['prompt'], revised_prompt=item['revised_prompt'], model=job.model,
+        size=job.size, aspect_ratio=job.aspect_ratio, finished_at=job.finished_at,
+        username=item['username'], is_public=job.is_public, is_prompt_public=item['is_prompt_public'],
+        is_favorite=item['is_favorite'], tags=job.tags,
+        like_count=like_counts.get(job.id, 0), liked_by_me=job.id in liked_job_ids,
+        media_expires_at=item['media_expires_at'],
+    ) for job, item in zip(jobs, artworks)]
 
 
 @router.get("/health/live", response_model=HealthResponse)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -71,6 +72,7 @@ def mark_generation_succeeded(
     job.public_url = None
     job.media_state = MediaState.AVAILABLE
     job.media_size_bytes = len(result.image_bytes)
+    job.media_hash = sha256(result.image_bytes).hexdigest()
     job.media_content_type = result.content_type
     job.provider_job_meta = result.provider_meta
     job.finished_at = finished_at

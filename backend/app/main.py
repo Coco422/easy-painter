@@ -8,6 +8,8 @@ from redis import Redis
 from sqlalchemy.orm import Session
 
 from app.api import admin_router, announcement_router, auth_router, community_admin_router, inspiration_router, media_router, reference_router, router, user_group_router, user_router
+from app.api.artwork_routes import artwork_router
+from app.api.artwork_media_routes import artwork_media_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.init_db import init_db
@@ -42,6 +44,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(artwork_router, prefix=settings.api_v1_prefix)
+app.include_router(artwork_media_router, prefix=settings.api_v1_prefix)
 app.include_router(router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(user_router, prefix=settings.api_v1_prefix)

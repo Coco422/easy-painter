@@ -13,4 +13,5 @@ class ReferenceImageItem(BaseModel):
     created_at: datetime
     last_used_at: datetime | None = None
     media_expires_at: datetime | None = None
+    thumbnail_url: str | None = None
     evicted_image_ids: list[str] = Field(default_factory=list)

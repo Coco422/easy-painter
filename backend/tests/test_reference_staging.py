@@ -170,7 +170,7 @@ async def test_upload_list_file_and_delete_flow(monkeypatch):
     response = reference_routes.get_staged_reference_image_file(image_id=item.id, db=db, current_user=user)
     assert response.body == PNG_BYTES
     assert response.media_type == "image/png"
-    assert response.headers["Cache-Control"] == "private, max-age=3600"
+    assert response.headers["Cache-Control"] == "private, no-cache, must-revalidate"
 
     reference_routes.delete_staged_reference_image(image_id=item.id, db=db, current_user=user)
     assert reference_routes.list_staged_reference_images(db=db, current_user=user, page=1, page_size=50).items == []

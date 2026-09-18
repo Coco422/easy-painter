@@ -9,12 +9,15 @@ const routes = [
   { path: '/profile', component: () => import('@/pages/ProfilePage.vue') },
   {
     path: '/gallery',
-    component: () => import('@/pages/GalleryPage.vue'),
+    component: () => import('@/pages/ArtworkLibraryPage.vue'),
+    props: { mode: 'gallery' },
     beforeEnter: () => {
       if (!isLoggedIn()) return '/login'
     },
   },
-  { path: '/gallery/:username', component: () => import('@/pages/PublicGalleryPage.vue') },
+  { path: '/gallery/:username', component: () => import('@/pages/ArtworkLibraryPage.vue'), props: { mode: 'gallery' } },
+  { path: '/history', component: () => import('@/pages/ArtworkLibraryPage.vue'), props: { mode: 'history' }, beforeEnter: () => { if (!isLoggedIn()) return '/login' } },
+  { path: '/favorites', component: () => import('@/pages/ArtworkLibraryPage.vue'), props: { mode: 'favorites' }, beforeEnter: () => { if (!isLoggedIn()) return '/login' } },
   { path: '/admin', component: () => import('@/pages/admin/AdminPage.vue') },
 ]
 

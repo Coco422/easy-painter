@@ -22,6 +22,7 @@ from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
 from app.models.job_charge import JobCharge, JobChargeStatus
 from app.models.media import MediaState
+from app.services.community import withdraw_pending
 from app.models.model_config import ModelConfig
 from app.models.outbox_event import OutboxEvent
 from app.models.redemption_code import RedemptionCode
@@ -35,6 +36,7 @@ from app.schemas.inspiration import (
     CreateInspirationResponse,
 )
 from app.schemas.pagination import PageResponse
+from app.services.artworks import original_available, timestamp
 from app.services.storage import MinioStorageService, StorageError
 from app.services.billing import adjust_user_credits
 from app.services.job_lifecycle import mark_generation_failed
@@ -195,6 +197,8 @@ class AdminJobItem(BaseModel):
     error_message: str | None = None
     provider_job_meta: dict[str, Any] | None = None
     image_url: str | None = None
+    media_state: str = "none"
+    media_expires_at: datetime | None = None
     reference_image_filename: str | None = None
     model_label: str | None = None
     provider_name: str | None = None
@@ -270,9 +274,11 @@ def admin_list_jobs(
             provider_job_meta=job.provider_job_meta,
             image_url=(
                 job_media_url(job_id=job.id, user_id=job.user_id)
-                if job.object_key and job.media_state == MediaState.AVAILABLE and job.deleted_at is None
+                if original_available(job)
                 else None
             ),
+            media_state=job.media_state.value,
+            media_expires_at=timestamp(job.media_expires_at),
             reference_image_filename=job.reference_image_filename,
             model_label=job.model_label_snapshot,
             provider_name=job.provider_name_snapshot,
@@ -454,6 +460,8 @@ def admin_update_user(
         user.display_name = body.display_name
     if body.is_public is not None:
         user.is_public = body.is_public
+        if not body.is_public:
+            withdraw_pending(db, user.id)
     if body.group_code is not None and body.group_code != user.group_code:
         get_assignable_group(db, body.group_code)
         user.group_code = body.group_code
@@ -931,6 +939,7 @@ def admin_list_inspirations(
             description=item.description,
             prompt=item.prompt,
             image_url=f"/api/v1/inspirations/{item.id}/file" if item.image_object_key else item.image_url,
+            thumbnail_url=f"/api/v1/artworks/inspiration/{item.id}/file?variant=thumbnail&v={item.thumbnail_hash}" if item.thumbnail_key else None,
             image_object_key=item.image_object_key,
             external_id=item.external_id,
             source=item.source,

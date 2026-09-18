@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
+import ProtectedImage from '@/components/ProtectedImage.vue'
+import MediaExpiry from '@/components/MediaExpiry.vue'
 import type { InspirationItem } from '@/lib/types'
 
 const props = defineProps<{
@@ -44,7 +46,7 @@ const columns = computed(() => {
             type="button"
             @click="emit('select', item)"
           >
-            <img :src="item.image_url" :alt="item.title" loading="lazy" />
+            <ProtectedImage :src="item.thumbnail_url" :alt="item.title" />
             <div class="inspiration-card-overlay">
               <span v-if="item.source === 'community-curated'" class="inspiration-source-tag source-gallery">管理员精选</span>
               <span v-else class="inspiration-source-tag source-external">灵感库</span>
@@ -60,6 +62,7 @@ const columns = computed(() => {
               </div>
             </div>
           </button>
+          <MediaExpiry state="available" permanent />
         </div>
       </div>
     </div>
@@ -75,7 +78,7 @@ const columns = computed(() => {
 
 .inspiration-grid {
   display: flex;
-  gap: 16px;
+  gap: 24px;
   align-items: flex-start;
 }
 
@@ -83,7 +86,7 @@ const columns = computed(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
   min-width: 0;
 }
 
@@ -109,7 +112,7 @@ const columns = computed(() => {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
-.inspiration-card img {
+.inspiration-card :deep(img) {
   width: 100%;
   display: block;
   object-fit: cover;
@@ -127,7 +130,7 @@ const columns = computed(() => {
   padding: 12px;
 }
 
-.inspiration-card:hover .inspiration-card-overlay {
+.inspiration-card:hover .inspiration-card-overlay, .inspiration-card:focus-visible .inspiration-card-overlay {
   opacity: 1;
 }
 

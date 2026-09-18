@@ -28,7 +28,9 @@ async function handleLogout() {
     <nav class="header-primary-nav">
       <router-link to="/" class="primary-nav-link" :class="{ active: route.path === '/' }">社区灵感</router-link>
       <router-link to="/create" class="primary-nav-link" :class="{ active: route.path === '/create' }">创作台</router-link>
-      <router-link v-if="isLoggedIn()" to="/gallery" class="primary-nav-link" :class="{ active: route.path === '/gallery' }">画廊</router-link>
+      <router-link v-if="isLoggedIn()" to="/history" class="primary-nav-link" :class="{ active: route.path === '/history' }">生图历史</router-link>
+      <router-link v-if="isLoggedIn()" to="/gallery" class="primary-nav-link" :class="{ active: route.path.startsWith('/gallery') }">画廊</router-link>
+      <router-link v-if="isLoggedIn()" to="/favorites" class="primary-nav-link" :class="{ active: route.path === '/favorites' }">收藏</router-link>
     </nav>
     <nav class="header-nav">
       <template v-if="isLoggedIn()">
@@ -37,9 +39,6 @@ async function handleLogout() {
           <span>{{ authState.user?.credits ?? 0 }}</span>
         </router-link>
         <span class="nav-user">{{ authState.user?.username }}</span>
-        <router-link v-if="authState.user?.is_public" :to="`/gallery/${authState.user.username}`" class="nav-link">
-          公开画廊
-        </router-link>
         <router-link v-if="isAdmin()" to="/admin" class="nav-link nav-admin">管理</router-link>
         <button class="nav-link nav-logout" @click="handleLogout">退出</button>
       </template>
@@ -116,6 +115,7 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .primary-nav-link {
@@ -137,5 +137,14 @@ async function handleLogout() {
   color: var(--accent);
   background: var(--accent-glow);
   font-weight: 600;
+}
+.header-nav { flex-wrap: wrap; }
+.header-nav > *, .primary-nav-link { white-space: nowrap; }
+@media (max-width: 600px) {
+  .primary-nav-link { padding: 6px 8px; }
+  .header-primary-nav { gap: 0; }
+  .header-nav { gap: 10px; }
+  .nav-user { max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
+  .theme-toggle { flex-shrink: 0; }
 }
 </style>

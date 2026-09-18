@@ -300,11 +300,11 @@ onBeforeUnmount(stopBindCountdown)
         </label>
         <label class="field-checkbox">
           <input v-model="isPublic" type="checkbox" />
-          <span>公开画廊（其他用户可以查看你的作品）</span>
+          <span>公开作品总开关（允许展示个人画廊和投稿社区）</span>
         </label>
         <p class="field-hint">
-          开启后，你将拥有一个专属的作品集页面。你可以在作品详情中将图片「发布」到公开画廊，
-          已发布的作品会展示在你的公开主页上，任何人均可通过链接访问（无需登录）。
+          开启后，已加入个人画廊的作品对外可见；你也可以主动投稿社区，审核通过后独立长期保存。
+          关闭后个人画廊隐藏，待审投稿自动撤回；已经审核收录的社区副本继续保留。
         </p>
         <div v-if="isPublic && galleryUrl" class="gallery-link-row">
           <code class="gallery-link-url">{{ galleryUrl }}</code>

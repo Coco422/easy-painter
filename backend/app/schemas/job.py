@@ -134,6 +134,8 @@ class JobDetailResponse(BaseModel):
     job_id: str
     status: str
     image_url: str | None = None
+    thumbnail_url: str | None = None
+    retention_kind: str = 'temporary'
     prompt: str
     revised_prompt: str | None = None
     model: str

@@ -54,6 +54,7 @@ export interface CreateJobRequest {
 }
 
 export interface ReferenceImageItem {
+  thumbnail_url?: string | null
   evicted_image_ids?: string[]
   id: string
   filename: string
@@ -80,6 +81,8 @@ export interface CreateJobResponse {
 }
 
 export interface JobDetailResponse {
+  thumbnail_url?: string | null
+  retention_kind?: string
   job_id: string
   status: JobStatus
   image_url: string | null
@@ -220,6 +223,8 @@ export interface AnnouncementItem {
 }
 
 export interface AdminJobItem {
+  media_state: string
+  media_expires_at: string | null
   job_id: string
   status: string
   prompt: string
@@ -308,6 +313,7 @@ export interface ModelConfig {
 }
 
 export interface InspirationItem {
+  thumbnail_url?: string | null
   id: string
   title: string
   description: string | null

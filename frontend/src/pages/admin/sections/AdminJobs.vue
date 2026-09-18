@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ProtectedImage from '@/components/ProtectedImage.vue'
+import MediaExpiry from '@/components/MediaExpiry.vue'
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NButton,
@@ -8,7 +10,7 @@ import {
   NDrawer,
   NDrawerContent,
   NEmpty,
-  NImage,
+  NModal,
   NPagination,
   NSelect,
   NSpace,
@@ -36,6 +38,7 @@ const page = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
 const selectedRowKeys = ref<DataTableRowKey[]>([])
+const previewOpen = ref(false)
 const selectedJob = ref<AdminJobItem | null>(null)
 const pageSizes = [25, 50, 100]
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
@@ -135,6 +138,7 @@ function changePageSize(nextPageSize: number) {
 }
 
 function viewJob(job: AdminJobItem) {
+  previewOpen.value = false
   selectedJob.value = job
 }
 
@@ -264,6 +268,10 @@ onMounted(loadJobs)
     </div>
 
     <NDrawer :show="Boolean(selectedJob)" width="min(1040px, 96vw)" placement="right" @update:show="(show) => { if (!show) selectedJob = null }">
+      <NModal v-if="selectedJob" v-model:show="previewOpen" preset="card" title="原图预览" style="width: min(1200px, 96vw)">
+        <ProtectedImage :src="selectedJob.image_url" :state="selectedJob.media_state" :expires-at="selectedJob.media_expires_at" eager class="large-preview" />
+        <MediaExpiry :state="selectedJob.media_state" :expires-at="selectedJob.media_expires_at" />
+      </NModal>
       <NDrawerContent v-if="selectedJob" title="任务详情" closable>
         <div class="job-detail-summary">
           <div><span>任务 ID</span><code>{{ selectedJob.job_id }}</code></div>
@@ -279,14 +287,17 @@ onMounted(loadJobs)
               <span class="preview-hint"><Maximize2 :size="14" />点击图片放大</span>
             </div>
             <div class="result-canvas">
-              <NImage
+              <ProtectedImage
                 :src="selectedJob.image_url"
                 :alt="`任务 ${selectedJob.job_id} 的生成结果`"
-                object-fit="contain"
+                :state="selectedJob.media_state"
+                :expires-at="selectedJob.media_expires_at"
+                @click="previewOpen = true"
                 class="result-image"
-                lazy
+                eager
               />
             </div>
+            <MediaExpiry :state="selectedJob.media_state" :expires-at="selectedJob.media_expires_at" />
             <div class="result-meta">
               <span>{{ selectedJob.size }}</span>
               <span>{{ selectedJob.aspect_ratio }}</span>
@@ -330,6 +341,7 @@ onMounted(loadJobs)
 </template>
 
 <style scoped>
+.large-preview :deep(img) { max-height: 80vh; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .status-select { width: 180px; }
 .section-empty { padding: 72px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }

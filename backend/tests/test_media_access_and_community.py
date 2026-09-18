@@ -13,6 +13,7 @@ from starlette.requests import Request
 from app.api import community_admin_routes, inspiration_routes, media_routes, routes
 from app.core.config import get_settings
 from app.db.base import Base
+from app.models.artwork import CommunitySubmission
 from app.models.generation_job import GenerationJob, JobStatus
 from app.models.inspiration import Inspiration
 from app.models.media import MediaState
@@ -70,7 +71,7 @@ def test_media_capability_rechecks_resource_visibility_and_scope(monkeypatch):
     owner_token = media_routes.issue_job_media_token(job_id=job.id, user_id="owner")
     response = media_routes.stream_job_media(job.id, request(), owner_token)
     assert response.media_type == "image/webp"
-    assert response.headers["cache-control"].startswith("private, max-age=")
+    assert response.headers["cache-control"] == "private, no-cache, must-revalidate"
 
     with pytest.raises(HTTPException) as exc_info:
         media_routes.stream_job_media(
@@ -169,6 +170,7 @@ def test_curated_copy_survives_source_deletion_and_hidden_prompts_are_ineligible
         is_prompt_public=False,
     )
     db.add_all([user, eligible, hidden_prompt])
+    db.add(CommunitySubmission(job_id=eligible.id, user_id=user.id, status="pending"))
     db.commit()
 
     class Storage:
