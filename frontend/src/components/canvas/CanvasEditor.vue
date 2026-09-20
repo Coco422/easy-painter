@@ -55,11 +55,15 @@ const viewport = ref<HTMLElement>(),
   imageInput = ref<HTMLInputElement>(),
   panMode = ref(false),
   space = ref(false),
-  connecting = ref<string | null>(null)
+  connecting = ref<string | null>(null),
+  connectionPoint = ref<Point | null>(null),
+  connectionTarget = ref<string | null>(null),
+  connectionDragging = ref(false)
 const size = ref({ width: 1000, height: 700 }),
   box = ref<{ start: Point; end: Point } | null>(null)
 let observer: ResizeObserver | undefined,
-  cancelGesture: (() => void) | undefined
+  cancelGesture: (() => void) | undefined,
+  cancelConnectionDrag: (() => void) | undefined
 const selectedSet = computed(() => new Set(selected.value))
 const orderedNodes = computed(() =>
   [...project.value.nodes].sort(
@@ -71,6 +75,7 @@ const visibleNodes = computed(() => {
   return orderedNodes.value.filter(
     (n) =>
       selectedSet.value.has(n.id) ||
+      n.id === connecting.value ||
       ((n.x + n.width) * v.scale + v.x > -300 &&
         n.x * v.scale + v.x < size.value.width + 300 &&
         (n.y + n.height) * v.scale + v.y > -300 &&
@@ -128,6 +133,7 @@ function gesture(
   move: (e: PointerEvent) => void,
   finish = () => {},
 ) {
+  cancelConnection()
   cancelGesture?.()
   const controller = new AbortController()
   const target = event.currentTarget as HTMLElement
@@ -148,16 +154,93 @@ function gesture(
   window.addEventListener('pointerup', stop, { signal: controller.signal })
   window.addEventListener('pointercancel', stop, { signal: controller.signal })
 }
+function cancelConnection() {
+  cancelConnectionDrag?.()
+  connecting.value = null
+  connectionPoint.value = null
+  connectionTarget.value = null
+  connectionDragging.value = false
+}
+function updateConnection(e: PointerEvent) {
+  if (!connecting.value || !e.isPrimary) return
+  connectionPoint.value = worldPoint(point(e), project.value.viewport)
+  // Pointer capture keeps e.target on the source port; hit-test the drop position.
+  const element = document.elementFromPoint(e.clientX, e.clientY)
+  const id = element?.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId
+  const target =
+    id && viewport.value?.contains(element) ? nodeMap.value.get(id) : undefined
+  connectionTarget.value = target?.type === 'generation' ? target.id : null
+}
+function completeConnection(node: CanvasNode) {
+  const source = connecting.value && nodeMap.value.get(connecting.value)
+  if (!source || source.type === 'generation' || node.type !== 'generation')
+    return
+  if (
+    !project.value.edges.some(
+      (edge) => edge.from === source.id && edge.to === node.id,
+    )
+  ) {
+    session.checkpoint()
+    connect(project.value, source.id, node.id)
+    session.changed()
+  }
+  cancelConnection()
+}
+function startConnection(node: CanvasNode, e: PointerEvent | MouseEvent) {
+  if (e.button !== 0 || (e.type === 'pointerdown' && !(e as PointerEvent).isPrimary))
+    return
+  e.preventDefault()
+  cancelConnection()
+  cancelGesture?.()
+  connecting.value = node.id
+  // Keyboard activation keeps click-to-connect available without pointer capture.
+  if (e.type === 'click') return
+  if (!(e instanceof PointerEvent)) return
+
+  const port = e.currentTarget as HTMLElement
+  const controller = new AbortController()
+  const options = { signal: controller.signal }
+  port.setPointerCapture(e.pointerId)
+  const detach = () => {
+    controller.abort()
+    cancelConnectionDrag = undefined
+    if (port.hasPointerCapture(e.pointerId))
+      port.releasePointerCapture(e.pointerId)
+  }
+  cancelConnectionDrag = detach
+  window.addEventListener(
+    'pointermove',
+    (event) => {
+      if (event.pointerId !== e.pointerId) return
+      if (Math.hypot(event.clientX - e.clientX, event.clientY - e.clientY) >= 4)
+        connectionDragging.value = true
+      if (connectionDragging.value) updateConnection(event)
+    },
+    options,
+  )
+  window.addEventListener(
+    'pointerup',
+    (event) => {
+      if (event.pointerId !== e.pointerId) return
+      detach()
+      if (!connectionDragging.value) return
+      updateConnection(event)
+      const target =
+        connectionTarget.value && nodeMap.value.get(connectionTarget.value)
+      if (target) completeConnection(target)
+      else cancelConnection()
+    },
+    options,
+  )
+  const cancel = (event: PointerEvent) => {
+    if (event.pointerId === e.pointerId) cancelConnection()
+  }
+  window.addEventListener('pointercancel', cancel, options)
+  port.addEventListener('lostpointercapture', cancel, options)
+}
 function selectNode(node: CanvasNode, e: PointerEvent) {
   if (connecting.value) {
-    try {
-      session.checkpoint()
-      connect(project.value, connecting.value, node.id)
-      session.changed()
-      connecting.value = null
-    } catch (error) {
-      feedback.value = (error as Error).message
-    }
+    completeConnection(node)
     return
   }
   if (e.shiftKey || e.metaKey || e.ctrlKey)
@@ -266,7 +349,7 @@ function background(e: PointerEvent) {
   } else {
     selected.value = previous
     box.value = { start, end: start }
-    connecting.value = null
+    cancelConnection()
     gesture(
       e,
       (event) => {
@@ -376,13 +459,22 @@ function edgePath(from: string, to: string) {
   const a = nodeMap.value.get(from),
     b = nodeMap.value.get(to)
   if (!a || !b) return ''
-  const x = a.x + a.width,
-    y = a.y + a.height / 2,
-    xx = b.x,
-    yy = b.y + b.height / 2,
-    d = Math.max(60, Math.abs(xx - x) / 2)
-  return `M ${x} ${y} C ${x + d} ${y}, ${xx - d} ${yy}, ${xx} ${yy}`
+  return connectionPath(a, { x: b.x, y: b.y + b.height / 2 })
 }
+function connectionPath(source: CanvasNode, target: Point) {
+  const x = source.x + source.width,
+    y = source.y + source.height / 2,
+    d = Math.max(60, Math.abs(target.x - x) / 2)
+  return `M ${x} ${y} C ${x + d} ${y}, ${target.x - d} ${target.y}, ${target.x} ${target.y}`
+}
+const previewPath = computed(() => {
+  const source = connecting.value && nodeMap.value.get(connecting.value)
+  const target = connectionTarget.value && nodeMap.value.get(connectionTarget.value)
+  const end = target
+    ? { x: target.x, y: target.y + target.height / 2 }
+    : connectionPoint.value
+  return source && end ? connectionPath(source, end) : ''
+})
 async function importImages(files: FileList | File[], position = center()) {
   for (const [i, file] of Array.from(files).entries()) {
     try {
@@ -415,9 +507,14 @@ async function exportFile() {
   }
 }
 function keydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && connecting.value) {
+    e.preventDefault()
+    cancelConnection()
+    return
+  }
   if ((e.target as Element).closest('input,textarea,select,[contenteditable]'))
     return
-  if (e.code === 'Space') {
+  if (e.code === 'Space' && !(e.target as Element).closest('button')) {
     space.value = true
     e.preventDefault()
   }
@@ -430,7 +527,6 @@ function keydown(e: KeyboardEvent) {
     remove()
   }
   if (e.key === 'Escape') {
-    connecting.value = null
     selected.value = []
   }
 }
@@ -439,6 +535,7 @@ function keyup(e: KeyboardEvent) {
 }
 function blur() {
   space.value = false
+  cancelConnection()
   cancelGesture?.()
 }
 function paste(e: ClipboardEvent) {
@@ -477,6 +574,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   observer?.disconnect()
+  cancelConnection()
   cancelGesture?.()
   window.removeEventListener('keydown', keydown)
   window.removeEventListener('keyup', keyup)
@@ -555,6 +653,7 @@ onBeforeUnmount(() => {
         backgroundPosition: `${project.viewport.x}px ${project.viewport.y}px`,
       }"
       @pointerdown="background"
+      @pointermove="updateConnection"
       @wheel="wheel"
       @dragover.prevent
       @drop="drop"
@@ -583,12 +682,20 @@ onBeforeUnmount(() => {
             </path>
             <path :d="edgePath(edge.from, edge.to)" class="edge-line" />
           </g>
+          <path
+            v-if="previewPath"
+            :d="previewPath"
+            class="edge-line edge-preview"
+          />
         </svg>
         <CanvasNodeCard
           v-for="node in visibleNodes"
           :key="node.id"
           :node="node"
           :selected="selectedSet.has(node.id)"
+          :connecting="!!connecting"
+          :connection-source="connecting === node.id"
+          :connection-target="connectionTarget === node.id"
           :image="
             urls[
               node.assetId ??
@@ -610,7 +717,8 @@ onBeforeUnmount(() => {
             session.retry(project.runs.find((r) => r.nodeId === node.id)!)
           "
           @derive="derive(node)"
-          @connect="connecting = node.id"
+          @connect="startConnection(node, $event)"
+          @connect-target="completeConnection(node)"
         />
       </div>
       <div v-if="box" class="selection-box" :style="boxStyle" />
@@ -686,12 +794,12 @@ onBeforeUnmount(() => {
           解散组</button
         ><button @click="remove"><Trash2 :size="14" />移除</button>
       </div>
-      <div v-if="connecting" class="connect-hint">
-        <Link2 :size="15" />点击一个生成节点以建立连接<button
-          @click="connecting = null"
-        >
-          取消
-        </button>
+      <div v-if="connecting" class="connect-hint" role="status">
+        <Link2 :size="15" />{{
+          connectionDragging
+            ? '拖到生成节点后松开以连接'
+            : '拖动连线，或点击一个生成节点'
+        }} · Esc 取消<button @click="cancelConnection">取消</button>
       </div>
       <div class="canvas-bottom">
         <span
@@ -840,6 +948,11 @@ button {
   fill: none;
   pointer-events: stroke;
   cursor: pointer;
+}
+.edge-preview {
+  opacity: 1;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
 }
 .selection-box {
   position: absolute;

@@ -18,6 +18,9 @@ const props = defineProps<{
   models: PublicModel[]
   busy: boolean
   inputCount: number
+  connecting: boolean
+  connectionSource: boolean
+  connectionTarget: boolean
 }>()
 const emit = defineEmits<{
   select: [event: PointerEvent]
@@ -28,7 +31,8 @@ const emit = defineEmits<{
   generate: []
   retry: []
   derive: []
-  connect: []
+  connect: [event: PointerEvent | MouseEvent]
+  connectTarget: []
 }>()
 const enabledModels = computed(() => props.models.filter((m) => m.enabled))
 const model = computed(() =>
@@ -59,7 +63,12 @@ function selectModel() {
   <article
     class="canvas-node"
     :class="[
-      { selected, 'is-group': node.type === 'group' },
+      {
+        selected,
+        'is-group': node.type === 'group',
+        'connection-source': connectionSource,
+        'connection-target': connectionTarget,
+      },
       `kind-${node.type}`,
     ]"
     :style="{
@@ -193,11 +202,20 @@ function selectModel() {
     <button
       v-if="node.type !== 'generation'"
       class="node-port"
-      title="连接到生成节点"
+      title="拖动或点击，连接到生成节点"
       aria-label="连接到生成节点"
-      @pointerdown.stop
-      @click.stop="emit('connect')"
+      @pointerdown.stop="emit('connect', $event)"
+      @click.stop="$event.detail === 0 && emit('connect', $event)"
     />
+    <button
+      v-else-if="connecting"
+      class="connection-drop-target"
+      aria-label="连接到此生成节点"
+      @pointerdown.stop
+      @click.stop="emit('connectTarget')"
+    >
+      <span class="node-input-port" />
+    </button>
     <button
       v-if="selected"
       class="node-resize"
@@ -224,6 +242,12 @@ function selectModel() {
   border-color: var(--accent);
   box-shadow:
     0 0 0 2px var(--accent-soft),
+    var(--shadow-md);
+}
+.canvas-node.connection-target {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
     var(--shadow-md);
 }
 header {
@@ -372,15 +396,48 @@ select:focus {
 }
 .node-port {
   position: absolute;
-  right: -6px;
+  right: -12px;
   top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: crosshair;
+  touch-action: none;
+}
+.node-port::after,
+.node-input-port {
+  content: '';
+  position: absolute;
   width: 12px;
   height: 12px;
-  padding: 0;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   border: 2px solid var(--bg-surface);
   border-radius: 50%;
   background: var(--accent);
+}
+.node-port:hover::after,
+.node-port:focus-visible::after,
+.connection-source .node-port::after,
+.connection-target .node-input-port {
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.connection-drop-target {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 1px dashed var(--accent);
+  border-radius: inherit;
+  background: transparent;
   cursor: crosshair;
+}
+.node-input-port {
+  left: 0;
 }
 .node-resize {
   position: absolute;
