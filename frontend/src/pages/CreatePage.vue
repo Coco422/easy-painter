@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { randomId } from '@/lib/browser-crypto'
 
 import { useRoute, useRouter } from 'vue-router'
 
@@ -73,7 +74,7 @@ function supportsCurrentReferenceInput(model: PublicModel | undefined) {
 }
 
 function supportsCurrentSize(model: PublicModel | undefined, size: ImageSize) {
-  return Boolean(model) && (!model.supported_sizes.length || model.supported_sizes.includes(size))
+  return Boolean(model && (!model.supported_sizes.length || model.supported_sizes.includes(size)))
 }
 
 function ensureSelectableModel() {
@@ -253,7 +254,7 @@ async function submitJobs(options: {
     throw new Error(`当前模型单次最多支持 ${model?.max_reference_images ?? 5} 张参考图，请移除多余图片。`)
   }
   const submissions = Array.from({ length: options.batchCount }, () => {
-    const idempotencyKey = crypto.randomUUID()
+    const idempotencyKey = randomId()
     const payload = {
       prompt: options.promptText,
       model: options.model,

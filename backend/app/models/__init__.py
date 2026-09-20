@@ -1,5 +1,6 @@
 from app.models.artwork import Favorite, CommunitySubmission
 from app.models.announcement import Announcement
+from app.models.canvas import CanvasAsset, CanvasProject
 from app.models.credit_transaction import CreditTransaction, CreditTransactionType
 from app.models.gallery_like import GalleryLike
 from app.models.generation_job import GenerationJob
@@ -13,6 +14,8 @@ from app.models.user_group import UserGroup
 
 __all__ = [
     "Announcement",
+    "CanvasAsset",
+    "CanvasProject",
     "CreditTransaction",
     "CreditTransactionType",
     "GalleryLike",

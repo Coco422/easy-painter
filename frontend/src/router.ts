@@ -5,6 +5,7 @@ import { isLoggedIn } from '@/lib/auth'
 const routes = [
   { path: '/', component: () => import('@/pages/InspirationPage.vue') },
   { path: '/create', component: () => import('@/pages/CreatePage.vue') },
+  { path: '/canvas/:id?', component: () => import('@/pages/CanvasPage.vue'), beforeEnter: () => { if (!isLoggedIn()) return '/login' } },
   { path: '/login', component: () => import('@/pages/LoginPage.vue') },
   { path: '/profile', component: () => import('@/pages/ProfilePage.vue') },
   {

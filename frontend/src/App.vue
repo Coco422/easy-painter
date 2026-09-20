@@ -11,6 +11,7 @@ import { initTheme } from '@/lib/theme'
 const route = useRoute()
 const siteName = ref('一丝绘画站')
 const isAdminRoute = computed(() => route.path === '/admin')
+const isCanvasRoute = computed(() => route.path === '/canvas' || route.path.startsWith('/canvas/'))
 
 onMounted(async () => {
   initTheme()
@@ -29,10 +30,15 @@ onMounted(async () => {
 <template>
   <div class="page-shell">
     <AppHeader v-if="!isAdminRoute" :site-name="siteName" />
-    <GenerationStatsTicker v-if="!isAdminRoute" />
-    <AnnouncementBanner v-if="!isAdminRoute" />
-    <main class="page-content" :class="{ 'page-content--admin': isAdminRoute }">
+    <GenerationStatsTicker v-if="!isAdminRoute && !isCanvasRoute" />
+    <AnnouncementBanner v-if="!isAdminRoute && !isCanvasRoute" />
+    <main class="page-content" :class="{ 'page-content--admin': isAdminRoute, 'page-content--canvas': isCanvasRoute }">
       <router-view />
     </main>
   </div>
 </template>
+
+<style scoped>
+.page-content--canvas { max-width: none; padding: 16px 24px; }
+@media (max-width: 700px) { .page-content--canvas { padding: 10px; } }
+</style>

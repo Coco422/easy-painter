@@ -71,6 +71,15 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - JWT tokens stored in `localStorage`, sent as `Authorization: Bearer <token>` header
 - Admin access via secret key (`ADMIN_SECRET_KEY` env var), produces a separate JWT with `role=admin` claim
 - Frontend routes: `/` (community), `/create`, `/history`, `/gallery`, `/gallery/:username` (shared portfolio), `/favorites`, `/profile`, `/login`, `/admin`
+- `/canvas` and `/canvas/:id` are the separate local-first canvas library/editor; `/create` remains available. Read `docs/v0.20.0-release.md` for storage, recovery, cloud quotas and migration details.
+
+### Infinite Canvas
+
+- Browser IndexedDB stores account-scoped project JSON and content-hashed image Blobs. Layout undo is separate from paid generation runs; save the idempotency key and exact request before submission. Unknown submission results require confirmation with the same key.
+- Local project saves compare revisions to reject cross-tab overwrites. Export/import includes media; only a successfully stored local copy survives original-media expiry. Imports never auto-submit generation requests.
+- Optional cloud copies use Flyway V10 `canvas_projects` / `canvas_assets` and the private RustFS media bucket. Only an enabled `vip` group may write; owners retain read/export/delete access after downgrade. Cloud assets are retained until project/account deletion and use the existing deletion queue.
+- Lock the user before cloud mutations, enforce byte/project quotas server-side, and compare `expected_version` before document updates. Upload hashes are verified against actual image bytes; downloads authorize before object access.
+- Canvas reference/attribution: `THIRD_PARTY_NOTICES.md`. Frontend canvas model tests run with the existing Node test command; explicitly typecheck application code with `npx vue-tsc --noEmit -p tsconfig.app.json`.
 
 ### Artwork, Portfolio and Community Logic
 

@@ -476,7 +476,7 @@ def admin_delete_user(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
 ) -> None:
-    user = db.get(User, user_id)
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True))
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在。")
     has_financial_history = any(
@@ -495,6 +495,11 @@ def admin_delete_user(
     )
     if has_financial_history:
         raise HTTPException(status_code=409, detail="该用户已有账务记录，为保证流水完整性不能直接删除。")
+    from app.api.canvas_routes import delete_owned_project
+    from app.models.canvas import CanvasProject
+
+    for project in db.scalars(select(CanvasProject).where(CanvasProject.user_id == user.id)).all():
+        delete_owned_project(db, project)
     for like in db.scalars(select(GalleryLike).where(GalleryLike.user_id == user.id)).all():
         db.delete(like)
     db.delete(user)

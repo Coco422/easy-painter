@@ -50,6 +50,12 @@ class MinioStorageService:
         except Exception as exc:
             raise StorageError("Failed to store thumbnail.") from exc
 
+    def upload_canvas_asset(self, key: str, data: bytes, content_type: str) -> None:
+        try:
+            self.client.put_object(self.bucket, key, BytesIO(data), len(data), content_type=content_type)
+        except Exception as exc:
+            raise StorageError("Failed to store canvas asset.") from exc
+
     def upload_generated_image(self, job_id: str, image_bytes: bytes, content_type: str) -> StoredImage:
         timestamp = datetime.now(timezone.utc)
         extension = self._guess_extension(content_type)

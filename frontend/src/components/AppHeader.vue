@@ -28,6 +28,7 @@ async function handleLogout() {
     <nav class="header-primary-nav">
       <router-link to="/" class="primary-nav-link" :class="{ active: route.path === '/' }">社区灵感</router-link>
       <router-link to="/create" class="primary-nav-link" :class="{ active: route.path === '/create' }">创作台</router-link>
+      <router-link to="/canvas" class="primary-nav-link" :class="{ active: route.path === '/canvas' || route.path.startsWith('/canvas/') }">无限画布</router-link>
       <router-link v-if="isLoggedIn()" to="/history" class="primary-nav-link" :class="{ active: route.path === '/history' }">生图历史</router-link>
       <router-link v-if="isLoggedIn()" to="/gallery" class="primary-nav-link" :class="{ active: route.path.startsWith('/gallery') }">画廊</router-link>
       <router-link v-if="isLoggedIn()" to="/favorites" class="primary-nav-link" :class="{ active: route.path === '/favorites' }">收藏</router-link>

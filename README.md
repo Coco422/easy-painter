@@ -27,6 +27,14 @@
 └── .env.example
 ```
 
+## 无限画布
+
+v0.20.0 保留 `/create` 普通创作台，新增「无限画布」入口。登录后可创建多个画布，把图片、提示词和生成配置组织为节点，支持连线、分组、框选、平移缩放、撤销重做以及生成结果回填。
+
+画布和素材默认保存在当前浏览器，按账号隔离，可导入、导出包含图片的完整项目。清理网站数据会移除本地内容，请定期导出备份。AI 生成仍使用现有后端和计费流程。
+
+VIP 用户组可按画布开启云端同步：先本地保存，再同步变化与新增素材，支持跨设备恢复和版本冲突检查。普通账号仍可使用本地画布；VIP 降组后可恢复、导出或删除已有云端项目。首次升级需执行 Flyway V10，具体限制与升级步骤见 [v0.20.0 使用与升级说明](docs/v0.20.0-release.md)。
+
 ## 作品管理与图片保留期
 
 v0.19.0 将生图历史、个人画廊、收藏和社区投稿分开：历史保存全部任务与过期后的文字记录；个人画廊由用户主动加入作品；收藏仅保存引用。社区投稿需要开启个人中心公开总开关、确认公开图片与提示词，并由管理员审核通过。已收录内容使用独立长期副本，原作到期或撤回不影响社区版本。
@@ -111,7 +119,7 @@ SMTP_USE_SSL=false
 
 ### 全局生成统计
 
-前台所有页面在顶部导航下方展示生成统计，每 5 秒轮播“今日已生成图片 N 张”和“系统运行至今已生成 N 张”，每 60 秒刷新数据。点击可手动切换，悬停或键盘聚焦时暂停轮播。
+前台普通页面在顶部导航下方展示生成统计，每 5 秒轮播“今日已生成图片 N 张”和“系统运行至今已生成 N 张”，每 60 秒刷新数据。点击可手动切换，悬停或键盘聚焦时暂停轮播。无限画布页隐藏统计与横幅，保留完整编辑空间。
 
 - `GET /api/v1/stats/public` 无需登录，返回 `today_images`、`total_images`，仅公开汇总数量；响应可缓存 30 秒。
 - 全站每个成功任务计为一张图片，包含私有图片与匿名任务；排队中、生成中和失败任务不计入。
@@ -269,6 +277,10 @@ docker buildx build --platform linux/amd64 -f deploy/nginx/Dockerfile -t your-re
 ## 对外接口
 
 - `GET /api/v1/meta/public`
+- `GET /api/v1/canvas/capabilities`（云端画布权限与容量）
+- `GET/POST /api/v1/canvas/projects`（列出 / 创建云端画布）
+- `GET/PUT/DELETE /api/v1/canvas/projects/{id}`（读取 / 版本检查保存 / 删除）
+- `GET/PUT /api/v1/canvas/projects/{id}/assets/{digest}`（私有素材读取 / 去重上传）
 - `POST /api/v1/auth/email-codes`（发送注册或重置密码验证码）
 - `POST /api/v1/auth/register`（验证邮箱并注册）
 - `POST /api/v1/auth/login`（用户名或邮箱登录）
@@ -311,3 +323,9 @@ Admin 通知接口保持独立管理员令牌认证：
 - API 返回值、错误提示和日志都使用通用文案，不回显上游主机名或密钥。
 - SMTP 密码只允许保存在 `.env` 与后端容器环境变量中，不会通过公开接口返回。
 - 生产环境应根据邮件服务商配额调整 `EMAIL_CODE_*` 限额；如果站点暴露在高风险公网环境，建议在反向代理层再叠加全局限流或验证码挑战。
+
+## 致谢
+
+感谢 [basketikun](https://github.com/basketikun) 开源的 [infinite-canvas（无限画布）](https://github.com/basketikun/infinite-canvas)。Easy Painter 的无限画布以该项目为主要参考，重点借鉴其节点式创作交互、画布编排、连续生成流程以及浏览器本地保存画布与素材的设计，并适配本项目的 Vue 3、用户组、生成与计费体系。
+
+该参考项目采用 [MIT License](https://github.com/basketikun/infinite-canvas/blob/main/LICENSE)，参考版本、适配范围及完整版权与许可证文本见 [第三方声明](THIRD_PARTY_NOTICES.md)。
