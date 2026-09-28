@@ -1,4 +1,5 @@
 import { getAdminAuthHeader, getAuthHeader } from './auth'
+import { adminErrorMessage } from './admin-error'
 import type {
   AdminHealth,
   AdminInspirationItem,
@@ -257,8 +258,7 @@ export async function adminApiRequest<T>(url: string, init?: RequestInit): Promi
   if (!response.ok) {
     let message = '请求未能完成。'
     try {
-      const payload = (await response.json()) as { detail?: string }
-      if (payload.detail) message = payload.detail
+      message = adminErrorMessage(await response.json(), message)
     } catch {}
     const retryAfterHeader = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
     throw new ApiError(

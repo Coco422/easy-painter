@@ -68,6 +68,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - Existing signed-in users without email can bind one through `POST /users/me/email/code` + `PUT /users/me/email`; a bound email cannot be self-replaced, while admin can still update it directly
 - Email code sending uses a Redis atomic 60-second cooldown plus short-window and daily limits across email, IP, and (for authenticated binding) user ID; binding codes are scoped to the current user ID
 - Users can also be created by admin or auto-created from `DEFAULT_USERNAME`/`DEFAULT_PASSWORD`/optional `DEFAULT_EMAIL` on first startup
+- Admin user forms validate usernames (2–64 ASCII letters, digits or underscores), optional emails and passwords (6–128 characters) before submission. Admin create/update validation keeps the existing 422 detail array and supplies Chinese field messages; the client handles string, object and array errors without coercing objects into text.
 - JWT tokens stored in `localStorage`, sent as `Authorization: Bearer <token>` header
 - Admin access via secret key (`ADMIN_SECRET_KEY` env var), produces a separate JWT with `role=admin` claim
 - Frontend routes: `/` (community), `/create`, `/history`, `/gallery`, `/gallery/:username` (shared portfolio), `/favorites`, `/profile`, `/login`, `/admin`

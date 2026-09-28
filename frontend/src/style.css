@@ -2333,7 +2333,7 @@ a {
   letter-spacing: -0.02em;
 }
 
-.section-header span {
+.section-header > div > span {
   display: block;
   margin-top: 5px;
   color: var(--text-muted);

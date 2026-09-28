@@ -62,6 +62,16 @@ const verifyError = ref('')
 const themeOverrides = computed<GlobalThemeOverrides>(() => {
   const dark = themeState.current === 'dark'
   return {
+    Button: {
+      colorPrimary: dark ? '#d4a853' : '#916b20',
+      colorHoverPrimary: dark ? '#e0b866' : '#7a591b',
+      colorPressedPrimary: dark ? '#c49536' : '#654916',
+      colorFocusPrimary: dark ? '#e0b866' : '#7a591b',
+      textColorPrimary: dark ? '#201a10' : '#ffffff',
+      textColorHoverPrimary: dark ? '#201a10' : '#ffffff',
+      textColorPressedPrimary: dark ? '#201a10' : '#ffffff',
+      textColorFocusPrimary: dark ? '#201a10' : '#ffffff',
+    },
     common: {
       primaryColor: dark ? '#d4a853' : '#c49536',
       primaryColorHover: dark ? '#e0b866' : '#a87d28',

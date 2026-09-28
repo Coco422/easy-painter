@@ -55,8 +55,15 @@ const createFormRef = ref<FormInst | null>(null)
 const createModalOpen = ref(false)
 const createForm = reactive({ username: '', email: '', password: '', display_name: '', group_code: null as string | null })
 const createRules: FormRules = {
-  username: { required: true, message: '请输入用户名', trigger: ['input', 'blur'] },
-  password: { required: true, message: '请输入密码', trigger: ['input', 'blur'] },
+  username: [
+    { required: true, message: '请输入用户名', trigger: ['input', 'blur'] },
+    { pattern: /^[a-zA-Z0-9_]{2,64}$/, message: '用户名须为 2–64 位字母、数字或下划线；邮箱请填写到邮箱栏。', trigger: ['input', 'blur'] },
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: ['input', 'blur'] },
+    { min: 6, max: 128, message: '密码长度须为 6–128 个字符。', trigger: ['input', 'blur'] },
+  ],
+  email: { type: 'email', message: '请输入有效的邮箱地址，或留空。', trigger: ['input', 'blur'] },
 }
 
 const editModalOpen = ref(false)
@@ -78,6 +85,8 @@ const editGroupOptions = computed(() => groups.value
   .map((group) => ({ label: `${group.name}（${group.code}）${group.is_enabled ? '' : ' · 当前组已停用'}`, value: group.code })))
 const editRules: FormRules = {
   display_name: { required: true, message: '请输入显示名称', trigger: ['input', 'blur'] },
+  email: { type: 'email', message: '请输入有效的邮箱地址，或留空。', trigger: ['input', 'blur'] },
+  password: { min: 6, max: 128, message: '密码长度须为 6–128 个字符，或留空保持不变。', trigger: ['input', 'blur'] },
 }
 
 function handleError(error: unknown, fallback: string) {
@@ -338,7 +347,7 @@ onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
         <h1>用户管理</h1>
         <span>检索用户、快捷调整分组，并集中维护账户资料。</span>
       </div>
-      <NSpace>
+      <NSpace class="user-header-actions" align="center" :size="12" :wrap="false">
         <NButton :loading="loading" @click="refreshData"><template #icon><RefreshCw :size="15" /></template>刷新</NButton>
         <NButton type="primary" :disabled="groups.length === 0" @click="openCreate"><template #icon><UserPlus :size="16" /></template>创建用户</NButton>
       </NSpace>
@@ -365,9 +374,9 @@ onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
     <NModal v-model:show="createModalOpen" preset="card" title="创建用户" class="admin-form-modal" :mask-closable="!creating" :close-on-esc="!creating">
       <NForm ref="createFormRef" :model="createForm" :rules="createRules" label-placement="top" @submit.prevent="createUser">
         <div class="user-form-grid">
-          <NFormItem label="用户名" path="username"><NInput v-model:value="createForm.username" maxlength="64" placeholder="登录用户名" /></NFormItem>
+          <NFormItem label="用户名" path="username"><NInput v-model:value="createForm.username" maxlength="64" placeholder="2–64 位字母、数字或下划线" /></NFormItem>
           <NFormItem label="显示名称"><NInput v-model:value="createForm.display_name" maxlength="128" placeholder="可选，默认使用用户名" /></NFormItem>
-          <NFormItem label="邮箱"><NInput v-model:value="createForm.email" maxlength="320" placeholder="可选" /></NFormItem>
+          <NFormItem label="邮箱" path="email"><NInput v-model:value="createForm.email" maxlength="320" placeholder="可选，例如 name@example.com" /></NFormItem>
           <NFormItem label="密码" path="password"><NInput v-model:value="createForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" placeholder="设置初始密码" /></NFormItem>
         </div>
         <NFormItem label="用户组">
@@ -388,10 +397,10 @@ onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
     <NModal v-model:show="editModalOpen" preset="card" title="编辑用户" class="admin-form-modal" :mask-closable="!saving">
       <NForm ref="editFormRef" :model="editForm" :rules="editRules" label-placement="top">
         <NFormItem label="用户名"><NInput :value="editForm.username" disabled /></NFormItem>
-        <NFormItem label="邮箱"><NInput v-model:value="editForm.email" maxlength="320" placeholder="留空则不绑定邮箱" /></NFormItem>
+        <NFormItem label="邮箱" path="email"><NInput v-model:value="editForm.email" maxlength="320" placeholder="留空则不绑定邮箱" /></NFormItem>
         <NFormItem label="显示名称" path="display_name"><NInput v-model:value="editForm.display_name" maxlength="128" /></NFormItem>
         <NFormItem label="用户组"><NSelect v-model:value="editForm.group_code" :options="editGroupOptions" placeholder="请选择启用的用户组" /><small class="form-hint">更改只影响后续任务与参考图上传；停用组的现有成员可保留原组。</small></NFormItem>
-        <NFormItem label="重置密码"><NInput v-model:value="editForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" placeholder="超管可直接设置，留空则不修改" /></NFormItem>
+        <NFormItem label="重置密码" path="password"><NInput v-model:value="editForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" placeholder="超管可直接设置，留空则不修改" /></NFormItem>
         <NFormItem label="公开画廊"><NSwitch v-model:value="editForm.is_public" /></NFormItem>
       </NForm>
       <template #footer>
@@ -405,6 +414,7 @@ onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
 </template>
 
 <style scoped>
+.user-header-actions { flex-shrink: 0; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; }
 .search-input { width: min(360px, 100%); }
 .group-filter { width: 180px; }
