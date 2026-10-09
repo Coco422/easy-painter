@@ -14,6 +14,7 @@ const emit = defineEmits<{
 const first = computed(() => props.jobs[0])
 const completed = computed(() => props.jobs.filter(job => job.status === 'succeeded').length)
 const failed = computed(() => props.jobs.filter(job => job.status === 'failed').length)
+const waitingJob = computed(() => props.jobs.find(job => job.status === 'processing') ?? props.jobs.find(isLive))
 const pending = computed(() => props.jobs.length - completed.value - failed.value)
 function isLive(job: JobDetailResponse) { return job.status === 'queued' || job.status === 'processing' }
 </script>
@@ -30,6 +31,7 @@ function isLive(job: JobDetailResponse) { return job.status === 'queued' || job.
       <p class="job-prompt-full">{{ first.prompt }}</p>
     </details>
     <p class="job-billing-meta">{{ first.model_label || first.model }} · {{ first.size }} · {{ first.credit_cost }} 丝 / 张</p>
+    <CurrentJobCard v-if="waitingJob" :job="waitingJob" :is-polling="true" loading-only />
     <div class="batch-job-grid">
       <div v-for="(job, index) in jobs" :key="job.job_id" class="batch-job-item" :class="{ 'batch-job-item--live': isLive(job) }">
         <span class="batch-job-number">第 {{ index + 1 }} 张</span>

@@ -14,6 +14,7 @@ const props = defineProps<{
   job: JobDetailResponse | null
   isPolling: boolean
   compact?: boolean
+  loadingOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -298,8 +299,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section v-if="job" class="current-job" :class="[`current-job--${job.status}`, { 'current-job--compact': compact }]">
-    <div class="current-job-copy">
+  <section v-if="job" class="current-job" :class="[`current-job--${job.status}`, { 'current-job--compact': compact, 'current-job--loading-only': loadingOnly }]">
+    <div v-if="!loadingOnly" class="current-job-copy">
       <p v-if="!compact" class="section-label">当前任务</p>
       <div class="status-line">
         <strong>{{ statusText(job.status) }}</strong>
@@ -338,8 +339,8 @@ onBeforeUnmount(() => {
     <div
       v-if="!compact || job.status === 'succeeded'"
       class="current-job-visual"
-      :class="{ 'is-landscape': imageLayout.ratio >= 1.45 }"
-      :style="{ aspectRatio: displayedImageAspectRatio }"
+      :class="{ 'is-landscape': !loadingOnly && imageLayout.ratio >= 1.45 }"
+      :style="loadingOnly ? undefined : { aspectRatio: displayedImageAspectRatio }"
     >
       <ProtectedImage
         v-if="job.status === 'succeeded'"
@@ -347,6 +348,7 @@ onBeforeUnmount(() => {
         :state="job.media_state"
         :expires-at="job.media_expires_at"
         class="current-job-result-image"
+        :class="{ 'is-previewable': resultImageLoaded && available }"
         alt="当前任务结果图"
         eager
         @loaded="markResultImageLoaded"

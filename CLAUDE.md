@@ -141,7 +141,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 - `App.vue` — Router shell with persistent header
 - `router.ts` — Vue Router config
-- `pages/CreatePage.vue` — Generation panel and active jobs. Each submission groups its accepted jobs in one compact batch card; browser-local job/batch membership survives refresh, while jobs restored without membership stay separate. Prompts collapse to two lines and expand into a bounded scroll area; image actions and polling remain per job.
+- `pages/CreatePage.vue` — Generation panel and active jobs. Each submission groups its accepted jobs in one compact batch card; browser-local job/batch membership survives refresh, while jobs restored without membership stay separate. Prompts collapse to two lines and expand into a bounded scroll area; one shared animated waiting ritual remains visible while any job is pending; image actions and polling remain per job.
 - `pages/InspirationPage.vue` — Permanent community feed
 - `pages/ArtworkLibraryPage.vue` — History, personal/shared portfolio and favorites
 - `components/ArtworkModal.vue` — Gallery membership, favorites, explicit community consent and lifecycle actions
@@ -159,6 +159,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 - Upstream API credentials never reach the frontend — only stored in `.env` and backend container env vars
 - Model capabilities live in `model_configs` and are editable in admin; `PUBLIC_MODELS_JSON` is only a seed/fallback. Per-model `max_reference_images` defaults to 5 and is independent of the user-group reference library quota.
+- Staged reference uploads deduplicate byte-identical content within the same account using existing `media_hash` (SHA-256). Reuse only live available images before quota/eviction checks; preserve filename, creation time and expiry. New uploads store hashes immediately; matching-size legacy candidates without hashes are read and backfilled under the user/source row locks. Failed legacy reads abort without uploading or evicting. No schema migration is needed.
 - Jobs accept ordered `reference_image_ids`, preserve legacy single-image inputs, and snapshot private copies in `generation_jobs.reference_images` (V8). Worker reads snapshots with a legacy-column fallback; cleanup must cover all copies. GPT Image uses repeated `image` multipart fields, while multi-image Seedream uses `image[]`.
 - The `api` and `worker` services share the same Docker image (`backend/Dockerfile`)
 - Dev mode (`make backend`) rewrites DB/Redis/RustFS connection strings to use localhost ports

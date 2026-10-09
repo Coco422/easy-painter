@@ -237,7 +237,7 @@ async def test_upload_evicts_oldest_images_beyond_limit(monkeypatch):
     base_time = datetime(2026, 5, 7, 8, 0, tzinfo=timezone.utc)
     for index in range(reference_routes.MAX_REFERENCE_IMAGES_PER_USER):
         object_key = f"references/2026/05/07/staging/old-{index}.png"
-        storage.objects[object_key] = PNG_BYTES
+        storage.objects[object_key] = PNG_BYTES + str(index).encode()
         db.add(
             ReferenceImage(
                 id=f"old-{index}",
@@ -288,7 +288,7 @@ async def test_upload_failure_does_not_evict_existing_images(monkeypatch):
     storage = FakeStorage()
     for index in range(reference_routes.MAX_REFERENCE_IMAGES_PER_USER):
         object_key = f"references/2026/05/07/staging/old-{index}.png"
-        storage.objects[object_key] = PNG_BYTES
+        storage.objects[object_key] = PNG_BYTES + str(index).encode()
         db.add(
             ReferenceImage(
                 id=f"old-{index}",
@@ -354,7 +354,7 @@ async def test_database_failure_cleans_up_new_upload_without_evicting_oldest(mon
     user = make_user(db)
     storage = FakeStorage()
     old_key = "references/2026/05/07/staging/old.png"
-    storage.objects[old_key] = PNG_BYTES
+    storage.objects[old_key] = PNG_BYTES + b"old"
     db.add(
         ReferenceImage(
             id="old",
@@ -694,4 +694,123 @@ async def test_multi_reference_replay_does_not_copy_or_charge_twice(monkeypatch)
         await submit(['b', 'a'])
     assert error.value.status_code == 409
     assert len(storage.copies) == 2
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_duplicate_upload_reuses_id_and_preserves_retention_and_filename(monkeypatch):
+    from hashlib import sha256
+    db = make_session_factory()()
+    user = make_user(db)
+    storage = FakeStorage()
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+    first = await reference_routes.upload_staged_reference_image(file=make_upload("original.png"), db=db, current_user=user)
+    original = db.get(ReferenceImage, first.id)
+    original.used_count = 7
+    db.commit()
+    deadline = original.media_expires_at
+    created = original.created_at
+    second = await reference_routes.upload_staged_reference_image(file=make_upload("renamed.png"), db=db, current_user=user)
+    assert second.id == first.id
+    assert second.filename == "original.png"
+    assert second.used_count == 7
+    assert second.evicted_image_ids == []
+    assert original.media_expires_at == deadline
+    assert original.created_at == created
+    assert original.media_hash == sha256(PNG_BYTES).hexdigest()
+    assert db.scalar(select(func.count()).select_from(ReferenceImage)) == 1
+    assert len(storage.objects) == 1
+    assert storage.deleted == []
+    db.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("confirm", [False, True])
+async def test_duplicate_legacy_upload_at_full_quota_backfills_hash_without_eviction(monkeypatch, confirm):
+    from hashlib import sha256
+    db = make_session_factory()()
+    user = make_user(db)
+    storage = FakeStorage()
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+    for i in range(reference_routes.MAX_REFERENCE_IMAGES_PER_USER):
+        key = f"legacy-{i}"
+        storage.objects[key] = PNG_BYTES if i == 0 else PNG_BYTES + str(i).encode()
+        db.add(ReferenceImage(id=key, user_id=user.id, object_key=key, filename=f"{i}.png", content_type="image/png"))
+    db.commit()
+    result = await reference_routes.upload_staged_reference_image(file=make_upload("different-name.png"), confirm_evict_oldest=confirm, db=db, current_user=user)
+    assert result.id == "legacy-0"
+    assert result.evicted_image_ids == []
+    assert db.get(ReferenceImage, "legacy-0").media_hash == sha256(PNG_BYTES).hexdigest()
+    assert len(storage.objects) == reference_routes.MAX_REFERENCE_IMAGES_PER_USER
+    assert not storage.deleted
+    db.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("state,expired", [("available", True), ("delete_pending", False), ("deleted", False)])
+async def test_duplicate_does_not_reuse_expired_or_deleted_images(monkeypatch, state, expired):
+    from hashlib import sha256
+    from app.models.media import MediaState
+    db = make_session_factory()()
+    user = make_user(db)
+    storage = FakeStorage()
+    storage.objects['old'] = PNG_BYTES
+    db.add(ReferenceImage(id='old', user_id=user.id, object_key='old', filename='old.png', content_type='image/png', media_hash=sha256(PNG_BYTES).hexdigest(), media_state=MediaState(state), media_expires_at=datetime.now(timezone.utc) + timedelta(hours=-1 if expired else 1)))
+    db.commit()
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+    result = await reference_routes.upload_staged_reference_image(file=make_upload(), db=db, current_user=user)
+    assert result.id != 'old'
+    assert len(storage.objects) == 2
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_duplicate_content_is_isolated_between_users(monkeypatch):
+    db = make_session_factory()()
+    user = make_user(db)
+    other = make_user(db, 'other', 'other')
+    storage = FakeStorage()
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+    first = await reference_routes.upload_staged_reference_image(file=make_upload(), db=db, current_user=user)
+    second = await reference_routes.upload_staged_reference_image(file=make_upload(), db=db, current_user=other)
+    assert first.id != second.id
+    assert len(storage.objects) == 2
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_legacy_comparison_failure_does_not_upload_or_evict(monkeypatch):
+    db = make_session_factory()()
+    user = make_user(db)
+    db.add(ReferenceImage(id='old', user_id=user.id, object_key='old', filename='old.png', content_type='image/png'))
+    db.commit()
+    storage = FakeStorage()
+    def fail_read(*args):
+        raise StorageError('unavailable')
+    storage.download_reference_image = fail_read
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+    with pytest.raises(HTTPException) as error:
+        await reference_routes.upload_staged_reference_image(file=make_upload(), db=db, current_user=user)
+    assert error.value.status_code == 503
+    assert not storage.objects
+    assert not storage.deleted
+    assert db.get(ReferenceImage, 'old').media_hash is None
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_known_duplicate_takes_priority_over_unreadable_legacy_image(monkeypatch):
+    db = make_session_factory()()
+    user = make_user(db)
+    storage = FakeStorage()
+    monkeypatch.setattr(reference_routes, "MinioStorageService", lambda: storage)
+    first = await reference_routes.upload_staged_reference_image(file=make_upload(), db=db, current_user=user)
+    db.add(ReferenceImage(id='legacy', user_id=user.id, object_key='missing', filename='legacy.png', content_type='image/png', created_at=datetime(2020, 1, 1, tzinfo=timezone.utc)))
+    db.commit()
+    def fail_read(*args):
+        raise AssertionError('known hash matches must not download legacy objects')
+    storage.download_reference_image = fail_read
+    second = await reference_routes.upload_staged_reference_image(file=make_upload('renamed.png'), db=db, current_user=user)
+    assert second.id == first.id
+    assert len(storage.objects) == 1
     db.close()

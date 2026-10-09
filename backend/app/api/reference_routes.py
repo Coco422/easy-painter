@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
@@ -86,6 +87,35 @@ async def upload_staged_reference_image(
         if policy.max_reference_images == 0:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前用户组不支持参考图。")
         policy_now = datetime.now(timezone.utc)
+        content_hash = sha256(payload.image_bytes).hexdigest()
+        # The user lock serializes concurrent uploads. Lock candidates as well
+        # so deletion cannot invalidate a reused image before this transaction ends.
+        candidates = db.scalars(
+            select(ReferenceImage).where(
+                ReferenceImage.user_id == current_user.id,
+                ReferenceImage.media_state == MediaState.AVAILABLE,
+                (ReferenceImage.media_expires_at.is_(None)) | (ReferenceImage.media_expires_at > policy_now),
+                (ReferenceImage.media_hash == content_hash) | (
+                    ReferenceImage.media_hash.is_(None) & (
+                        ReferenceImage.media_size_bytes.is_(None) |
+                        (ReferenceImage.media_size_bytes == len(payload.image_bytes))
+                    )
+                ),
+            ).order_by(ReferenceImage.media_hash.is_(None), asc(ReferenceImage.created_at), asc(ReferenceImage.id))
+            .with_for_update().execution_options(populate_existing=True)
+        ).all()
+        for candidate in candidates:
+            if candidate.media_hash is None:
+                try:
+                    stored = storage.download_reference_image(candidate.object_key, candidate.content_type)
+                except StorageError:
+                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="参考图比对失败，请稍后重试。") from None
+                candidate.media_hash = sha256(stored.image_bytes).hexdigest()
+                candidate.media_size_bytes = len(stored.image_bytes)
+            if candidate.media_hash == content_hash and not _expired(candidate.media_expires_at):
+                result = _build_reference_image_item(candidate)
+                db.commit()
+                return result
         existing_count = db.scalar(
             select(func.count()).select_from(ReferenceImage).where(
                 ReferenceImage.user_id == current_user.id,
@@ -131,6 +161,7 @@ async def upload_staged_reference_image(
             retention_hours_snapshot=policy.reference_retention_hours,
             media_expires_at=policy_now + timedelta(hours=policy.reference_retention_hours),
             media_size_bytes=len(payload.image_bytes), media_state=MediaState.AVAILABLE,
+            media_hash=content_hash,
         )
         db.add(image)
         for old_image in oldest_images:
