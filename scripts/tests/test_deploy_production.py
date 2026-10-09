@@ -36,6 +36,7 @@ if [[ "$*" == *pg_restore* ]]; then cat >/dev/null; fi
     def test_success_backs_up_before_stopping_and_migrates_before_starting(self):
         result, commands, env, backups = self.run_deploy()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--project-directory', commands)
         self.assertLess(commands.index('pg_restore'), commands.index('stop -t 30'))
         self.assertLess(commands.index('run --rm migrate'), commands.index('up -d --wait'))
         self.assertIn('IMAGE_TAG=v0.20.3', env)

@@ -19,7 +19,7 @@ if [[ "$release_tag" != "$previous_tag" && "$(printf '%s\n' "$previous_tag" "$re
   exit 0
 fi
 compose=(docker compose --env-file .env -f compose.yml)
-IMAGE_TAG="$release_tag" docker compose --env-file .env -f "$bundle_dir/deploy/compose.yml" pull
+IMAGE_TAG="$release_tag" docker compose --project-directory "$deploy_dir" --env-file .env -f "$bundle_dir/deploy/compose.yml" pull
 snapshot="backups/deploy-$(date -u +%Y%m%dT%H%M%SZ)-$release_tag"
 mkdir -p "$snapshot"
 cp -p .env "$snapshot/env"
