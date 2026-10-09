@@ -141,7 +141,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 - `App.vue` — Router shell with persistent header
 - `router.ts` — Vue Router config
-- `pages/CreatePage.vue` — Generation panel and active jobs
+- `pages/CreatePage.vue` — Generation panel and active jobs. Each submission groups its accepted jobs in one compact batch card; browser-local job/batch membership survives refresh, while jobs restored without membership stay separate. Prompts collapse to two lines and expand into a bounded scroll area; image actions and polling remain per job.
 - `pages/InspirationPage.vue` — Permanent community feed
 - `pages/ArtworkLibraryPage.vue` — History, personal/shared portfolio and favorites
 - `components/ArtworkModal.vue` — Gallery membership, favorites, explicit community consent and lifecycle actions
@@ -166,5 +166,6 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - Admin uses a separate JWT (not a user account) — verified via `ADMIN_SECRET_KEY` env var
 - No frontend state management library — auth state is a simple Vue `reactive()` object in `lib/auth.ts`
 - Frontend and backend must be released together; the version center only reports updates and does not perform partial upgrades
+- Formal tag image builds include a production CD job after all three images succeed; configuration and failure recovery: `docs/continuous-deployment.md`. It deploys only tags whose commits are on main, using production environment SSH Secrets.
 - Every production deployment pins a newly created `vX.Y.Z` tag; `main` and `sha-*` images are build/diagnostic artifacts, not steady production releases
 - Database schema is managed only by forward-only Flyway SQL migrations; API startup must not run `create_all` or ad-hoc `ALTER TABLE`

@@ -6,7 +6,8 @@ import { useRoute, useRouter } from 'vue-router'
 
 import ArtworkModal from '@/components/ArtworkModal.vue'
 import { fetchArtwork, type Artwork } from '@/lib/artworks'
-import CurrentJobCard from '@/components/CurrentJobCard.vue'
+import CurrentJobBatch from '@/components/CurrentJobBatch.vue'
+import { groupJobs } from '@/lib/job-batches'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import {
@@ -25,6 +26,24 @@ import type {
   PublicModel,
   PublicMetaResponse,
 } from '@/lib/types'
+
+const BATCH_STORAGE_KEY = 'easy-painter:job-batches'
+const jobBatches = ref<Record<string, string>>(readJobBatches())
+const activeBatches = computed(() => groupJobs(activeJobs.value, jobBatches.value))
+
+function readJobBatches(): Record<string, string> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(BATCH_STORAGE_KEY) ?? '{}')
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+  } catch { return {} }
+}
+
+function saveJobBatches() {
+  const retainedIds = new Set([...readCachedJobIds(), ...activeJobs.value.map(job => job.job_id)])
+  jobBatches.value = Object.fromEntries(Object.entries(jobBatches.value).filter(([id]) => retainedIds.has(id)))
+  try { window.localStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify(jobBatches.value)) } catch {}
+}
 
 const ACTIVE_JOB_STORAGE_KEY = 'easy-painter:active-job-ids'
 
@@ -138,6 +157,7 @@ function removeActiveJob(jobId: string) {
   clearJobTimer(jobId)
   uncacheJob(jobId)
   activeJobs.value = activeJobs.value.filter((item) => item.job_id !== jobId)
+  saveJobBatches()
 }
 
 function makeQueuedJob(result: CreateJobResponse, promptText: string, model: string, size: ImageSize): JobDetailResponse {
@@ -270,12 +290,15 @@ async function submitJobs(options: {
   const results = await Promise.allSettled(submissions)
   const fulfilled = results.filter((item): item is PromiseFulfilledResult<CreateJobResponse> => item.status === 'fulfilled')
   const rejected = results.filter((item): item is PromiseRejectedResult => item.status === 'rejected')
+  const batchId = randomId()
   for (const item of fulfilled) {
+    jobBatches.value[item.value.job_id] = batchId
     const job = makeQueuedJob(item.value, options.promptText, options.model, options.size)
     upsertActiveJob(job)
     cacheJob(job.job_id)
     pollJob(job.job_id)
   }
+  saveJobBatches()
   if (fulfilled.length === 0) {
     const firstError = rejected[0]?.reason
     throw firstError instanceof Error ? firstError : new Error('提交失败，请稍后重试。')
@@ -405,11 +428,10 @@ onMounted(() => {
 
   <div v-if="activeJobs.length > 0" class="current-jobs-stack">
     <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
-    <CurrentJobCard
-      v-for="job in activeJobs"
-      :key="job.job_id"
-      :job="job"
-      :is-polling="isLiveJob(job)"
+    <CurrentJobBatch
+      v-for="batch in activeBatches"
+      :key="batch.id"
+      :jobs="batch.jobs"
       @retry="retryJob"
       @dismiss="removeActiveJob"
       @add-to-gallery="handleAddToGallery"

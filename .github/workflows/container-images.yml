@@ -21,7 +21,7 @@ permissions:
 
 concurrency:
   group: container-images-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -82,3 +82,53 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           provenance: mode=max
           sbom: true
+
+  deploy:
+    name: Deploy production release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    environment: production
+    concurrency:
+      group: easy-painter-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Validate release on main
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 scripts/version.py check "$RELEASE_TAG"
+          git merge-base --is-ancestor HEAD origin/main
+          bash -n scripts/deploy-production.sh
+          python3 -m unittest discover -s scripts/tests -v
+      - name: Deploy over SSH
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?}" "${DEPLOY_USER:?}" "${DEPLOY_PATH:?}" "${DEPLOY_SSH_KEY:?}" "${DEPLOY_KNOWN_HOSTS:?}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          ssh_args=(-i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          remote_bundle=$(ssh "${ssh_args[@]}" "$target" 'mktemp -d /tmp/easy-painter-cd.XXXXXXXX')
+          [[ "$remote_bundle" =~ ^/tmp/easy-painter-cd\.[a-zA-Z0-9]+$ ]]
+          trap 'ssh "${ssh_args[@]}" "$target" "rm -rf -- $remote_bundle"; rm -f ~/.ssh/deploy_key' EXIT
+          tar -czf - scripts/deploy-production.sh deploy/compose.yml | ssh "${ssh_args[@]}" "$target" "tar -xzf - -C $remote_bundle"
+          printf -v remote_command 'bash %q %q %q' "$remote_bundle/scripts/deploy-production.sh" "$RELEASE_TAG" "$DEPLOY_PATH"
+          ssh "${ssh_args[@]}" "$target" "$remote_command"

@@ -13,6 +13,7 @@ import type { JobDetailResponse } from '@/lib/types'
 const props = defineProps<{
   job: JobDetailResponse | null
   isPolling: boolean
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -83,7 +84,7 @@ let reducedMotionQuery: MediaQueryList | null = null
 
 const available = computed(() => !!props.job && mediaAvailable(props.job.media_state ?? 'none', props.job.media_expires_at, now.value))
 watch(available, value => { if (!value) downloadController?.abort() })
-const liveJob = computed(() => (props.job && isLiveStatus(props.job.status) ? props.job : null))
+const liveJob = computed(() => (!props.compact && props.job && isLiveStatus(props.job.status) ? props.job : null))
 const loadingSeed = computed(() => {
   if (!liveJob.value) return 0
   return hashSeed(`${liveJob.value.job_id}:${liveJob.value.created_at}:${liveJob.value.status}`)
@@ -297,15 +298,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section v-if="job" class="current-job" :class="`current-job--${job.status}`">
+  <section v-if="job" class="current-job" :class="[`current-job--${job.status}`, { 'current-job--compact': compact }]">
     <div class="current-job-copy">
-      <p class="section-label">当前任务</p>
+      <p v-if="!compact" class="section-label">当前任务</p>
       <div class="status-line">
         <strong>{{ statusText(job.status) }}</strong>
         <span v-if="isPolling" class="status-dot" />
       </div>
-      <p class="job-prompt">{{ job.prompt }}</p>
-      <div class="job-billing-meta">
+      <details v-if="!compact" class="job-prompt-details">
+        <summary class="job-prompt">{{ job.prompt }}</summary>
+        <p class="job-prompt-full">{{ job.prompt }}</p>
+      </details>
+      <div v-if="!compact || !isLiveStatus(job.status)" class="job-billing-meta">
         <span>{{ job.model_label || job.model }}</span>
         <span v-if="job.provider_name">{{ job.provider_name }}</span>
         <span>{{ job.credit_cost }} 丝 / 张</span>
@@ -332,6 +336,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div
+      v-if="!compact || job.status === 'succeeded'"
       class="current-job-visual"
       :class="{ 'is-landscape': imageLayout.ratio >= 1.45 }"
       :style="{ aspectRatio: displayedImageAspectRatio }"
