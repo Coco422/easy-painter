@@ -14,6 +14,7 @@ DEFAULT_EXAMPLE_PROMPTS = [
 ]
 
 MODEL_REFERENCE_IMAGE_SUPPORT = {
+    "gpt-image-2": True,
     "gpt-image-2-b": True,
     "gpt-image-2-c": True,
     "grok-4.1-image": True,
@@ -28,6 +29,15 @@ MODEL_SUPPORTED_SIZES = {
 }
 
 DEFAULT_PUBLIC_MODELS = [
+    {
+        "id": "gpt-image-2",
+        "label": "GPT-Image-2（支持参考图）",
+        "enabled": True,
+        "supports_reference_image": True,
+        "max_reference_images": 5,
+        "supported_sizes": [],
+        "credit_cost": 2,
+    },
     {
         "id": "gpt-image-2-c",
         "label": "GPT-Image-2 C（支持参考图）",

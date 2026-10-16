@@ -85,20 +85,41 @@ class UpstreamImageClient:
         except httpx.HTTPError as exc:
             raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True) from exc
 
+        if response.status_code == 429:
+            # OpenAI-compatible upstreams report an exhausted or cooling-down image
+            # quota as 429 (chatgpt2api returns "no available image quota"). Retrying
+            # inside the task lease cannot clear that, so fail fast and refund.
+            logger.warning(
+                "Upstream image generation exhausted its quota with 429 for model=%s: %s",
+                model,
+                self._error_snippet(response),
+            )
+            raise UpstreamServiceError("生成服务当前额度不足，请稍后再试。", retryable=False)
+        if response.status_code in (401, 403):
+            # Wrong/revoked key, or a model the upstream account is not allowed to use.
+            logger.error(
+                "Upstream image generation was rejected with %s for model=%s; check the provider API key and model permission: %s",
+                response.status_code,
+                model,
+                self._error_snippet(response),
+            )
+            raise UpstreamServiceError("生成服务配置异常，请联系管理员。", retryable=False)
         if response.status_code >= 500:
             logger.warning(
-                "Upstream image generation failed with %s for model=%s size=%s.",
+                "Upstream image generation failed with %s for model=%s size=%s: %s",
                 response.status_code,
                 model,
                 request_payload["size"],
+                self._error_snippet(response),
             )
             raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True)
         if response.status_code >= 400:
             logger.warning(
-                "Upstream image generation rejected request with %s for model=%s size=%s.",
+                "Upstream image generation rejected request with %s for model=%s size=%s: %s",
                 response.status_code,
                 model,
                 request_payload["size"],
+                self._error_snippet(response),
             )
             raise UpstreamServiceError("生成请求未能完成，请稍后调整提示词再试。", retryable=False)
 
@@ -207,6 +228,15 @@ class UpstreamImageClient:
         if isinstance(value, bool):
             return str(value).lower()
         return str(value)
+
+    @staticmethod
+    def _error_snippet(response: httpx.Response) -> str:
+        """Single-line upstream error body for logs; upstreams often hide the cause there."""
+        try:
+            text = response.text
+        except Exception:  # pragma: no cover - defensive for malformed responses
+            return ""
+        return " ".join(str(text).split())[:300]
 
     def _download_image(self, image_url: str) -> tuple[bytes, str]:
         timeout = self.config.get("timeout_seconds", 700)
