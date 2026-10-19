@@ -17,7 +17,7 @@ async function loadAnnouncements() {
 }
 
 watch(
-  () => [authState.token, authState.user?.email] as const,
+  () => [authState.sessionId, authState.user?.email] as const,
   () => { void loadAnnouncements() },
   { immediate: true },
 )

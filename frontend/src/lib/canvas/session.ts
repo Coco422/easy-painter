@@ -6,7 +6,7 @@ import {
   fetchPublicMeta,
   uploadReferenceImage,
 } from '@/lib/api'
-import { authState, fetchCurrentUser, getAuthHeader } from '@/lib/auth'
+import { authState, fetchCurrentUser, authenticatedFetch } from '@/lib/auth'
 import { mediaAvailable, sameOriginMedia } from '@/lib/media-state'
 import type { ImageSize, PublicMetaResponse } from '@/lib/types'
 import {
@@ -40,7 +40,7 @@ export function useCanvasSession(initial: CanvasProject) {
     canUndo = computed(() => (historyVersion.value, past.length > 0)),
     canRedo = computed(() => (historyVersion.value, future.length > 0))
   const ownerId = initial.ownerId,
-    token = authState.token
+    sessionId = authState.sessionId
   let disposed = false,
     editVersion = 0,
     saveTimer: ReturnType<typeof setTimeout> | undefined,
@@ -51,7 +51,7 @@ export function useCanvasSession(initial: CanvasProject) {
   let cloudTimer: ReturnType<typeof setTimeout> | undefined
   let syncIntent = 0
   function assertOwner() {
-    if (disposed || authState.user?.id !== ownerId || authState.token !== token)
+    if (disposed || authState.user?.id !== ownerId || authState.sessionId !== sessionId)
       throw new Error('登录状态已变化，请重新打开画布。')
   }
   function checkpoint() {
@@ -309,10 +309,7 @@ export function useCanvasSession(initial: CanvasProject) {
     }
     if (!sameOriginMedia(job.image_url, location.origin))
       throw new Error('生成结果地址不受支持。')
-    const response = await fetch(job.image_url, {
-      headers: getAuthHeader(),
-      credentials: 'same-origin',
-    })
+    const response = await authenticatedFetch(job.image_url)
     if (!response.ok)
       throw new Error('图片已生成，但本地保存失败。请重试获取图片。')
     const item = await makeAsset(
@@ -436,7 +433,7 @@ export function useCanvasSession(initial: CanvasProject) {
       if (
         disposed ||
         authState.user?.id !== ownerId ||
-        authState.token !== token
+        authState.sessionId !== sessionId
       )
         return
       cloudState.value = '云端未同步'

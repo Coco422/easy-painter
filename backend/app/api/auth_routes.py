@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from redis import Redis
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.auth import create_access_token, hash_password, verify_password
+from app.core.auth import create_access_token, decode_access_token, hash_password, require_current_user, verify_password
 from app.core.config import Settings, get_settings
 from app.core.network import extract_client_ip, rate_limit_identity
 from app.db.session import get_db
@@ -37,8 +38,63 @@ from app.services.mailer import EmailDeliveryError, SmtpEmailSender
 from app.services.rate_limit import GenerationRateLimiter
 from app.services.redis_client import get_redis
 from app.services.group_policy import get_default_group
+from app.models.auth_session import AuthSession
+from app.services.auth_sessions import (
+    ACCESS_LIFETIME, COOKIE_NAME, check_session_request, clear_session_cookie,
+    create_session, parse_refresh, rotate_session, set_session_cookie, utcnow,
+)
 
 auth_router = APIRouter()
+
+
+def _session_response(db: Session, user: User, response: Response | None) -> TokenResponse:
+    session = create_session(db, user)
+    if response is not None:
+        set_session_cookie(response, session)
+    return TokenResponse(access_token=create_access_token(
+        {"sub": user.id, "sid": session.id, "typ": "access"}, expires_delta=ACCESS_LIFETIME,
+    ))
+
+
+@auth_router.post("/auth/session", response_model=TokenResponse)
+def exchange_legacy_session(
+    request: Request, response: Response,
+    user: User = Depends(require_current_user), db: Session = Depends(get_db),
+) -> TokenResponse:
+    check_session_request(request)
+    payload = decode_access_token(request.headers.get("authorization", "").split(" ", 1)[-1])
+    if payload.get("sid") or payload.get("typ"):
+        raise HTTPException(401, "请使用刷新凭证续期。")
+    return _session_response(db, user, response)
+
+
+@auth_router.post("/auth/refresh", response_model=TokenResponse)
+def refresh_session(request: Request, response: Response, db: Session = Depends(get_db)):
+    check_session_request(request)
+    try:
+        session = rotate_session(db, request.cookies.get(COOKIE_NAME, ""))
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        failure = JSONResponse({"detail": exc.detail}, status_code=401)
+        clear_session_cookie(failure)
+        return failure
+    set_session_cookie(response, session)
+    return TokenResponse(access_token=create_access_token(
+        {"sub": session.user_id, "sid": session.id, "typ": "access"}, expires_delta=ACCESS_LIFETIME,
+    ))
+
+
+@auth_router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout_session(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
+    check_session_request(request)
+    parsed = parse_refresh(request.cookies.get(COOKIE_NAME, ""))
+    if parsed:
+        session = db.scalar(select(AuthSession).where(AuthSession.id == parsed[0]).with_for_update())
+        if session:
+            session.revoked_at = utcnow()
+            db.commit()
+    clear_session_cookie(response)
 
 
 @auth_router.post("/auth/login", response_model=TokenResponse)
@@ -47,7 +103,10 @@ def login(
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
     request: Request = None,
+    response: Response = None,
 ) -> TokenResponse:
+    if isinstance(request, Request):
+        check_session_request(request)
     limiter = GenerationRateLimiter(redis_client=redis_client, limit=10, window_seconds=60)
     identity = rate_limit_identity(extract_client_ip(request))
     result = limiter.check(f"login:{identity}")
@@ -67,8 +126,7 @@ def login(
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误。")
 
-    token = create_access_token({"sub": user.id})
-    return TokenResponse(access_token=token)
+    return _session_response(db, user, response)
 
 
 @auth_router.post(
@@ -146,7 +204,11 @@ def register(
     db: Session = Depends(get_db),
     redis_client: Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
+    response: Response = None,
+    request: Request = None,
 ) -> TokenResponse:
+    if isinstance(request, Request):
+        check_session_request(request)
     if not settings.registration_enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前未开放注册。")
 
@@ -179,7 +241,7 @@ def register(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名或邮箱已存在。")
     consume_email_code(redis_client, email=email, purpose=EmailCodePurpose.REGISTER)
-    return TokenResponse(access_token=create_access_token({"sub": user.id}))
+    return _session_response(db, user, response)
 
 
 @auth_router.post("/auth/password/reset", status_code=status.HTTP_204_NO_CONTENT)

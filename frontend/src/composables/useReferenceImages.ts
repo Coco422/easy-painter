@@ -46,7 +46,7 @@ function releaseObjectUrl(id: string) {
 
 async function uploadAndSelect(file: File, confirmEvictOldest: boolean, limit: number) {
   if (selected.value.length >= limit) throw new Error(`当前模型单次最多支持 ${limit} 张参考图。`)
-  const ownerToken = authState.token
+  const ownerToken = authState.sessionId
   if (uploading.value) {
     throw new Error('已有参考图正在上传，请稍候。')
   }
@@ -55,7 +55,7 @@ async function uploadAndSelect(file: File, confirmEvictOldest: boolean, limit: n
   pendingPreviewUrl.value = URL.createObjectURL(file)
   try {
     const item = await uploadReferenceImage(file, confirmEvictOldest)
-    if (ownerToken !== authState.token) throw new Error('登录状态已变化，请重新选择参考图。')
+    if (ownerToken !== authState.sessionId) throw new Error('登录状态已变化，请重新选择参考图。')
     for (const id of item.evicted_image_ids ?? []) {
       deselect(id)
       releaseObjectUrl(id)
@@ -97,7 +97,7 @@ function clearSelected() {
   selected.value = []
 }
 
-watch(() => authState.token, () => {
+watch(() => authState.sessionId, () => {
   clearSelected()
   history.value = []
   historyTotal.value = 0
@@ -119,12 +119,12 @@ async function remove(item: ReferenceImageItem) {
 }
 
 async function loadHistory(reset = true) {
-  const ownerToken = authState.token
+  const ownerToken = authState.sessionId
   historyLoading.value = true
   try {
     const nextPage = reset ? 1 : historyPage.value + 1
     const response = await fetchReferenceImages(nextPage)
-    if (ownerToken !== authState.token) return
+    if (ownerToken !== authState.sessionId) return
     history.value = reset
       ? response.items
       : [...history.value, ...response.items.filter((item) => !history.value.some((entry) => entry.id === item.id))]

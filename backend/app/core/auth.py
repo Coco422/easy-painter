@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.user import User
+from app.models.auth_session import AuthSession
+from app.services.auth_sessions import valid_session
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -49,10 +51,15 @@ def _extract_user(
     if not credentials:
         return None
     payload = decode_access_token(credentials.credentials)
+    if payload.get("typ") not in {None, "access"} or payload.get("role") == "admin":
+        raise HTTPException(status_code=401, detail="无效的登录凭证。")
     user_id = payload.get("sub")
     if not user_id:
         return None
-    return db.get(User, user_id)
+    user = db.get(User, user_id)
+    if payload.get("typ") == "access" and not valid_session(db.get(AuthSession, payload.get("sid")), user):
+        raise HTTPException(status_code=401, detail="登录已过期。")
+    return user
 
 
 def get_current_user_optional(

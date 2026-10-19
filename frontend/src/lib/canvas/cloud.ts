@@ -1,5 +1,5 @@
 import { apiRequest } from '@/lib/api'
-import { getAuthHeader } from '@/lib/auth'
+import { authenticatedFetch } from '@/lib/auth'
 import { assetIds, clone, uid, validateProject } from './model'
 import type { CanvasProject } from './model'
 import { getAsset, getProject, makeAsset, saveProject } from './storage'
@@ -86,9 +86,8 @@ export async function restoreCloudProject(
     } catch {
       /* Download missing assets. */
     }
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `/api/v1/canvas/projects/${id}/assets/${hash}`,
-      { headers: getAuthHeader() },
     )
     if (!response.ok) throw new Error('云端素材读取失败，本地画布尚未改变。')
     const asset = await makeAsset(

@@ -108,7 +108,7 @@ def test_email_code_registration_and_email_login(monkeypatch):
             sent.update(recipient=recipient, code=code, purpose=purpose.value)
 
     monkeypatch.setattr(auth_routes, "SmtpEmailSender", FakeSender)
-    monkeypatch.setattr(auth_routes, "create_access_token", lambda data: f"token:{data['sub']}")
+    monkeypatch.setattr(auth_routes, "create_access_token", lambda data, **kwargs: f"token:{data['sub']}")
 
     response = auth_routes.request_email_code(
         body=EmailCodeRequest(email="NewUser@Example.com", purpose=EmailCodePurpose.REGISTER),

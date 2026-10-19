@@ -1,5 +1,6 @@
 from app.models.artwork import Favorite, CommunitySubmission
 from app.models.announcement import Announcement
+from app.models.auth_session import AuthSession
 from app.models.canvas import CanvasAsset, CanvasProject
 from app.models.credit_transaction import CreditTransaction, CreditTransactionType
 from app.models.gallery_like import GalleryLike

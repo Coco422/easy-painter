@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { authState, getAdminAuthHeader, getAuthHeader } from '@/lib/auth'
+import { authState, authenticatedFetch, getAdminAuthHeader, getAuthHeader } from '@/lib/auth'
 import { mediaAvailable, retryableMediaStatus, sameOriginMedia } from '@/lib/media-state'
 import { useMediaClock } from '@/composables/useMediaClock'
 
@@ -41,7 +41,7 @@ function begin() {
   const attempt = async (retried = false) => {
     if (signal.aborted || version !== generation || !allowed.value) return
     try {
-      const response = await fetch(src, {
+      const response = await (local && !props.admin ? authenticatedFetch : fetch)(src, {
         headers: local ? (props.admin ? getAdminAuthHeader() : getAuthHeader()) : {},
         credentials: local ? 'same-origin' : 'omit', signal, cache: 'default',
       })
@@ -65,7 +65,7 @@ function begin() {
   }
   void attempt()
 }
-watch([() => props.src, allowed, visible, () => props.admin ? authState.adminToken : authState.token], begin)
+watch([() => props.src, allowed, visible, () => props.admin ? authState.adminToken : authState.sessionId], begin)
 onMounted(() => {
   if (props.eager || !('IntersectionObserver' in window)) visible.value = true
   else {

@@ -1,4 +1,4 @@
-import { getAdminAuthHeader, getAuthHeader } from './auth'
+import { authenticatedFetch, getAdminAuthHeader, getAuthHeader } from './auth'
 import { adminErrorMessage } from './admin-error'
 import type {
   AdminHealth,
@@ -55,7 +55,7 @@ export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T>
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(url, {
+  const response = await authenticatedFetch(url, {
     ...init,
     headers,
   })
@@ -141,7 +141,7 @@ export function deleteReferenceImage(id: string) {
 }
 
 export async function fetchReferenceImageObjectUrl(id: string): Promise<string> {
-  const response = await fetch(`/api/v1/reference-images/${id}/file`, {
+  const response = await authenticatedFetch(`/api/v1/reference-images/${id}/file`, {
     headers: getAuthHeader(),
   })
   if (!response.ok) {

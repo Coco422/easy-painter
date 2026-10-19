@@ -66,7 +66,7 @@ function update(item: Artwork) {
   }
 }
 async function favorite(item: Artwork) {
-  if (!authState.token) { void router.push('/login'); return }
+  if (!authState.sessionId) { void router.push('/login'); return }
   busy.value = new Set(busy.value).add(item.id)
   try { update(await setFavorite(item, !item.is_favorite)) }
   catch (e) { error.value = e instanceof Error ? e.message : '收藏失败。' }
@@ -91,7 +91,7 @@ async function share() {
 function deleted(item: Artwork) {
   items.value = items.value.filter(i => !(i.kind === item.kind && i.id === item.id)); total.value = Math.max(0,total.value-1)
 }
-watch([() => props.mode, () => route.params.username, () => authState.token], () => {
+watch([() => props.mode, () => route.params.username, () => authState.sessionId], () => {
   state.value = 'all'; selected.value = null; refreshed.clear(); items.value = []; void load(1)
 }, { immediate: true })
 onBeforeUnmount(() => { requestId += 1; controller?.abort(); if (poll) clearTimeout(poll) })

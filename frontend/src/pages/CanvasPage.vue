@@ -162,14 +162,14 @@ watch(
   },
 )
 watch(
-  () => authState.token,
+  () => authState.sessionId,
   () => {
     current.value = undefined
     projects.value = []
     cloud.value = []
     capabilities.value = undefined
     generation++
-    if (!authState.token) void router.replace('/login')
+    if (!authState.sessionId) void router.replace('/login')
     else void load()
   },
 )

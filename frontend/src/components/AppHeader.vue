@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Moon, Sun, Wallet } from 'lucide-vue-next'
+import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import logoUrl from '@/assets/brand/logo.png'
 import VersionReleaseDialog from '@/components/VersionReleaseDialog.vue'
@@ -12,10 +13,16 @@ defineProps<{
 
 const router = useRouter()
 const route = useRoute()
+const logoutError = ref('')
 
 async function handleLogout() {
-  await logout()
-  router.push('/')
+  logoutError.value = ''
+  try {
+    await logout()
+    await router.push('/')
+  } catch (error) {
+    logoutError.value = error instanceof Error ? error.message : '退出未能同步到服务器，请重试。'
+  }
 }
 </script>
 
@@ -53,6 +60,9 @@ async function handleLogout() {
       </button>
     </nav>
   </header>
+  <p v-if="logoutError" class="feedback-banner" role="alert">
+    {{ logoutError }} <button class="ghost-button" @click="handleLogout">重试退出</button>
+  </p>
 </template>
 
 <style scoped>
