@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 
 import ProtectedImage from '@/components/ProtectedImage.vue'
 import MediaExpiry from '@/components/MediaExpiry.vue'
-import { authState } from '@/lib/auth'
+import { authState, fetchImageFile } from '@/lib/auth'
 import { fetchArtwork, setFavorite, type Artwork } from '@/lib/artworks'
 import { imageDownloadFilename } from '@/lib/image-download'
 import type { InspirationItem } from '@/lib/types'
@@ -76,7 +76,7 @@ async function downloadImage() {
   if (!props.item || unavailable.value) return
   const item = props.item
   try {
-    const response = await fetch(item.image_url)
+    const response = await fetchImageFile(item.image_url)
     if (!response.ok) { if ([401,403,404,410].includes(response.status)) unavailable.value = true; throw new Error('download failed') }
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
@@ -158,7 +158,7 @@ function formatSource(source: string) {
       </div>
 
       <div class="modal-image-frame">
-        <ProtectedImage :src="item.image_url" :alt="item.title" :state="unavailable ? 'unavailable' : 'available'" eager @invalid="unavailable = true" />
+        <ProtectedImage :src="item.image_url" :alt="item.title" :state="unavailable ? 'unavailable' : 'available'" eager preview @invalid="unavailable = true" />
       </div>
 
       <div class="modal-copy">

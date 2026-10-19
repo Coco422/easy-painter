@@ -163,6 +163,17 @@ export async function authenticatedFetch(url: string, init?: RequestInit): Promi
   return response
 }
 
+/** Image downloads share refresh handling; external media receives no credentials. */
+export function fetchImageFile(url: string, init?: RequestInit): Promise<Response> {
+  const target = new URL(url, window.location.origin)
+  if (target.origin === window.location.origin && target.pathname.startsWith('/api/')) {
+    return authenticatedFetch(url, init)
+  }
+  const headers = new Headers(init?.headers)
+  headers.delete('Authorization')
+  return fetch(url, { ...init, headers, credentials: 'omit' })
+}
+
 async function signIn(url: string, body: unknown): Promise<void> {
   const operation = ++authOperation
   await withSessionLock(async () => {

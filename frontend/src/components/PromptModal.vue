@@ -4,6 +4,8 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { imageDownloadFilename } from '@/lib/image-download'
+import { fetchImageFile } from '@/lib/auth'
+import ProtectedImage from '@/components/ProtectedImage.vue'
 import type { GalleryItem } from '@/lib/types'
 
 const DEFAULT_TAGS = ['头像', '插画', '海报', '风景', '人像', '动漫', '3D', 'LOGO', '表情包', '壁纸']
@@ -106,7 +108,7 @@ async function downloadImage() {
   if (!props.item) return
   const item = props.item
   try {
-    const response = await fetch(item.image_url)
+    const response = await fetchImageFile(item.image_url)
     if (!response.ok) throw new Error('download failed')
     const blob = await response.blob()
     const url = URL.createObjectURL(blob)
@@ -173,7 +175,7 @@ function onCustomTagKeydown(e: KeyboardEvent) {
       </div>
 
       <div class="modal-image-frame">
-        <img :src="item.image_url" :alt="item.prompt" class="modal-image" />
+        <ProtectedImage :src="item.image_url" :state="item.media_state || 'available'" :expires-at="item.media_expires_at" :alt="item.prompt" class="modal-image" eager preview />
       </div>
 
       <!-- Publish mode: tag input -->

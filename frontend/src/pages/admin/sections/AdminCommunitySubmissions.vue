@@ -11,6 +11,7 @@ const emit = defineEmits<{ changed: []; 'auth-expired': [] }>()
 const message = useMessage(), now = useMediaClock()
 const state = ref('pending'), page = ref(1), total = ref(0)
 const items = ref<Submission[]>([]), selected = ref<Submission | null>(null)
+const detailStart = ref<HTMLElement | null>(null)
 const loading = ref(false), saving = ref(false), reason = ref('')
 const options = [ ['pending','待审核'], ['approved','已收录'], ['rejected','已拒绝'], ['withdrawn','已撤回'], ['expired','已过期'], ['all','全部'] ].map(([value,label]) => ({value,label}))
 const reviewable = computed(() => !!selected.value && selected.value.submission_status === 'pending' && mediaAvailable(selected.value.media_state, selected.value.media_expires_at, now.value))
@@ -54,9 +55,9 @@ void load()
       <NButton @click="open(item)">{{ item.submission_status === 'pending' ? '审核' : '查看' }}</NButton>
     </div>
     <NPagination v-if="total" v-model:page="page" :page-size="25" :item-count="total" />
-    <NModal :show="!!selected" preset="card" title="审核社区投稿" style="width: min(800px, 94vw)" :mask-closable="!saving" :closable="!saving" @update:show="value => { if (!value) selected = null }">
+    <NModal :show="!!selected" :trap-focus="false" preset="card" title="审核社区投稿" @after-enter="detailStart?.focus()" @keydown.esc="!saving && (selected = null)" style="width: min(800px, 94vw)" :mask-closable="!saving" :closable="!saving" @update:show="value => { if (!value) selected = null }">
       <template v-if="selected">
-        <div class="review-original"><ProtectedImage :src="selected.image_url" :state="selected.media_state" :expires-at="selected.media_expires_at" eager admin /></div>
+        <div ref="detailStart" tabindex="-1" class="review-original"><ProtectedImage :src="selected.image_url" :state="selected.media_state" :expires-at="selected.media_expires_at" eager admin preview /></div>
         <MediaExpiry :state="selected.media_state" :expires-at="selected.media_expires_at" :permanent="selected.retention_kind === 'permanent'" />
         <p class="review-prompt">{{ selected.prompt }}</p><p v-if="selected.review_reason">处理意见：{{ selected.review_reason }}</p>
         <template v-if="selected.submission_status === 'pending'">

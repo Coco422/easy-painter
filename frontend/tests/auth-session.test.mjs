@@ -179,3 +179,21 @@ test('a stale profile response cannot populate another account after a storage e
   assert.equal(app.authState.user, null)
   assert.equal(app.authState.sessionId, 'other-session')
 })
+
+test('private image downloads refresh expired access while external media never receives credentials', async () => {
+  const fresh = token()
+  const app = setup({ initial: token({ exp: 1 }), fetch: async (url, init) => {
+    if (url.endsWith('/refresh')) return json({ access_token: fresh })
+    if (url.startsWith('/api/')) {
+      assert.equal(init.headers.get('Authorization'), `Bearer ${fresh}`)
+    } else {
+      assert.equal(init.headers.get('Authorization'), null)
+      assert.equal(init.credentials, 'omit')
+    }
+    return new Response('image bytes')
+  } })
+  assert.equal((await app.fetchImageFile('/api/v1/jobs/image/file')).status, 200)
+  assert.equal((await app.fetchImageFile('https://external.test/image.png', {
+    headers: { Authorization: 'must-not-leak' }, credentials: 'include',
+  })).status, 200)
+})

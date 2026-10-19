@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import ProtectedImage from '@/components/ProtectedImage.vue'
 import MediaExpiry from '@/components/MediaExpiry.vue'
-import { getAuthHeader } from '@/lib/auth'
+import { fetchImageFile } from '@/lib/auth'
 import { useMediaClock } from '@/composables/useMediaClock'
 import { mediaAvailable } from '@/lib/media-state'
 import { imageDownloadFilename } from '@/lib/image-download'
@@ -177,7 +177,7 @@ async function downloadImage() {
   downloadError.value = ''
   downloadController = new AbortController()
   try {
-    const response = await fetch(job.image_url, { headers: getAuthHeader(), signal: downloadController.signal })
+    const response = await fetchImageFile(job.image_url, { signal: downloadController.signal })
     if (!response.ok) throw new Error('download failed')
     const blob = await response.blob()
     if (!available.value) return

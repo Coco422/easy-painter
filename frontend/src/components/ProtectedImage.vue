@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { authState, authenticatedFetch, getAdminAuthHeader, getAuthHeader } from '@/lib/auth'
+import { authState, fetchImageFile, getAdminAuthHeader, getAuthHeader } from '@/lib/auth'
 import { mediaAvailable, retryableMediaStatus, sameOriginMedia } from '@/lib/media-state'
 import { useMediaClock } from '@/composables/useMediaClock'
+import ImageViewer from '@/components/ImageViewer.vue'
 
 const props = withDefaults(defineProps<{
-  src?: string | null; state?: string; expiresAt?: string | null; alt?: string; eager?: boolean; admin?: boolean
+  src?: string | null; state?: string; expiresAt?: string | null; alt?: string; eager?: boolean; admin?: boolean; preview?: boolean
 }>(), { state: 'available', alt: '', eager: false, admin: false })
-const emit = defineEmits<{ invalid: []; loaded: [event: Event] }>()
+const emit = defineEmits<{ invalid: []; loaded: [event: Event]; 'preview-change': [show: boolean] }>()
 const now = useMediaClock()
 const frame = ref<HTMLElement | null>(null)
 const visible = ref(false)
 const objectUrl = ref('')
+const loaded = ref(false)
+const previewOpen = ref(false)
 const failed = ref(false)
 const retrying = ref(false)
 const allowed = computed(() => mediaAvailable(props.state, props.expiresAt, now.value))
@@ -21,6 +24,8 @@ let retryTimer: ReturnType<typeof setTimeout> | undefined
 let generation = 0
 
 function clear() {
+  previewOpen.value = false
+  loaded.value = false
   generation += 1
   controller?.abort()
   if (retryTimer) clearTimeout(retryTimer)
@@ -29,6 +34,13 @@ function clear() {
   objectUrl.value = ''
   retrying.value = false
 }
+function openPreview(event: Event) {
+  if (!props.preview) return
+  event.stopPropagation()
+  if (allowed.value && objectUrl.value && loaded.value && !failed.value) previewOpen.value = true
+}
+function imageLoaded(event: Event) { loaded.value = true; emit('loaded', event) }
+watch(previewOpen, show => emit('preview-change', show), { flush: 'sync' })
 function begin() {
   clear()
   failed.value = false
@@ -41,7 +53,7 @@ function begin() {
   const attempt = async (retried = false) => {
     if (signal.aborted || version !== generation || !allowed.value) return
     try {
-      const response = await (local && !props.admin ? authenticatedFetch : fetch)(src, {
+      const response = await (local && !props.admin ? fetchImageFile : fetch)(src, {
         headers: local ? (props.admin ? getAdminAuthHeader() : getAuthHeader()) : {},
         credentials: local ? 'same-origin' : 'omit', signal, cache: 'default',
       })
@@ -79,17 +91,25 @@ onBeforeUnmount(() => { observer?.disconnect(); clear() })
 </script>
 <template>
   <span ref="frame" class="protected-image">
-    <img v-if="allowed && objectUrl && !failed" :src="objectUrl" :alt="alt" @load="emit('loaded', $event)" @error="failed = true" />
+    <img v-if="allowed && objectUrl && !failed" :src="objectUrl" :alt="alt"
+      :role="preview ? 'button' : undefined" :tabindex="preview ? 0 : undefined"
+      :aria-label="preview ? `${alt || '图片'}，放大查看` : undefined"
+      :title="preview ? '点击放大，支持滚轮缩放与拖动' : undefined"
+      :class="{ 'is-previewable': preview && loaded }"
+      @click="openPreview" @keydown.enter.prevent="openPreview" @keydown.space.prevent="openPreview"
+      @load="imageLoaded" @error="failed = true; previewOpen = false" />
     <span v-else class="image-placeholder" role="status">
       <span v-if="!allowed">{{ state === 'none' ? '暂无生成图片' : '图片已失效' }}</span>
       <span v-else-if="!src">预览准备中，可打开详情</span>
       <span v-else-if="failed">图片暂时无法显示</span>
       <span v-else>{{ retrying ? '连接不稳定，重试一次…' : '正在加载图片…' }}</span>
     </span>
+    <ImageViewer v-if="preview && allowed && objectUrl && !failed" v-model:show="previewOpen" :src="objectUrl" />
   </span>
 </template>
 <style scoped>
 .protected-image { display: block; width: 100%; height: 100%; min-height: 120px; background: var(--bg-elevated); overflow: hidden; }
 img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.is-previewable { cursor: zoom-in; }
 .image-placeholder { display: grid; place-items: center; height: 100%; min-height: 140px; padding: 24px; color: var(--text-muted); font-size: 13px; text-align: center; }
 </style>

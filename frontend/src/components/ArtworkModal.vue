@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { Check, Share2 } from 'lucide-vue-next'
 import ProtectedImage from '@/components/ProtectedImage.vue'
 import MediaExpiry from '@/components/MediaExpiry.vue'
-import { authState, getAuthHeader } from '@/lib/auth'
+import { authState, fetchImageFile } from '@/lib/auth'
 import { deleteJob } from '@/lib/api'
 import { setGallery, setFavorite, submitCommunity, withdrawCommunity, type Artwork } from '@/lib/artworks'
 import { mediaAvailable } from '@/lib/media-state'
@@ -29,6 +29,7 @@ const promptPublic = ref(true)
 const tags = ref('')
 const consent = ref(false)
 const panel = ref<HTMLElement | null>(null)
+const previewOpen = ref(false)
 const previousFocus = document.activeElement as HTMLElement | null
 let downloadController: AbortController | undefined
 const submissionLabels: Record<string,string> = { none: '未投稿', pending: '待审核', approved: '已收录', rejected: '已拒绝', withdrawn: '已撤回', expired: '投稿已过期' }
@@ -58,7 +59,7 @@ async function download() {
   busy.value = true; error.value = ''
   downloadController = new AbortController()
   try {
-    const response = await fetch(props.item.image_url, { headers: getAuthHeader(), signal: downloadController.signal })
+    const response = await fetchImageFile(props.item.image_url, { signal: downloadController.signal })
     if (!response.ok) { if ([401,403,404,410].includes(response.status)) emit('invalid'); throw new Error('图片已失效或暂时无法下载。') }
     const blob = await response.blob()
     if (!available.value) return
@@ -99,6 +100,7 @@ async function copy() {
   catch { error.value = '复制失败，请手动选择提示词。' }
 }
 function keydown(event: KeyboardEvent) {
+  if (previewOpen.value) return
   if (event.key === 'Escape') close()
   if (event.key === 'Tab' && panel.value) {
     const focusable = [...panel.value.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea')]
@@ -115,7 +117,7 @@ onBeforeUnmount(() => { document.removeEventListener('keydown', keydown); downlo
   <div class="modal-backdrop" @click.self="close">
     <section ref="panel" class="modal-panel artwork-dialog" role="dialog" aria-modal="true" aria-labelledby="artwork-dialog-title">
       <header class="dialog-header"><h2 id="artwork-dialog-title">{{ available ? '作品详情' : '生成记录' }}</h2><button class="ghost-button" :disabled="busy" @click="close">关闭</button></header>
-      <div class="dialog-image"><ProtectedImage :src="item.image_url" :state="item.media_state" :expires-at="item.media_expires_at" :alt="item.title || '生成作品'" eager @invalid="emit('invalid')" /></div>
+      <div class="dialog-image"><ProtectedImage :src="item.image_url" :state="item.media_state" :expires-at="item.media_expires_at" :alt="item.title || '生成作品'" eager preview @preview-change="previewOpen = $event" @invalid="emit('invalid')" /></div>
       <div class="dialog-body">
         <MediaExpiry :state="item.media_state" :expires-at="item.media_expires_at" :permanent="item.retention_kind === 'permanent'" />
         <p v-if="item.retention_kind === 'permanent'" class="dialog-note">当前查看社区收录副本，原始生成文件按原期限清理。</p>

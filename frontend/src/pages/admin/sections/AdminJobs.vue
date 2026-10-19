@@ -10,7 +10,6 @@ import {
   NDrawer,
   NDrawerContent,
   NEmpty,
-  NModal,
   NPagination,
   NSelect,
   NSpace,
@@ -38,8 +37,8 @@ const page = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
 const selectedRowKeys = ref<DataTableRowKey[]>([])
-const previewOpen = ref(false)
 const selectedJob = ref<AdminJobItem | null>(null)
+const detailStart = ref<HTMLElement | null>(null)
 const pageSizes = [25, 50, 100]
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
@@ -138,7 +137,6 @@ function changePageSize(nextPageSize: number) {
 }
 
 function viewJob(job: AdminJobItem) {
-  previewOpen.value = false
   selectedJob.value = job
 }
 
@@ -267,13 +265,10 @@ onMounted(loadJobs)
       />
     </div>
 
-    <NDrawer :show="Boolean(selectedJob)" width="min(1040px, 96vw)" placement="right" @update:show="(show) => { if (!show) selectedJob = null }">
-      <NModal v-if="selectedJob" v-model:show="previewOpen" preset="card" title="原图预览" style="width: min(1200px, 96vw)">
-        <ProtectedImage :src="selectedJob.image_url" :state="selectedJob.media_state" :expires-at="selectedJob.media_expires_at" eager class="large-preview" />
-        <MediaExpiry :state="selectedJob.media_state" :expires-at="selectedJob.media_expires_at" />
-      </NModal>
-      <NDrawerContent v-if="selectedJob" title="任务详情" closable>
-        <div class="job-detail-summary">
+    <!-- The image viewer teleports to body; a drawer focus lock would steal its focus. -->
+    <NDrawer :show="Boolean(selectedJob)" :trap-focus="false" width="min(1040px, 96vw)" placement="right" @after-enter="detailStart?.focus()" @update:show="(show) => { if (!show) selectedJob = null }">
+      <NDrawerContent v-if="selectedJob" title="任务详情" closable @keydown.esc="selectedJob = null">
+        <div ref="detailStart" tabindex="-1" class="job-detail-summary">
           <div><span>任务 ID</span><code>{{ selectedJob.job_id }}</code></div>
           <NTag :type="statusTagType(selectedJob.status)" size="small" :bordered="false">{{ statusLabel(selectedJob.status) }}</NTag>
           <span>{{ selectedJob.username || '未知用户' }}</span>
@@ -292,9 +287,9 @@ onMounted(loadJobs)
                 :alt="`任务 ${selectedJob.job_id} 的生成结果`"
                 :state="selectedJob.media_state"
                 :expires-at="selectedJob.media_expires_at"
-                @click="previewOpen = true"
                 class="result-image"
                 eager
+                preview
               />
             </div>
             <MediaExpiry :state="selectedJob.media_state" :expires-at="selectedJob.media_expires_at" />
@@ -341,7 +336,6 @@ onMounted(loadJobs)
 </template>
 
 <style scoped>
-.large-preview :deep(img) { max-height: 80vh; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .status-select { width: 180px; }
 .section-empty { padding: 72px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); }
