@@ -70,7 +70,6 @@ export interface CreateJobResponse {
   job_id: string
   status: JobStatus
   poll_url: string
-  rate_limit_remaining: number
   credit_cost: number
   base_credit_cost: number | null
   billing_multiplier_bps: number | null
@@ -146,7 +145,7 @@ export type ImageSize =
   | '3840x2160'
   | '2160x3840'
 
-export type BatchCount = 1 | 2 | 4
+export type BatchCount = number
 
 export interface GalleryPageResponse {
   items: GalleryItem[]

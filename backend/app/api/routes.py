@@ -66,7 +66,6 @@ from app.services.artworks import resolve_asset, media_url, timestamp, available
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-ACTIVE_JOBS_LIMIT = 20
 LIVE_JOB_STATUSES = (JobStatus.QUEUED, JobStatus.PROCESSING)
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
@@ -285,7 +284,6 @@ def create_generation_job(
                 db=db,
                 job=existing_job,
                 balance=db.scalar(select(User.credits).where(User.id == current_user.id)) or 0,
-                rate_limit_remaining=settings.generate_rate_limit_count,
                 settings=settings,
             )
 
@@ -386,15 +384,17 @@ def create_generation_job(
         db.flush()
         limiter = GenerationRateLimiter(
             redis_client=redis_client,
-            limit=settings.generate_rate_limit_count,
-            window_seconds=settings.generate_rate_limit_window_seconds,
+            limit=settings.generation_abuse_burst_limit,
+            window_seconds=1,
+            namespace="generation_abuse",
         )
         rate_limit_result = limiter.check(f"user:{current_user.id}")
         if not rate_limit_result.allowed:
             db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="生成请求过于频繁，请稍后再试。",
+                detail="检测到短时间内大量生成请求，请稍后重试。",
+                headers={"Retry-After": "1"},
             )
         if parsed_payload.reference_image:
             try:
@@ -483,7 +483,6 @@ def create_generation_job(
                 db=db,
                 job=existing_job,
                 balance=db.scalar(select(User.credits).where(User.id == current_user.id)) or 0,
-                rate_limit_remaining=settings.generate_rate_limit_count,
                 settings=settings,
             )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该请求已被其他操作占用。") from None
@@ -514,7 +513,6 @@ def create_generation_job(
         db=db,
         job=job,
         balance=balance_after,
-        rate_limit_remaining=rate_limit_result.remaining,
         settings=settings,
     )
 
@@ -545,7 +543,6 @@ def _build_create_job_response(
     db: Session,
     job: GenerationJob,
     balance: int,
-    rate_limit_remaining: int,
     settings: Settings,
 ) -> CreateJobResponse:
     charge = db.scalar(select(JobCharge).where(JobCharge.job_id == job.id))
@@ -553,7 +550,6 @@ def _build_create_job_response(
         job_id=job.id,
         status=job.status.value,
         poll_url=f"{settings.api_v1_prefix}/jobs/{job.id}",
-        rate_limit_remaining=rate_limit_remaining,
         credit_cost=charge.amount if charge else job.credit_cost_snapshot,
         base_credit_cost=job.base_credit_cost_snapshot,
         billing_multiplier_bps=job.billing_multiplier_bps_snapshot,
@@ -612,7 +608,6 @@ def list_active_jobs(
         .where(GenerationJob.user_id == current_user.id)
         .where(GenerationJob.status.in_(LIVE_JOB_STATUSES))
         .order_by(desc(GenerationJob.created_at))
-        .limit(ACTIVE_JOBS_LIMIT)
     )
     jobs = db.scalars(stmt).all()
     return [_build_job_detail_response(db, job, viewer_user_id=current_user.id) for job in jobs]

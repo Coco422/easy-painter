@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { randomId } from '@/lib/browser-crypto'
+import { submitGenerationBatch, validGenerationCount } from '@/lib/generation-batch'
 
 import { useRoute, useRouter } from 'vue-router'
 
@@ -71,6 +72,7 @@ const artworkAction = ref<'gallery' | undefined>()
 const activeJobs = ref<JobDetailResponse[]>([])
 const loading = ref(true)
 const submitting = ref(false)
+const stopBatchRequested = ref(false)
 const feedback = ref('')
 const pollingTimers = new Map<string, number>()
 
@@ -316,7 +318,11 @@ async function submitJobs(options: {
   if (options.referenceImageIds.length > (model?.max_reference_images ?? 5)) {
     throw new Error(`当前模型单次最多支持 ${model?.max_reference_images ?? 5} 张参考图，请移除多余图片。`)
   }
-  const submissions = Array.from({ length: options.batchCount }, () => {
+  if (!validGenerationCount(options.batchCount)) throw new Error('生成数量需为正整数。')
+  const batchId = randomId()
+  stopBatchRequested.value = false
+  let first = true
+  const summary = await submitGenerationBatch(options.batchCount, async () => {
     const idempotencyKey = randomId()
     const payload = {
       prompt: options.promptText,
@@ -326,35 +332,31 @@ async function submitJobs(options: {
     }
     const submit = () => createJob(payload, idempotencyKey)
     return submit().catch((error) => {
-      if (error instanceof ApiError) throw error
+      if (error instanceof ApiError || epoch !== pageEpoch) throw error
+      // A lost response must reuse the same intent and request parameters.
       return submit()
     })
+  }, {
+    isCurrent: () => epoch === pageEpoch,
+    shouldContinue: () => !stopBatchRequested.value,
+    onSuccess(result) {
+      jobBatches.value[result.job_id] = batchId
+      const job = makeQueuedJob(result, options.promptText, options.model, options.size)
+      upsertActiveJob(job)
+      cacheJob(job.job_id)
+      pollJob(job.job_id)
+      if (first) { versions.selectedId.value = job.job_id; first = false; void scrollToResults() }
+    },
+    onProgress(completed) { feedback.value = `正在提交 ${completed} / ${options.batchCount} 张…` },
   })
-  const results = await Promise.allSettled(submissions)
   if (epoch !== pageEpoch) throw new Error('登录状态已变化，请重新打开创作台。')
-  const fulfilled = results.filter((item): item is PromiseFulfilledResult<CreateJobResponse> => item.status === 'fulfilled')
-  const rejected = results.filter((item): item is PromiseRejectedResult => item.status === 'rejected')
-  const batchId = randomId()
-  for (const item of fulfilled) {
-    jobBatches.value[item.value.job_id] = batchId
-    const job = makeQueuedJob(item.value, options.promptText, options.model, options.size)
-    upsertActiveJob(job)
-    cacheJob(job.job_id)
-    pollJob(job.job_id)
-  }
   saveJobBatches()
-  if (fulfilled[0]) versions.selectedId.value = fulfilled[0].value.job_id
-  if (fulfilled.length === 0) {
-    const firstError = rejected[0]?.reason
-    throw firstError instanceof Error ? firstError : new Error('提交失败，请稍后重试。')
-  }
   await fetchCurrentUser().catch(() => undefined)
-  const remaining = Math.min(...fulfilled.map((item) => item.value.rate_limit_remaining))
-  const actualReserved = fulfilled.reduce((total, item) => total + item.value.credit_cost, 0)
-  feedback.value =
-    rejected.length > 0
-      ? `已提交 ${fulfilled.length} 个任务，${rejected.length} 个任务提交失败；实际预扣 ${actualReserved} 丝。本分钟还可再创建 ${remaining} 次。`
-      : `已提交 ${fulfilled.length} 个任务，实际预扣 ${actualReserved} 丝。本分钟还可再创建 ${remaining} 次。`
+  if (epoch !== pageEpoch) return
+  if (summary.accepted === 0 && summary.error) throw summary.error
+  const stopped = summary.remaining > 0 ? `其余 ${summary.remaining} 张尚未提交。` : ''
+  feedback.value = `已提交 ${summary.accepted} 个任务，实际预扣 ${summary.reserved} 丝。` +
+    (summary.failed ? ` ${summary.failed} 个请求未确认成功。${summary.error?.message ?? ''}` : '') + stopped
   void scrollToResults()
 }
 
@@ -505,6 +507,7 @@ onMounted(() => {
       @update:batch-count="selectedBatchCount = $event"
       @submit="submitPrompt"
     />
+    <button v-if="submitting" type="button" class="ghost-button" :disabled="stopBatchRequested" @click="stopBatchRequested = true">{{ stopBatchRequested ? '正在停止继续提交…' : '停止继续提交' }}</button>
     </aside>
 
     <section ref="resultsPanel" class="workspace-results" aria-label="创作结果" :aria-busy="loading">

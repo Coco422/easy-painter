@@ -15,7 +15,7 @@ export function adminErrorMessage(payload: unknown, fallback: string): string {
       const error = item as { loc?: unknown; msg?: unknown; type?: unknown }
       const field = Array.isArray(error.loc) ? error.loc[error.loc.length - 1] : undefined
       if (field === 'username' && ['string_pattern_mismatch', 'string_too_short', 'string_too_long'].includes(String(error.type))) {
-        return ['用户名须为 2–64 位字母、数字或下划线；邮箱请填写到邮箱栏。']
+        return ['用户名须为 3–32 位小写字母、数字或下划线，且以字母开头；邮箱请填写到邮箱栏。']
       }
       if (field === 'password' && ['string_too_short', 'string_too_long'].includes(String(error.type))) {
         return ['密码长度须为 6–128 个字符。']

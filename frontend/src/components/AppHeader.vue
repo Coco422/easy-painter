@@ -47,7 +47,8 @@ async function handleLogout() {
           <Wallet :size="16" />
           <span>{{ authState.user?.credits ?? 0 }}</span>
         </router-link>
-        <span class="nav-user">{{ authState.user?.username }}</span>
+        <span class="nav-user">{{ authState.user?.display_name || authState.user?.username }}</span>
+        <router-link to="/recharge" class="nav-link">充值</router-link>
         <router-link v-if="isAdmin()" to="/admin" class="nav-link nav-admin">管理</router-link>
         <button class="nav-link nav-logout" @click="handleLogout">退出</button>
       </template>
@@ -72,7 +73,11 @@ async function handleLogout() {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex-shrink: 0;
 }
+
+.brand-title { white-space: nowrap; }
+.nav-user { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 
 .brand-logo {
   width: 48px;
@@ -125,6 +130,8 @@ async function handleLogout() {
 
 .header-primary-nav {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
@@ -150,7 +157,7 @@ async function handleLogout() {
   background: var(--accent-glow);
   font-weight: 600;
 }
-.header-nav { flex-wrap: wrap; }
+.header-nav { flex-wrap: wrap; gap: 12px; }
 .header-nav > *, .primary-nav-link { white-space: nowrap; }
 @media (max-width: 600px) {
   .site-header { align-items: center; column-gap: 10px; }
@@ -160,6 +167,7 @@ async function handleLogout() {
   .primary-nav-link { padding: 6px 8px; }
   .header-primary-nav {
     order: 3;
+    flex: 1 0 100%;
     width: 100%;
     gap: 2px;
     flex-wrap: nowrap;

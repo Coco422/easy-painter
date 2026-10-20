@@ -19,7 +19,7 @@ import { Cpu, GalleryVerticalEnd, Gauge, Group, ListTodo, LogOut, Megaphone, Men
 import { adminLogout, adminVerify, authState } from '@/lib/auth'
 import { themeState } from '@/lib/theme'
 
-type SectionKey = 'overview' | 'providers' | 'models' | 'users' | 'groups' | 'jobs' | 'billing' | 'inspirations' | 'announcements'
+type SectionKey = 'overview' | 'providers' | 'models' | 'users' | 'groups' | 'jobs' | 'billing' | 'recharge' | 'inspirations' | 'announcements'
 
 const sectionComponents: Record<SectionKey, Component> = {
   overview: defineAsyncComponent(() => import('./sections/AdminOverview.vue')),
@@ -29,6 +29,7 @@ const sectionComponents: Record<SectionKey, Component> = {
   groups: defineAsyncComponent(() => import('./sections/AdminUserGroups.vue')),
   jobs: defineAsyncComponent(() => import('./sections/AdminJobs.vue')),
   billing: defineAsyncComponent(() => import('./sections/AdminBilling.vue')),
+  recharge: defineAsyncComponent(() => import('./sections/AdminRecharge.vue')),
   inspirations: defineAsyncComponent(() => import('./sections/AdminInspirations.vue')),
   announcements: defineAsyncComponent(() => import('./sections/AdminAnnouncements.vue')),
 }
@@ -41,6 +42,7 @@ const navItems = [
   { key: 'groups' as const, label: '用户组', icon: Group },
   { key: 'jobs' as const, label: '任务管理', icon: ListTodo },
   { key: 'billing' as const, label: '计费管理', icon: Wallet },
+  { key: 'recharge' as const, label: '充值管理', icon: Wallet },
   { key: 'inspirations' as const, label: '社区内容', icon: GalleryVerticalEnd },
   { key: 'announcements' as const, label: '通知管理', icon: Megaphone },
 ]

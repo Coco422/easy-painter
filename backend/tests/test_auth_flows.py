@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -18,6 +20,7 @@ from app.models.media import MediaState
 from app.models.user import User
 from app.schemas.auth import (
     AdminUpdateUserRequest,
+    AdminCreateUserRequest,
     BindEmailCodeRequest,
     BindEmailRequest,
     EmailCodePurpose,
@@ -25,6 +28,7 @@ from app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    UpdateUserRequest,
 )
 from app.services.email_codes import release_email_code_cooldown, store_email_code, verify_email_code
 from app.services.mailer import EmailDeliveryError, SmtpEmailSender
@@ -149,6 +153,136 @@ def test_email_code_registration_and_email_login(monkeypatch):
         request=DummyRequest(),
     )
     assert login_result.access_token == f"token:{user.id}"
+    assert auth_routes.login(
+        body=LoginRequest(username="new_user", password="new-password"),
+        db=db, redis_client=redis_client, request=DummyRequest(),
+    ).access_token == login_result.access_token
+
+
+@pytest.mark.parametrize('username', [None, '', '   '])
+def test_email_only_registration_generates_private_unique_handle(monkeypatch, username):
+    db = make_session_factory()()
+    redis_client = FakeRedis()
+    settings = smtp_settings()
+    monkeypatch.setattr(auth_routes, 'create_access_token', lambda data, **kwargs: f"token:{data['sub']}")
+    handles = []
+    for index in range(2):
+        email = f'new{index}@example.com'
+        store_email_code(redis_client, settings, email=email, purpose=EmailCodePurpose.REGISTER, code='123456')
+        result = auth_routes.register(
+            body=RegisterRequest(username=username, email=email.upper(), email_code='123456', password='new-password'),
+            db=db, redis_client=redis_client, settings=settings,
+        )
+        user = db.scalar(select(User).where(User.email == email))
+        assert user is not None
+        assert 3 <= len(user.username) <= 32
+        assert user.username.startswith('user_')
+        assert '@' not in user.username and email not in user.display_name
+        assert user.display_name.startswith('画友')
+        assert auth_routes.login(
+            body=LoginRequest(username=email.upper(), password='new-password'),
+            db=db, redis_client=redis_client, request=DummyRequest(),
+        ).access_token == result.access_token
+        handles.append(user.username)
+    assert len(set(handles)) == 2
+
+
+@pytest.mark.parametrize('username', ['ab', 'Auser', '1user', '_user', 'with-dash', 'with space', 'user@example.com', '中文名字', 'a' * 33, 'public'])
+def test_public_username_constraints_apply_to_registration_and_rename(username):
+    with pytest.raises(ValidationError):
+        RegisterRequest(username=username, email='new@example.com', email_code='123456', password='password')
+    with pytest.raises(ValidationError):
+        UpdateUserRequest(username=username)
+
+
+@pytest.mark.parametrize('username', ['abc', 'a_1', 'a' * 32])
+def test_public_username_boundary_values(username):
+    assert UpdateUserRequest(username=username).username == username
+
+
+def test_rename_changes_gallery_link_but_preserves_email_login_and_user_id(monkeypatch):
+    db = make_session_factory()()
+    redis_client = FakeRedis()
+    user = User(username='LegacyName', email='owner@example.com', password_hash=hash_password('password'), display_name='原昵称', is_public=True)
+    db.add(user)
+    db.commit()
+    original_id = user.id
+    monkeypatch.setattr(auth_routes, 'create_access_token', lambda data, **kwargs: f"token:{data['sub']}")
+    updated = user_routes.update_me(UpdateUserRequest(username='new_handle', display_name='新昵称'), current_user=user, db=db)
+    assert updated.id == original_id
+    assert updated.username == 'new_handle'
+    assert updated.display_name == '新昵称'
+    assert updated.email == 'owner@example.com'
+    for identifier in ['OWNER@example.com', 'new_handle']:
+        assert auth_routes.login(LoginRequest(username=identifier, password='password'), db=db, redis_client=redis_client, request=DummyRequest()).access_token == f'token:{original_id}'
+    with pytest.raises(HTTPException) as exc:
+        auth_routes.login(LoginRequest(username='LegacyName', password='password'), db=db, redis_client=redis_client, request=DummyRequest())
+    assert exc.value.status_code == 401
+    routes.get_user_gallery(username='new_handle', db=db, page=1, page_size=20)
+    with pytest.raises(HTTPException) as exc:
+        routes.get_user_gallery(username='LegacyName', db=db, page=1, page_size=20)
+    assert exc.value.status_code == 404
+
+
+def test_rename_rejects_case_insensitive_legacy_collision_without_updating_profile():
+    db = make_session_factory()()
+    owner = User(username='owner', password_hash='hash', display_name='原昵称')
+    db.add_all([owner, User(username='TakenName', password_hash='hash')])
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        user_routes.update_me(UpdateUserRequest(username='takenname', display_name='不能保存'), current_user=owner, db=db)
+    assert exc.value.status_code == 409
+    db.refresh(owner)
+    assert owner.username == 'owner' and owner.display_name == '原昵称'
+
+
+def test_profile_rename_unique_constraint_race_returns_conflict(monkeypatch):
+    db = make_session_factory()()
+    owner = User(username='owner', password_hash='hash', display_name='原昵称')
+    db.add(owner)
+    db.commit()
+    monkeypatch.setattr(db, 'commit', lambda: (_ for _ in ()).throw(IntegrityError('unique', {}, Exception())))
+    with pytest.raises(HTTPException) as exc:
+        user_routes.update_me(UpdateUserRequest(username='new_handle', display_name='不能保存'), current_user=owner, db=db)
+    assert exc.value.status_code == 409
+    db.refresh(owner)
+    assert owner.username == 'owner' and owner.display_name == '原昵称'
+
+
+def test_legacy_username_can_be_kept_when_updating_display_name():
+    db = make_session_factory()()
+    owner = User(username='LegacyName', password_hash='hash', display_name='原昵称')
+    db.add(owner)
+    db.commit()
+    updated = user_routes.update_me(UpdateUserRequest(display_name='新昵称'), current_user=owner, db=db)
+    assert updated.username == 'LegacyName' and updated.display_name == '新昵称'
+
+
+@pytest.mark.parametrize('entry', ['register', 'admin'])
+def test_creating_username_cannot_collide_with_legacy_case_variant(entry):
+    db = make_session_factory()()
+    db.add(User(username='TakenName', password_hash='hash'))
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        if entry == 'register':
+            auth_routes.register(RegisterRequest(username='takenname', email='new@example.com', email_code='123456', password='password'), db=db, redis_client=FakeRedis(), settings=smtp_settings())
+        else:
+            admin_routes.admin_create_user(AdminCreateUserRequest(username='takenname', password='password'), db=db, _={'role': 'admin'})
+    assert exc.value.status_code == 409
+
+
+def test_generated_username_retries_collision_with_legacy_handle(monkeypatch):
+    db = make_session_factory()()
+    db.add(User(username='USER_' + '0' * 16, password_hash='hash'))
+    db.commit()
+    redis_client = FakeRedis()
+    settings = smtp_settings()
+    candidates = iter(['0' * 16, '1' * 16])
+    monkeypatch.setattr(auth_routes.secrets, 'token_hex', lambda _: next(candidates))
+    monkeypatch.setattr(auth_routes, 'create_access_token', lambda data, **kwargs: 'token')
+    store_email_code(redis_client, settings, email='new@example.com', purpose=EmailCodePurpose.REGISTER, code='123456')
+    auth_routes.register(RegisterRequest(email='new@example.com', email_code='123456', password='password'), db=db, redis_client=redis_client, settings=settings)
+    assert db.scalar(select(User).where(User.email == 'new@example.com')).username == 'user_' + '1' * 16
 
 
 def test_reset_password_uses_email_code_without_old_password(monkeypatch):

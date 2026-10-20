@@ -57,7 +57,8 @@ const createForm = reactive({ username: '', email: '', password: '', display_nam
 const createRules: FormRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: ['input', 'blur'] },
-    { pattern: /^[a-zA-Z0-9_]{2,64}$/, message: '用户名须为 2–64 位字母、数字或下划线；邮箱请填写到邮箱栏。', trigger: ['input', 'blur'] },
+    { validator: (_rule, value: string) => value !== 'public', message: '该用户名为系统保留名称，请换一个。', trigger: ['input', 'blur'] },
+    { pattern: /^[a-z][a-z0-9_]{2,31}$/, message: '用户名须为 3–32 位小写字母、数字或下划线，且以字母开头；邮箱请填写到邮箱栏。', trigger: ['input', 'blur'] },
   ],
   password: [
     { required: true, message: '请输入密码', trigger: ['input', 'blur'] },
@@ -374,7 +375,7 @@ onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
     <NModal v-model:show="createModalOpen" preset="card" title="创建用户" class="admin-form-modal" :mask-closable="!creating" :close-on-esc="!creating">
       <NForm ref="createFormRef" :model="createForm" :rules="createRules" label-placement="top" @submit.prevent="createUser">
         <div class="user-form-grid">
-          <NFormItem label="用户名" path="username"><NInput v-model:value="createForm.username" maxlength="64" placeholder="2–64 位字母、数字或下划线" /></NFormItem>
+          <NFormItem label="用户名" path="username"><NInput v-model:value="createForm.username" maxlength="32" placeholder="3–32 位小写字母、数字或下划线，以字母开头" /></NFormItem>
           <NFormItem label="显示名称"><NInput v-model:value="createForm.display_name" maxlength="128" placeholder="可选，默认使用用户名" /></NFormItem>
           <NFormItem label="邮箱" path="email"><NInput v-model:value="createForm.email" maxlength="320" placeholder="可选，例如 name@example.com" /></NFormItem>
           <NFormItem label="密码" path="password"><NInput v-model:value="createForm.password" type="password" show-password-on="click" autocomplete="new-password" maxlength="128" placeholder="设置初始密码" /></NFormItem>

@@ -1,4 +1,10 @@
+# Avoid persisting payment signatures, OAuth codes or other URL credentials.
+log_format private_request '$remote_addr - $remote_user [$time_local] '
+                           '"$request_method $uri $server_protocol" $status $body_bytes_sent '
+                           '"$http_user_agent"';
+
 server {
+    access_log /var/log/nginx/access.log private_request;
     listen 80;
     server_name _;
     resolver 127.0.0.11 ipv6=off valid=1s;

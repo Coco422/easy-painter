@@ -20,18 +20,18 @@ def test_admin_create_returns_readable_validation_errors_before_database_access(
     assert response.status_code == 422
     errors = {error['loc'][-1]: error for error in response.json()['detail']}
     assert errors['username']['type'] == 'string_pattern_mismatch'
-    assert errors['username']['msg'] == '用户名须为 2–64 位字母、数字或下划线；邮箱请填写到邮箱栏。'
+    assert errors['username']['msg'] == '用户名须为 3–32 位小写字母、数字或下划线，且以字母开头；邮箱请填写到邮箱栏。'
     assert errors['password']['msg'] == '密码须为 6–128 个字符。'
     assert errors['email']['msg'] == '请输入有效的邮箱地址。'
 
 
-@pytest.mark.parametrize('username', ['a', 'a' * 65, '中文', 'with space', 'user@example.com'])
+@pytest.mark.parametrize('username', ['a', 'ab', 'a' * 33, 'A_1', '1user', '_user', '中文', 'with space', 'user@example.com'])
 def test_username_constraints_remain_enforced(username):
     with pytest.raises(ValidationError, match='用户名须为'):
         AdminCreateUserRequest(username=username, password='123456')
 
 
-@pytest.mark.parametrize('username', ['ab', 'A_1', 'a' * 64])
+@pytest.mark.parametrize('username', ['abc', 'a_1', 'a' * 32])
 def test_valid_admin_create_boundaries_and_optional_email(username):
     user = AdminCreateUserRequest(username=username, password='p' * 128)
     assert user.username == username
@@ -44,3 +44,8 @@ def test_admin_update_uses_same_readable_validation():
         AdminUpdateUserRequest(email='invalid')
     with pytest.raises(ValidationError, match='密码须为'):
         AdminUpdateUserRequest(password='123')
+
+
+def test_admin_cannot_create_reserved_gallery_route_name():
+    with pytest.raises(ValidationError, match='系统保留名称'):
+        AdminCreateUserRequest(username='public', password='123456')

@@ -17,7 +17,7 @@ from app.services.health import DISPATCHER_HEARTBEAT_KEY
 from app.services.job_lifecycle import mark_generation_failed
 from app.services.media_lifecycle import process_media_deletions, scan_expired_media, refresh_submission_states
 from app.services.redis_client import redis_client
-from app.services.tasks import generate_image_task, backfill_media_thumbnails
+from app.services.tasks import generate_image_task, backfill_media_thumbnails, reconcile_recharges
 
 
 configure_logging()
@@ -192,6 +192,8 @@ def main() -> None:
         except Exception:
             logger.exception("Dispatcher loop failed.")
         try:
+            if redis_client.set("easy-painter:recharge-reconciliation", "1", nx=True, ex=60):
+                reconcile_recharges.apply_async(expires=120)
             if redis_client.set("easy-painter:thumbnail-backfill", "1", nx=True, ex=60):
                 backfill_media_thumbnails.apply_async(expires=60)
         except Exception:

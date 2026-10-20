@@ -20,6 +20,8 @@ const redeemFeedback = ref('')
 const redeemSuccess = ref(false)
 
 const displayName = ref('')
+const usernameInput = ref('')
+const usernameChangeConfirmed = ref(false)
 const isPublic = ref(false)
 const profileSaving = ref(false)
 const profileFeedback = ref('')
@@ -38,7 +40,7 @@ const router = useRouter()
 const galleryUrl = computed(() => {
   const username = authState.user?.username
   if (!username) return ''
-  return `${window.location.origin}/gallery/${username}`
+  return `${window.location.origin}/gallery/${encodeURIComponent(username)}`
 })
 const normalizedBindEmail = computed(() => bindEmailInput.value.trim().toLowerCase())
 const bindEmailValid = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedBindEmail.value))
@@ -88,14 +90,32 @@ async function handleRedeem() {
 }
 
 async function handleSaveProfile() {
-  profileSaving.value = true
+  const nextUsername = usernameInput.value.trim()
+  const usernameChanged = nextUsername !== authState.user?.username
   profileFeedback.value = ''
+  if (usernameChanged && !/^[a-z][a-z0-9_]{2,31}$/.test(nextUsername)) {
+    profileFeedback.value = '用户名须为 3–32 位小写字母、数字或下划线，且以字母开头。'
+    return
+  }
+  if (usernameChanged && nextUsername === 'public') {
+    profileFeedback.value = '该用户名为系统保留名称，请换一个。'
+    return
+  }
+  if (usernameChanged && !usernameChangeConfirmed.value) {
+    profileFeedback.value = '修改用户名会改变画廊地址，请先确认旧链接将失效。'
+    return
+  }
+  profileSaving.value = true
   try {
     await updateProfile({
+      username: usernameChanged ? nextUsername : undefined,
       display_name: displayName.value || undefined,
       is_public: isPublic.value,
     })
     await fetchCurrentUser()
+    usernameInput.value = authState.user?.username ?? ''
+    usernameChangeConfirmed.value = false
+    galleryCopied.value = false
     profileFeedback.value = '资料已更新。'
   } catch (error) {
     profileFeedback.value = error instanceof Error ? error.message : '保存失败。'
@@ -213,6 +233,7 @@ function transactionTypeLabel(transactionType: string): string {
   return ({
     opening_balance: '期初余额',
     redeem: '兑换入账',
+    recharge: '在线充值',
     job_reserve: '生成预扣',
     job_refund: '失败退款',
     admin_adjust: '管理员调账',
@@ -236,6 +257,7 @@ function formatTime(iso: string): string {
 onMounted(async () => {
   await fetchCurrentUser()
   if (authState.user) {
+    usernameInput.value = authState.user.username
     displayName.value = authState.user.display_name || ''
     isPublic.value = authState.user.is_public
   }
@@ -255,6 +277,7 @@ onBeforeUnmount(stopBindCountdown)
         <p class="card-label">灵感丝线余额</p>
         <p class="credits-value">{{ authState.user?.credits ?? 0 }}</p>
         <p class="credits-hint">每张图片消耗模型对应灵感丝线</p>
+        <router-link to="/recharge" class="secondary-button">前往充值中心</router-link>
       </section>
 
       <!-- Redeem card -->
@@ -295,6 +318,15 @@ onBeforeUnmount(stopBindCountdown)
       <section class="profile-card profile-edit-card">
         <p class="card-label">基本资料</p>
         <label class="field-label">
+          <span>用户名</span>
+          <input v-model.trim="usernameInput" type="text" class="field-input" maxlength="32" autocomplete="username" spellcheck="false" @input="usernameChangeConfirmed = false" />
+        </label>
+        <p class="field-hint">3–32 位小写字母、数字或下划线，以字母开头。用户名不可重复，用于画廊链接；登录建议使用邮箱。</p>
+        <label v-if="usernameInput.trim() !== authState.user?.username" class="field-checkbox">
+          <input v-model="usernameChangeConfirmed" type="checkbox" />
+          <span>我了解修改用户名后画廊地址会变化，旧链接将失效。</span>
+        </label>
+        <label class="field-label">
           <span>显示名称</span>
           <input v-model="displayName" type="text" class="field-input" maxlength="128" placeholder="留空则使用用户名" />
         </label>
@@ -311,7 +343,7 @@ onBeforeUnmount(stopBindCountdown)
           <button class="ghost-button" @click="copyGalleryLink">
             {{ galleryCopied ? '已复制' : '复制链接' }}
           </button>
-          <button class="ghost-button" @click="router.push(`/gallery/${authState.user?.username}`)">
+          <button class="ghost-button" @click="router.push(`/gallery/${encodeURIComponent(authState.user?.username ?? '')}`)">
             前往画廊
           </button>
         </div>

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Easy Painter Release"
+  short_description: "准备或执行版本发布与生产更新"

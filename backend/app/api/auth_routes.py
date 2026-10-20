@@ -213,8 +213,17 @@ def register(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前未开放注册。")
 
     email = normalize_email(str(body.email))
-    if db.scalar(select(User).where(User.username == body.username)):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在。")
+    username = body.username
+    if username is not None:
+        if db.scalar(select(User.id).where(func.lower(User.username) == username)):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在。")
+    else:
+        for _ in range(3):
+            username = f"user_{secrets.token_hex(8)}"
+            if not db.scalar(select(User.id).where(func.lower(User.username) == username)):
+                break
+        else:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="账号创建暂时失败，请重试。")
     if db.scalar(select(User).where(func.lower(User.email) == email)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已注册。")
     if not verify_email_code(
@@ -228,10 +237,10 @@ def register(
 
     default_group = get_default_group(db)
     user = User(
-        username=body.username,
+        username=username,
         email=email,
         password_hash=hash_password(body.password),
-        display_name=body.display_name.strip() or body.username,
+        display_name=body.display_name.strip() or (body.username if body.username else f"画友{username[-6:]}"),
         group_code=default_group.code if default_group else STANDARD_GROUP_CODE,
     )
     db.add(user)

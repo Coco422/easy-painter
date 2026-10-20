@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteLocationNormalized } from 'vue-router'
 
 import { isLoggedIn } from '@/lib/auth'
 
@@ -8,9 +8,14 @@ const routes = [
   { path: '/mcp/callback', component: () => import('@/pages/AgentTestPage.vue') },
   { path: '/', component: () => import('@/pages/InspirationPage.vue') },
   { path: '/create', component: () => import('@/pages/CreatePage.vue') },
-  { path: '/canvas/:id?', component: () => import('@/pages/CanvasPage.vue'), beforeEnter: () => { if (!isLoggedIn()) return '/login' } },
+  { path: '/canvas/:id?', component: () => import('@/pages/CanvasPage.vue'), beforeEnter: (to: RouteLocationNormalized) => {
+    if (!isLoggedIn()) return { path: '/login', query: { redirect: to.fullPath } }
+  } },
   { path: '/login', component: () => import('@/pages/LoginPage.vue') },
   { path: '/profile', component: () => import('@/pages/ProfilePage.vue') },
+  { path: '/recharge/:result(return)?', component: () => import('@/pages/RechargePage.vue'), beforeEnter: (to: RouteLocationNormalized) => {
+    if (!isLoggedIn()) return { path: '/login', query: { redirect: to.fullPath } }
+  } },
   {
     path: '/gallery',
     component: () => import('@/pages/ArtworkLibraryPage.vue'),

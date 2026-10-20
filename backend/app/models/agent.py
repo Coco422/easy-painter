@@ -27,6 +27,7 @@ class AgentGrant(Base):
     scopes: Mapped[list] = mapped_column(JSON)
     password_digest: Mapped[str] = mapped_column(String(64))
     max_per_job: Mapped[int] = mapped_column(Integer)
+    # Legacy V12 storage only; never read as a spending limit.
     daily_limit: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

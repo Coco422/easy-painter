@@ -10,16 +10,15 @@ import hashlib
 import hmac
 import re
 import secrets
-from datetime import timedelta, timezone
+from datetime import timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.agent import AgentAuthorization, AgentClient, AgentCredential, AgentGrant, AgentUsage
-from app.models.job_charge import JobCharge, JobChargeStatus
+from app.models.agent import AgentAuthorization, AgentClient, AgentCredential, AgentGrant
 from app.models.user import User
 from app.services.auth_sessions import as_utc, password_digest, utcnow
 
@@ -156,20 +155,8 @@ def refresh_tokens(db: Session, data: dict) -> dict:
     return result
 
 
-def daily_usage(db: Session, grant_id: str) -> int:
-    # Beijing calendar day; reserved charges count so concurrent queued jobs
-    # cannot exceed a daily budget. Refunded jobs release the budget.
-    start = utcnow().astimezone(timezone(timedelta(hours=8))).replace(hour=0, minute=0, second=0, microsecond=0)
-    return db.scalar(select(func.coalesce(func.sum(JobCharge.amount), 0)).join(AgentUsage, AgentUsage.job_id == JobCharge.job_id)
-                     .where(AgentUsage.grant_id == grant_id, AgentUsage.created_at >= start,
-                            AgentUsage.created_at < start + timedelta(days=1), JobCharge.status != JobChargeStatus.REFUNDED)) or 0
-
-
 def check_budget(db: Session, grant: AgentGrant, amount: int, max_cost: int) -> None:
     if 'jobs:create' not in grant.scopes:
         raise HTTPException(403, '此连接未获准生成或修改图片。')
     if amount > min(grant.max_per_job, max_cost):
         raise HTTPException(403, {'message': '超过单次消费上限。', 'required': amount, 'max_per_job': grant.max_per_job, 'max_cost': max_cost})
-    used = daily_usage(db, grant.id)
-    if amount + used > grant.daily_limit:
-        raise HTTPException(403, {'message': '超过此连接的每日消费上限。', 'used_today': used, 'daily_limit': grant.daily_limit})

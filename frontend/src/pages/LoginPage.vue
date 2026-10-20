@@ -23,12 +23,11 @@ const emailDeliveryEnabled = ref(true)
 let countdownTimer: number | null = null
 
 const loginForm = reactive({ identifier: '', password: '' })
-const registerForm = reactive({ username: '', displayName: '', email: '', code: '', password: '', confirmPassword: '' })
+const registerForm = reactive({ email: '', code: '', password: '' })
 const forgotForm = reactive({ email: '', code: '', password: '', confirmPassword: '' })
 const passwordVisible = reactive({
   login: false,
   register: false,
-  registerConfirm: false,
   forgot: false,
   forgotConfirm: false,
 })
@@ -79,7 +78,7 @@ async function sendCode(email: string, purpose: EmailCodePurpose) {
 
 async function handleLogin() {
   if (!loginForm.identifier || !loginForm.password) {
-    error.value = '请输入用户名或邮箱和密码。'
+    error.value = '请输入邮箱或用户名和密码。'
     return
   }
   submitting.value = true
@@ -98,23 +97,17 @@ async function handleLogin() {
 async function handleRegister() {
   error.value = ''
   notice.value = ''
-  if (!registerForm.username || !registerForm.email || !registerForm.code || !registerForm.password) {
-    error.value = '请填写用户名、邮箱、验证码和密码。'
+  if (!registerForm.email || !registerForm.code || !registerForm.password) {
+    error.value = '请填写邮箱、验证码和密码。'
     return
   }
   if (registerForm.password.length < 6) {
     error.value = '密码至少需要 6 个字符。'
     return
   }
-  if (registerForm.password !== registerForm.confirmPassword) {
-    error.value = '两次输入的密码不一致。'
-    return
-  }
   submitting.value = true
   try {
     await register({
-      username: registerForm.username,
-      display_name: registerForm.displayName || undefined,
       email: registerForm.email,
       email_code: registerForm.code,
       password: registerForm.password,
@@ -189,8 +182,8 @@ onMounted(async () => {
 
       <form v-if="mode === 'login'" class="auth-form" @submit.prevent="handleLogin">
         <label class="auth-label">
-          用户名或邮箱
-          <input v-model.trim="loginForm.identifier" type="text" class="auth-input" autocomplete="username" maxlength="320" />
+          邮箱
+          <input v-model.trim="loginForm.identifier" type="text" class="auth-input" autocomplete="username" maxlength="320" placeholder="输入邮箱，老账号也可使用用户名" />
         </label>
         <label class="auth-label">
           密码
@@ -214,17 +207,8 @@ onMounted(async () => {
       </form>
 
       <form v-else-if="mode === 'register'" class="auth-form" @submit.prevent="handleRegister">
+        <p class="auth-description">用邮箱注册，验证后即可开始创作。</p>
         <p v-if="!emailDeliveryEnabled" class="auth-service-warning">管理员尚未配置 SMTP 邮件服务，暂时无法发送注册验证码。</p>
-        <div class="auth-field-grid">
-          <label class="auth-label">
-            用户名
-            <input v-model.trim="registerForm.username" type="text" class="auth-input" autocomplete="username" maxlength="64" placeholder="字母、数字或下划线" />
-          </label>
-          <label class="auth-label">
-            显示名称
-            <input v-model.trim="registerForm.displayName" type="text" class="auth-input" maxlength="128" placeholder="可选" />
-          </label>
-        </div>
         <label class="auth-label">
           邮箱
           <input v-model.trim="registerForm.email" type="email" class="auth-input" autocomplete="email" maxlength="320" />
@@ -238,28 +222,16 @@ onMounted(async () => {
             </button>
           </span>
         </label>
-        <div class="auth-field-grid">
-          <label class="auth-label">
-            密码
-            <span class="auth-password-field">
-              <input v-model="registerForm.password" :type="passwordVisible.register ? 'text' : 'password'" class="auth-input" autocomplete="new-password" maxlength="128" placeholder="至少 6 个字符" />
-              <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.register ? '隐藏密码' : '显示密码'" :title="passwordVisible.register ? '隐藏密码' : '显示密码'" @click="passwordVisible.register = !passwordVisible.register">
-                <EyeOff v-if="passwordVisible.register" :size="18" aria-hidden="true" />
-                <Eye v-else :size="18" aria-hidden="true" />
-              </button>
-            </span>
-          </label>
-          <label class="auth-label">
-            确认密码
-            <span class="auth-password-field">
-              <input v-model="registerForm.confirmPassword" :type="passwordVisible.registerConfirm ? 'text' : 'password'" class="auth-input" autocomplete="new-password" maxlength="128" />
-              <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.registerConfirm ? '隐藏密码' : '显示密码'" :title="passwordVisible.registerConfirm ? '隐藏密码' : '显示密码'" @click="passwordVisible.registerConfirm = !passwordVisible.registerConfirm">
-                <EyeOff v-if="passwordVisible.registerConfirm" :size="18" aria-hidden="true" />
-                <Eye v-else :size="18" aria-hidden="true" />
-              </button>
-            </span>
-          </label>
-        </div>
+        <label class="auth-label">
+          密码
+          <span class="auth-password-field">
+            <input v-model="registerForm.password" :type="passwordVisible.register ? 'text' : 'password'" class="auth-input" autocomplete="new-password" maxlength="128" placeholder="至少 6 个字符" />
+            <button type="button" class="auth-password-toggle" :aria-label="passwordVisible.register ? '隐藏密码' : '显示密码'" :title="passwordVisible.register ? '隐藏密码' : '显示密码'" @click="passwordVisible.register = !passwordVisible.register">
+              <EyeOff v-if="passwordVisible.register" :size="18" aria-hidden="true" />
+              <Eye v-else :size="18" aria-hidden="true" />
+            </button>
+          </span>
+        </label>
         <p v-if="error" class="auth-error">{{ error }}</p>
         <p v-if="notice" class="auth-notice">{{ notice }}</p>
         <button type="submit" class="auth-submit" :disabled="submitting">{{ submitting ? '注册中…' : '验证邮箱并注册' }}</button>

@@ -19,7 +19,7 @@ Portable Skill: {{ORIGIN}}/mcp/skill/SKILL.md
 
 Remote Streamable HTTP, OAuth authorization code with mandatory PKCE S256, public-client dynamic registration, resource-bound opaque access tokens (15 minutes) and rotating refresh tokens bounded by grant expiry. User chooses 7/30/90-day grants and scopes account:read, jobs:read, jobs:create. Browser login tokens cannot authenticate MCP; MCP credentials cannot authenticate ordinary browser APIs.
 
-Each connection has a per-job and Asia/Shanghai-calendar-day limit. Pending reservations count; refunds release allowance. The tool max_cost also caps each request. Limits and account balance are enforced server-side in the same transaction as job/charge/outbox creation. Revoking a connection or resetting the user's password invalidates it. Existing accepted jobs continue after revocation.
+There is no daily spending limit or per-minute generation quota on the website, API or MCP, including previously authorized connections. Short burst protection still rejects abnormal request floods. Each connection has a per-job cap; the tool max_cost also caps each request. Per-job caps and account balance are enforced server-side in the same transaction as job/charge/outbox creation. Failed jobs refund reserved credits. Revoking a connection or resetting the user's password invalidates it. Existing accepted jobs continue after revocation.
 
 Free calls: models, balance, quote and job status. Paid calls use current model and user-group prices returned by list_models/estimate_cost; no fixed MCP plan or extra MCP fee is defined. Never promise a price before checking the current model.
 

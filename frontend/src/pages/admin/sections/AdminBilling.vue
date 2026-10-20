@@ -292,6 +292,7 @@ function transactionTypeLabel(type: string) {
   return ({
     opening_balance: '期初余额',
     redeem: '兑换入账',
+    recharge: '在线充值',
     job_reserve: '任务预扣',
     job_refund: '失败退款',
     admin_adjust: '管理员调账',

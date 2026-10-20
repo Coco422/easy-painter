@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Enum as SqlEnum, ForeignKey, Integer, String
+from sqlalchemy import JSON, CheckConstraint, DateTime, Enum as SqlEnum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -17,6 +17,7 @@ def utcnow() -> datetime:
 class CreditTransactionType(str, Enum):
     OPENING_BALANCE = "opening_balance"
     REDEEM = "redeem"
+    RECHARGE = "recharge"
     JOB_RESERVE = "job_reserve"
     JOB_REFUND = "job_refund"
     ADMIN_ADJUST = "admin_adjust"
@@ -25,6 +26,10 @@ class CreditTransactionType(str, Enum):
 
 class CreditTransaction(Base):
     __tablename__ = "credit_transactions"
+    __table_args__ = (CheckConstraint(
+        "transaction_type IN ('opening_balance', 'redeem', 'recharge', 'job_reserve', 'job_refund', 'admin_adjust', 'reconciliation')",
+        name="ck_credit_transaction_type",
+    ),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)

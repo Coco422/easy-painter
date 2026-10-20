@@ -7,7 +7,7 @@ test('admin creation validation errors show readable username and password guida
     { loc: ['body', 'username'], type: 'string_pattern_mismatch', msg: "String should match pattern '^[a-zA-Z0-9_]+$'" },
     { loc: ['body', 'password'], type: 'string_too_short', msg: 'String should have at least 6 characters' },
   ] }, '失败')
-  assert.match(message, /用户名须为 2–64 位/)
+  assert.match(message, /用户名须为 3–32 位小写字母/)
   assert.match(message, /邮箱请填写到邮箱栏/)
   assert.match(message, /密码长度须为 6–128 个字符/)
   assert.ok(!message.includes('[object Object]'))

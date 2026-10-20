@@ -66,15 +66,14 @@ def build_mcp_server():
 
     @server.tool(annotations=read)
     def get_balance() -> dict:
-        """Read account credits and this connection's Beijing-calendar-day budget. Free."""
-        return execute('account:read', lambda db, grant, user: {'credits': user.credits, 'max_per_job': grant.max_per_job,
-                         'daily_limit': grant.daily_limit, 'used_today': auth.daily_usage(db, grant.id), 'timezone': 'Asia/Shanghai'})
+        """Read account credits and this connection's per-job spending cap. No daily spending limit. Free."""
+        return execute('account:read', lambda db, grant, user: {'credits': user.credits, 'max_per_job': grant.max_per_job})
 
     @server.tool(annotations=read)
     def estimate_cost(model: str, size: str = 'auto', editing: bool = False) -> dict:
         """Validate model/size and quote one image; does not reserve credits. Prices are rechecked at submission."""
         return execute(None, lambda db, grant, user: {**agent_tools.estimate(db, user, model, size, editing=editing),
-                         'max_per_job': grant.max_per_job, 'daily_remaining': max(0, grant.daily_limit - auth.daily_usage(db, grant.id))})
+                         'max_per_job': grant.max_per_job})
 
     @server.tool(annotations=write)
     def generate_image(prompt: Annotated[str, Field(min_length=1, max_length=32000)], model: str,

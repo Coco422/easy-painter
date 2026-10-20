@@ -169,7 +169,7 @@ class Handler(BaseHTTPRequestHandler):
                 if any(REFERENCES.get(rid, {}).get('_owner') != owner for rid in body.get('reference_image_ids', [])): return self.send(dict(detail='参考图不可访问。'), 404)
                 jid = str(uuid.uuid4())
                 JOBS[jid] = dict(job_id=jid, status='queued', image_url=None, thumbnail_url=None, prompt=body['prompt'], revised_prompt=None, model='mock-image', model_label='Mock 绘图模型', provider_name='本地 Mock', size=body.get('size', 'auto'), aspect_ratio='16:9', error_message=None, credit_cost=5, billing_status='reserved', refunded_at=None, created_at=now(), finished_at=None, media_state='none', media_expires_at=expiry(), _owner=owner, _started=time.monotonic(), _png=fake_image(body['prompt'], len(JOBS) + 1))
-                response = dict(job_id=jid, status='queued', poll_url=f'/api/v1/jobs/{jid}', rate_limit_remaining=50, credit_cost=5, base_credit_cost=5, billing_multiplier_bps=10000, group_code='mock', group_name='Mock', balance_after=995, billing_status='reserved')
+                response = dict(job_id=jid, status='queued', poll_url=f'/api/v1/jobs/{jid}', credit_cost=5, base_credit_cost=5, billing_multiplier_bps=10000, group_code='mock', group_name='Mock', balance_after=995, billing_status='reserved')
                 IDEMPOTENCY[(owner, key)] = (body, response)
                 REQUESTS.append(dict(job_id=jid, key=key, payload=body))
                 if CONTROL.pop('unknown_next', False): return self.send(dict(detail='Mock 模拟响应丢失；任务已创建。'), 503)

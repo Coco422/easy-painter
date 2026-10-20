@@ -8,6 +8,7 @@ import ReferenceHistoryDrawer from '@/components/ReferenceHistoryDrawer.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import { ApiError } from '@/lib/api'
 import { resolveImageLayout } from '@/lib/image-layout'
+import { validGenerationCount } from '@/lib/generation-batch'
 import { buildCreationPrompt, creationInputError, creationLanguages, creationStyles, creationTemplates, type CreationMode } from '@/lib/creation-presets'
 import type { BatchCount, ImageSize, PublicModel, ReferenceImageItem } from '@/lib/types'
 
@@ -117,6 +118,7 @@ onBeforeUnmount(() => {
 
 function handleSubmit() {
   if (uploading.value || uploadingBatch.value || referencesOverLimit.value || props.submitting) return
+  if (!validGenerationCount(props.selectedBatchCount)) { submissionError.value = '生成数量需为正整数。'; return }
   submissionError.value = creationInputError(props.mode, props.prompt, finalPrompt.value, selected.value.length, props.maxLength)
   if (!submissionError.value) emit('submit', finalPrompt.value)
 }
@@ -415,10 +417,11 @@ watch([() => props.prompt, () => props.mode, template, style, language, selected
             {{ count }} 张
           </button>
         </span>
+        <input class="model-select batch-custom-count" type="number" min="1" step="1" aria-label="自定义生成数量" :value="selectedBatchCount" :disabled="submitting" @input="emit('update:batch-count', Number(($event.target as HTMLInputElement).value))" />
       </label>
 
       <p v-if="submissionError" class="creation-submit-error" role="alert">{{ submissionError }}</p>
-      <button class="primary-button" :disabled="submitting || uploading || uploadingBatch || referencesOverLimit || !selectedModel" @click="handleSubmit">
+      <button class="primary-button" :disabled="submitting || uploading || uploadingBatch || referencesOverLimit || !selectedModel || !validGenerationCount(selectedBatchCount)" @click="handleSubmit">
         <Sparkles :size="17" aria-hidden="true" />{{ submitting ? '正在提交...' : mode === 'edit' ? '生成修改版' : '开始创作' }}
       </button>
 

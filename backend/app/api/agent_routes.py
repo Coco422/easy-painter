@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -29,7 +29,15 @@ oauth_router = APIRouter()
 class Limits(BaseModel):
     model_config = ConfigDict(extra='forbid')
     max_per_job: Annotated[int, Field(strict=True, ge=0, le=100000)] = 10
-    daily_limit: Annotated[int, Field(strict=True, ge=0, le=1000000)] = 100
+
+    @model_validator(mode='before')
+    @classmethod
+    def ignore_legacy_daily_limit(cls, value):
+        # Cached clients may still send this retired field. It has no effect and
+        # is intentionally absent from the public schema and response bodies.
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != 'daily_limit'}
+        return value
 
 
 class Consent(Limits):
@@ -153,8 +161,6 @@ def consent_details(request_id: str, response: Response, db: Session = Depends(g
 def consent(request_id: str, body: Consent, request: Request, response: Response,
             db: Session = Depends(get_db), user: User = Depends(require_current_user)):
     check_session_request(request)
-    if body.daily_limit < body.max_per_job:
-        raise HTTPException(422, '每日额度不能低于单次上限。')
     user = db.scalar(select(User).where(User.id == user.id).with_for_update().execution_options(populate_existing=True))
     row = db.scalar(select(AgentAuthorization).where(AgentAuthorization.id == request_id).with_for_update().execution_options(populate_existing=True))
     authorization(db, request_id)
@@ -171,7 +177,7 @@ def consent(request_id: str, body: Consent, request: Request, response: Response
         raise HTTPException(409, '有效连接已达 50 个，请先断开不用的连接。')
     client = db.get(AgentClient, row.client_id)
     grant = AgentGrant(user_id=user.id, client_id=client.id, resource=row.resource, label=client.name, scopes=scopes,
-                       password_digest=password_digest(user), max_per_job=body.max_per_job, daily_limit=body.daily_limit,
+                       password_digest=password_digest(user), max_per_job=body.max_per_job, daily_limit=body.max_per_job,
                        created_at=utcnow(), expires_at=utcnow() + timedelta(days=body.days))
     db.add(grant); db.flush()
     code = secrets.token_urlsafe(32)
@@ -205,7 +211,7 @@ async def token(request: Request, db: Session = Depends(get_db), redis_client=De
 def grant_view(db: Session, row: AgentGrant) -> dict:
     user = db.get(User, row.user_id)
     return {'id': row.id, 'label': row.label, 'scopes': row.scopes, 'max_per_job': row.max_per_job,
-            'daily_limit': row.daily_limit, 'used_today': service.daily_usage(db, row.id), 'expires_at': row.expires_at,
+            'expires_at': row.expires_at,
             'created_at': row.created_at, 'active': service.valid_grant(row, user)}
 
 
@@ -220,9 +226,10 @@ def connections(response: Response, db: Session = Depends(get_db), user: User = 
 def update_limits(grant_id: str, body: Limits, request: Request, response: Response,
                   db: Session = Depends(get_db), user: User = Depends(require_current_user)):
     check_session_request(request)
-    if body.daily_limit < body.max_per_job: raise HTTPException(422, '每日额度不能低于单次上限。')
     grant, _ = service.grant_for_update(db, grant_id, user_id=user.id)
-    grant.max_per_job, grant.daily_limit = body.max_per_job, body.daily_limit
+    grant.max_per_job = body.max_per_job
+    # Preserve the V12 storage constraint without enforcing any daily budget.
+    grant.daily_limit = body.max_per_job
     db.commit(); no_store(response)
     return grant_view(db, grant)
 

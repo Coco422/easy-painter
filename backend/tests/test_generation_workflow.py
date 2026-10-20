@@ -326,6 +326,11 @@ def test_list_active_jobs_returns_only_current_users_live_jobs():
 
     assert [job.job_id for job in jobs] == [newer_job.id, older_job.id]
     assert [job.status for job in jobs] == [JobStatus.PROCESSING.value, JobStatus.QUEUED.value]
+    db.add_all([GenerationJob(prompt=f"Batch {i}",model="gpt-image-2-c",user_id=user.id,status=JobStatus.QUEUED) for i in range(25)])
+    db.commit()
+    restored=routes.list_active_jobs(db=db,current_user=user)
+    assert len(restored)==27
+    assert all(job.job_id not in {failed_job.id,other_job.id} for job in restored)
     db.close()
 
 

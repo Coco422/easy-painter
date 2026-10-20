@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr
 
 
 DEFAULT_EXAMPLE_PROMPTS = [
@@ -123,6 +125,16 @@ class Settings(BaseSettings):
     default_email: str = ""
     registration_enabled: bool = True
 
+    # Keep checkout disabled until the operator configures and enables ZPAY.
+    zpay_enabled: bool = False
+    zpay_gateway_url: str = ""
+    zpay_merchant_id: str = ""
+    zpay_key: SecretStr = SecretStr("")
+    payment_config_encryption_key: SecretStr = SecretStr("")
+    zpay_payment_methods: list[Literal["alipay", "wxpay"]] = ["alipay", "wxpay"]
+    zpay_public_base_url: str = ""
+    zpay_order_ttl_minutes: int = 30
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -156,8 +168,8 @@ class Settings(BaseSettings):
 
     prompt_max_length: int = 4000
     gallery_limit: int = 24
-    generate_rate_limit_count: int = 12
-    generate_rate_limit_window_seconds: int = 60
+    # Short burst protection only; no per-minute generation quota.
+    generation_abuse_burst_limit: int = Field(default=60, ge=1)
     polling_interval_ms: int = 2000
     generation_job_stale_seconds: int = 2700
     generation_queue_stale_seconds: int = 900

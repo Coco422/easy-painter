@@ -83,13 +83,21 @@ def update_me(
     db: Session = Depends(get_db),
 ) -> UserResponse:
     current_user = db.scalar(select(User).where(User.id == current_user.id).with_for_update().execution_options(populate_existing=True))
+    if body.username is not None and body.username != current_user.username:
+        if db.scalar(select(User.id).where(func.lower(User.username) == body.username, User.id != current_user.id)):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已被使用，请换一个。")
+        current_user.username = body.username
     if body.display_name is not None:
         current_user.display_name = body.display_name
     if body.is_public is not None:
         current_user.is_public = body.is_public
         if not body.is_public:
             withdraw_pending(db, current_user.id)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已被使用，请换一个。") from None
     db.refresh(current_user)
     return _user_response(current_user, db)
 

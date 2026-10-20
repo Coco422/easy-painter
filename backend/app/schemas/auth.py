@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr, Field, ValidationError, ValidationInfo, ValidatorFunctionWrapHandler, field_validator
+from pydantic import AfterValidator, BaseModel, EmailStr, Field, ValidationError, ValidationInfo, ValidatorFunctionWrapHandler, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.models.user_group import STANDARD_GROUP_CODE
@@ -42,12 +42,27 @@ class BindEmailRequest(BaseModel):
     email_code: str = Field(pattern=r"^\d{6}$")
 
 
+def _check_username(value: str) -> str:
+    # /gallery/public is the community API route, rather than a user gallery.
+    if value == "public":
+        raise PydanticCustomError("username_reserved", "该用户名为系统保留名称，请换一个。")
+    return value
+
+
+Username = Annotated[str, Field(min_length=3, max_length=32, pattern=r"^[a-z][a-z0-9_]*$"), AfterValidator(_check_username)]
+
+
 class RegisterRequest(BaseModel):
-    username: str = Field(min_length=2, max_length=64, pattern=r"^[a-zA-Z0-9_]+$")
+    username: Username | None = None
     email: EmailStr
     email_code: str = Field(pattern=r"^\d{6}$")
     password: str = Field(min_length=6, max_length=128)
     display_name: str = Field(default="", max_length=128)
+
+    @field_validator('username', mode='before')
+    @classmethod
+    def optional_username(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 class ResetPasswordRequest(BaseModel):
@@ -73,6 +88,7 @@ class UserResponse(BaseModel):
 
 
 class UpdateUserRequest(BaseModel):
+    username: Username | None = None
     display_name: str | None = Field(default=None, max_length=128)
     is_public: bool | None = None
 
@@ -82,7 +98,7 @@ class AdminVerifyRequest(BaseModel):
 
 
 class AdminCreateUserRequest(BaseModel):
-    username: str = Field(min_length=2, max_length=64, pattern=r"^[a-zA-Z0-9_]+$")
+    username: Username
     email: EmailStr | None = None
     password: str = Field(min_length=6, max_length=128)
     display_name: str = Field(default="", max_length=128)
@@ -113,8 +129,10 @@ def _validate_admin_user_field(value, handler: ValidatorFunctionWrapHandler, inf
         return handler(value)
     except ValidationError as exc:
         error = exc.errors()[0]
+        if error['type'] == 'username_reserved':
+            raise
         messages = {
-            'username': '用户名须为 2–64 位字母、数字或下划线；邮箱请填写到邮箱栏。',
+            'username': '用户名须为 3–32 位小写字母、数字或下划线，且以字母开头；邮箱请填写到邮箱栏。',
             'email': '请输入有效的邮箱地址。',
             'password': '密码须为 6–128 个字符。',
             'display_name': '显示名称须为不超过 128 个字符的文本。',

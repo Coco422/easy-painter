@@ -212,7 +212,7 @@ export async function requestEmailCode(email: string, purpose: EmailCodePurpose)
 }
 
 export async function register(data: {
-  username: string
+  username?: string
   email: string
   email_code: string
   password: string

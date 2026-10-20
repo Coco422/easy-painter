@@ -64,11 +64,11 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 ### Auth System
 
-- Public registration verifies email through SMTP; login accepts username or email; password reset uses a one-time email code stored as a Redis HMAC digest
+- Public registration asks only for email, verification code and password, assigning a random internal username and default display name when omitted. Email is the primary login identifier; exact username login remains supported, while email matching is case-insensitive. Password reset uses a one-time email code stored as a Redis HMAC digest
 - Existing signed-in users without email can bind one through `POST /users/me/email/code` + `PUT /users/me/email`; a bound email cannot be self-replaced, while admin can still update it directly
 - Email code sending uses a Redis atomic 60-second cooldown plus short-window and daily limits across email, IP, and (for authenticated binding) user ID; binding codes are scoped to the current user ID
 - Users can also be created by admin or auto-created from `DEFAULT_USERNAME`/`DEFAULT_PASSWORD`/optional `DEFAULT_EMAIL` on first startup
-- Admin user forms validate usernames (2–64 ASCII letters, digits or underscores), optional emails and passwords (6–128 characters) before submission. Admin create/update validation keeps the existing 422 detail array and supplies Chinese field messages; the client handles string, object and array errors without coercing objects into text.
+- New or changed usernames must be 3–32 lowercase ASCII letters, digits or underscores and begin with a letter; `public` is reserved for the community gallery API route. Registration, profile rename and admin creation reject case-insensitive collisions; existing legacy names remain valid until changed. Users edit username and display name in their profile; a rename changes the public gallery URL and invalidates its old URL, with an explicit client warning. Database uniqueness also catches concurrent writes. Admin forms validate optional emails and passwords (6–128 characters); 422 errors retain readable Chinese field messages.
 - User access JWTs (15 minutes, `typ=access`, `sid`) remain in `localStorage` and use `Authorization: Bearer <token>`. Refresh credentials live only in a host-only HttpOnly, SameSite=Strict Cookie scoped to `/api/v1/auth`, Secure in production. Flyway V11 `auth_sessions` stores session state and rotation counters, never raw refresh credentials.
 - Visible-page authenticated requests renew on demand: 30-day idle expiry capped at 180 days from login. No timer or hidden-tab polling extends sessions. Web Locks coordinate tabs; the server locks session rows and accepts the immediate predecessor for 30 seconds, returning the same successor. Later replay revokes the session. Logout and password-hash changes invalidate session-backed access and refresh credentials.
 - `/auth/session` migrates valid legacy user JWTs once per browser transition; session-backed JWTs cannot use it to reset the absolute deadline. Legacy JWTs retain their original expiry during compatibility; already expired legacy JWTs require login. Admin JWTs keep the existing separate policy.
@@ -77,6 +77,13 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - Admin access via secret key (`ADMIN_SECRET_KEY` env var), produces a separate JWT with `role=admin` claim
 - Frontend routes: `/` (community), `/create`, `/history`, `/gallery`, `/gallery/:username` (shared portfolio), `/favorites`, `/profile`, `/login`, `/admin`
 - `/canvas` and `/canvas/:id` are the separate local-first canvas library/editor; `/create` remains available. Read `docs/v0.20.0-release.md` for storage, recovery, cloud quotas and migration details.
+
+### Recharge and Credit Provenance
+
+- ZPAY checkout defaults off. V13 adds packages, recharge orders and credit provenance; V14 stores immutable payment configurations with Fernet-encrypted merchant keys. Admin sets credentials in Recharge Management; only `PAYMENT_CONFIG_ENCRYPTION_KEY` lives in private env. Never return keys/ciphertext, reuse JWT keys, or replace a master key without re-encrypting every revision. Setup: `docs/recharge-center.md`; SDK findings: `docs/zpay-sdk-security-review.md`.
+- Only verified ZPAY notifications or active queries grant credits. Use the order's original `config_revision` credentials, check merchant/order/amount/method/trade number, lock user then order, and commit paid state/ledger/lots together. Repeated delivery must credit once. Browser return parameters are never evidence of payment; query credentials/signatures must be redacted from logs.
+- All new debits allocate noncash lots first, then paid FIFO. Refund failed reservations to original lots. Existing balances, redemption codes and admin adjustments have zero cash basis. Future commissions use only settled, unreversed paid allocations and the exact rational cash-basis snapshots, never inferred yuan-per-credit values.
+- Bounded recharge reconciliation runs in a worker so network delays do not block dispatcher heartbeats. Disabling checkout still permits confirmation of existing paid orders with their original merchant configuration. No cash refund, payout or commission API is enabled in this phase.
 
 ### Creation Workspace
 
@@ -89,7 +96,7 @@ See `docs/creation-workspace.md` for usage and local mock preview.
 ### Agent / MCP
 
 - MCP uses the official SDK at `/api/mcp`, separate resource-bound opaque OAuth credentials and Flyway V12 additive tables. Empty `MCP_PUBLIC_URL` disables access; production requires the exact canonical HTTPS endpoint. Setup, protocol and local preview: `docs/mcp-integration.md`.
-- Lock owner then grant. Agent usage, job, credit reservation and outbox must commit together through `create_generation_job`; include pending reservations in Beijing-day budgets and exclude refunds. Scope idempotency to the grant and preserve exact request parameters before paid calls.
+- Lock owner then grant. Agent usage, job, credit reservation and outbox must commit together through `create_generation_job`; enforce per-job caps and available balance, never daily spending limits. The legacy V12 `daily_limit` column only satisfies its storage constraint and is not a budget. Scope idempotency to the grant and preserve exact request parameters before paid calls.
 - Never accept website JWTs at MCP or agent credentials at browser APIs. Check grant/password/resource/expiry on every call and result media access. SDK transport auth does not authorize business actions by itself.
 - Agent content and Skill ZIP share `backend/app/agent_content/`; browser-local canvases/version graphs are not accessible to remote tools. `scripts/preview-mcp.py` is an isolated development fixture, never an application startup or production seed path.
 
@@ -153,7 +160,7 @@ See `docs/creation-workspace.md` for usage and local mock preview.
 - `services/upstream.py` — HTTP client to upstream image API
 - `services/storage.py` — RustFS upload/download/delete via the compatible MinIO S3 SDK
 - `services/storage_init.py` — Private bucket initialization; failures block service startup
-- `services/rate_limit.py` — Redis-based rate limiting
+- `services/rate_limit.py` — Redis-based rate limiting; generation uses a shared account burst guard (default 60 new submissions/second), never a minute/day quota. Old `GENERATE_RATE_LIMIT_*` values are ignored.
 - `db/init_db.py` — Default user, upstream, and model seed data only; schema changes live in `backend/db/migration/`
 
 ### Frontend Structure (`frontend/src/`)

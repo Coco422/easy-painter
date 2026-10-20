@@ -11,6 +11,7 @@ from app.models.generation_job import GenerationJob, JobStatus
 from app.models.job_charge import JobCharge, JobChargeStatus
 from app.models.redemption_code import RedemptionCode
 from app.models.user import User
+from app.services.credit_provenance import add_credit_lot, allocate_credits, ensure_credit_provenance, reverse_job_allocations
 
 
 def utcnow() -> datetime:
@@ -55,6 +56,8 @@ def reserve_job_credits(
         raise InsufficientCreditsError(required=amount, balance=current_balance)
 
     transaction_id = str(uuid4())
+    ensure_credit_provenance(db, user_id=user_id, balance=balance + amount)
+    allocate_credits(db, user_id=user_id, amount=amount, transaction_id=transaction_id, job_id=job.id)
     transaction = CreditTransaction(
         id=transaction_id,
         user_id=user_id,
@@ -121,6 +124,9 @@ def refund_job_charge(
     if balance is None:
         raise RuntimeError("charge owner no longer exists")
 
+    ensure_credit_provenance(db, user_id=charge.user_id, balance=balance - charge.amount)
+    reverse_job_allocations(db, user_id=charge.user_id, job_id=job_id, amount=charge.amount, now=refunded_at)
+
     refund_id = str(uuid4())
     db.add(
         CreditTransaction(
@@ -169,6 +175,8 @@ def redeem_credits(db: Session, *, user_id: str, code_text: str) -> tuple[int, i
 
     code.used_by = user.id
     code.used_at = utcnow()
+    ensure_credit_provenance(db, user_id=user.id, balance=user.credits)
+    add_credit_lot(db, user_id=user.id, amount=code.credits, source_type="redeem", source_id=f"redeem:{code.id}")
     user.credits += code.credits
     db.add(
         CreditTransaction(
@@ -197,9 +205,16 @@ def adjust_user_credits(
 
     balance_before = user.credits
     applied_amount = max(requested_amount, -balance_before)
+    ensure_credit_provenance(db, user_id=user.id, balance=balance_before)
+    transaction_id = str(uuid4())
+    if applied_amount > 0:
+        add_credit_lot(db, user_id=user.id, amount=applied_amount, source_type="admin", source_id=f"admin:{transaction_id}")
+    elif applied_amount < 0:
+        allocate_credits(db, user_id=user.id, amount=-applied_amount, transaction_id=transaction_id)
     user.credits += applied_amount
     db.add(
         CreditTransaction(
+            id=transaction_id,
             user_id=user.id,
             amount=applied_amount,
             balance_after=user.credits,
@@ -265,6 +280,7 @@ def reconcile_user_balances(db: Session) -> int:
         if user.credits != expected:
             previous = user.credits
             user.credits = expected
+            ensure_credit_provenance(db, user_id=user.id, balance=expected)
             db.add(
                 CreditTransaction(
                     user_id=user.id,

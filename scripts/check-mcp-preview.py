@@ -39,6 +39,7 @@ async def main():
         requested=web.get('/api/oauth/authorize',params=args,follow_redirects=False)
         assert requested.status_code == 303
         id=parse_qs(urlsplit(requested.headers['location']).query)['request'][0]
+        # Simulate a cached client sending the retired field; it must be ignored.
         approved=web.post('/api/v1/agent/authorizations/'+id,headers=headers,json={'allow':True,'scopes':['account:read','jobs:read','jobs:create'],'max_per_job':5,'daily_limit':10,'days':7})
         approved.raise_for_status();query=parse_qs(urlsplit(approved.json()['redirect_to']).query)
         assert query['state']==[args['state']]
@@ -49,6 +50,7 @@ async def main():
                 tools=await mcp.list_tools();assert len(tools.tools)==6
                 assert data(await mcp.call_tool('list_models'))['models'][0]['id']=='mock-image'
                 assert data(await mcp.call_tool('estimate_cost',{'model':'mock-image'}))['credit_cost']==5
+                opening=data(await mcp.call_tool('get_balance'))['credits']
                 call=dict(prompt='Mock workflow in gold',model='mock-image',size='auto',request_id=uuid4().hex,max_cost=5)
                 first=data(await mcp.call_tool('generate_image',call));replay=data(await mcp.call_tool('generate_image',call))
                 assert first['job_id']==replay['job_id']
@@ -62,9 +64,16 @@ async def main():
                 edit=dict(prompt='Change to blue',source_job_id=job['job_id'],model='mock-image',size='auto',request_id=uuid4().hex,max_cost=5)
                 edited=data(await mcp.call_tool('edit_image',edit))
                 assert data(await mcp.call_tool('edit_image',edit))['job_id']==edited['job_id']
-                rejected=await mcp.call_tool('generate_image',{**call,'request_id':uuid4().hex})
+                third=data(await mcp.call_tool('generate_image',{**call,'request_id':uuid4().hex}))
+                rejected=await mcp.call_tool('generate_image',{**call,'request_id':uuid4().hex,'max_cost':4})
                 assert rejected.model_dump(by_alias=True).get('isError')
-                balance=data(await mcp.call_tool('get_balance'));assert balance['used_today']==10
+                balance=data(await mcp.call_tool('get_balance'));assert balance['credits']==opening-15
+                assert 'used_today' not in balance and 'daily_limit' not in balance
+                for _ in range(20):
+                    final=data(await mcp.call_tool('get_job',{'job_id':third['job_id']}))
+                    if final['status']=='succeeded':break
+                    await asyncio.sleep(.5)
+                assert final['status']=='succeeded'
                 for _ in range(20):
                     final=data(await mcp.call_tool('get_job',{'job_id':edited['job_id']}))
                     if final['status']=='succeeded':break
@@ -74,6 +83,6 @@ async def main():
                 web.delete('/api/v1/agent/connections/'+grant['id'],headers=headers).raise_for_status()
                 assert web.get(job['image_url']).status_code==404
         assert web.post('/api/mcp',headers={'Authorization':'Bearer '+access},json={}).status_code==401
-    print(json.dumps({'sdk':'mcp 2.3.0','tools':6,'generate':'succeeded','edit':'succeeded','same_request_replay':'same job, no extra charge','daily_limit':'rejected third submission','revocation':'access and media denied'},ensure_ascii=False))
+    print(json.dumps({'sdk':'mcp 2.3.0','tools':6,'generate':'succeeded','edit':'succeeded','same_request_replay':'same job, no extra charge','daily_limit':'removed; third submission succeeded','max_cost':'rejected underquoted request','revocation':'access and media denied'},ensure_ascii=False))
 
 if __name__=='__main__':asyncio.run(main())

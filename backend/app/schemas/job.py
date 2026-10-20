@@ -115,7 +115,6 @@ class CreateJobResponse(BaseModel):
     job_id: str
     status: str
     poll_url: str
-    rate_limit_remaining: int
     credit_cost: int = 0
     base_credit_cost: int | None = None
     billing_multiplier_bps: int | None = None

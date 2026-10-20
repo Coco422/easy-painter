@@ -259,3 +259,9 @@ def backfill_media_thumbnails() -> None:
     from app.services.thumbnails import backfill_thumbnails
     with SessionLocal() as db:
         backfill_thumbnails(db)
+
+
+@celery_app.task(name="app.reconcile_recharges", ignore_result=True)
+def reconcile_recharges() -> None:
+    from app.services.payments import reconcile_recharge_orders
+    reconcile_recharge_orders(session_factory=SessionLocal, settings=settings)

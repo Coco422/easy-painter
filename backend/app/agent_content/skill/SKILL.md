@@ -9,7 +9,7 @@ Use the connected Easy Painter MCP tools. Tool prefixes depend on the host; disc
 
 ## Plan and quote
 
-- `list_models` reports enabled models, supported sizes, reference support and the user's per-image price. `get_balance` reports credits and the connection's limits. Both are free.
+- `list_models` reports enabled models, supported sizes, reference support and the user's per-image price. `get_balance` reports credits and the connection's per-job cap. There is no daily spending limit or per-minute generation quota across the website, API or MCP. Both are free.
 - Use `estimate_cost(model, size, editing)` before paid submission. Prefer an appropriate enabled model within the user's stated budget. Ask only when required content, cost authorization or model choice is materially unclear.
 - Each call creates **one image**. Creating several images requires separate authorized requests. Website/API/MCP share the same credits, reservation and refund rules.
 - Clarify the subject, layout, aspect ratio and desired text. Describe required labels, language, placement and hierarchy explicitly. Keep the user's intended content; explain meaningful prompt additions.
@@ -20,8 +20,9 @@ Use the connected Easy Painter MCP tools. Tool prefixes depend on the host; disc
 - For revisions use `edit_image(source_job_id, prompt, model, size, request_id, max_cost)`. The source must be the user's owned, still-available job image. Original versions stay intact. This is whole-image model redrawing, not a mask or layer editor. External image URLs and local file uploads are not supported in this release.
 - Before a paid call, preserve the exact arguments and a new stable `request_id` in the agent's task state. Set `max_cost` to the quoted cost within the user's authorization. Never silently increase it after a price change or limit error.
 - If submission times out or the response is lost, repeat **the same tool and all original arguments including request_id**. Do not generate a replacement ID for an unknown outcome. A reused ID with different arguments is a conflict, not permission to try a new paid request.
+- On a 429 flood-protection error, stop sending requests and pause before retrying the original call with the same request_id and arguments.
 - Once a job_id is known, call `get_job(job_id)` at the returned polling interval. Resume polling on later turns; connection loss does not cancel or refund a running job.
-- Failed jobs refund the account and release their reserved daily allowance. A new paid retry after a confirmed failure needs a fresh ID and the user's existing or renewed authorization. Stop on insufficient balance, permission, budget or expiry errors and explain the action needed.
+- Failed jobs refund the reserved credits to the account. A new paid retry after a confirmed failure needs a fresh ID and the user's existing or renewed authorization. Stop on insufficient balance, permission, budget or expiry errors and explain the action needed.
 
 ## Deliver
 

@@ -14,6 +14,7 @@ from app.services.mcp_server import build_mcp_server
 from app.api.artwork_routes import artwork_router
 from app.api.artwork_media_routes import artwork_media_router
 from app.api.canvas_routes import canvas_router
+from app.api.payment_routes import payment_router, admin_payment_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.init_db import init_db
@@ -53,6 +54,8 @@ app.add_middleware(
 app.include_router(artwork_router, prefix=settings.api_v1_prefix)
 app.include_router(artwork_media_router, prefix=settings.api_v1_prefix)
 app.include_router(canvas_router, prefix=settings.api_v1_prefix)
+app.include_router(payment_router, prefix=settings.api_v1_prefix)
+app.include_router(admin_payment_router, prefix=settings.api_v1_prefix)
 app.include_router(router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(user_router, prefix=settings.api_v1_prefix)

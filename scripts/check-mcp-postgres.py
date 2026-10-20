@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Isolated PostgreSQL SQL/concurrency check; never uses a live application DB.
 Run from backend: PYTHONPATH=. uv run --with pgserver==0.1.4 python ../scripts/check-mcp-postgres.py
-Executes V1–V12 SQL, not the Flyway container. Embedded PG is a test-only dependency.
+Executes all repository migration SQL, not the Flyway container. Embedded PG is a test-only dependency.
 """
 from pathlib import Path
 import tempfile,json
@@ -52,17 +52,21 @@ try:
             try:return agent_tools.submit(db,None,grant_id,prompt='A flow diagram',model='pg-test',size='auto',request_id=key,max_cost=5)
             except HTTPException as e:return {'error':e.status_code}
     with ThreadPoolExecutor(max_workers=8) as pool:results=list(pool.map(submit,[f'parallel-{i}' for i in range(8)]))
-    assert sum('job_id' in r for r in results)==2,results
-    assert sum(r.get('error')==403 for r in results)==6,results
+    assert sum('job_id' in r for r in results)==8,results
+    assert not any('error' in r for r in results),results
     successful_key=next(f'parallel-{i}' for i,r in enumerate(results) if 'job_id' in r)
+    # The remaining balance accepts exactly twelve more paid jobs; concurrent
+    # overdraw attempts must fail atomically, with no daily-budget gate.
+    with ThreadPoolExecutor(max_workers=8) as pool:exhaustion=list(pool.map(submit,[f'exhaust-{i}' for i in range(16)]))
+    assert sum('job_id' in r for r in exhaustion)==12,exhaustion
+    assert sum(r.get('error')==402 for r in exhaustion)==4,exhaustion
     with ThreadPoolExecutor(max_workers=8) as pool:replays=list(pool.map(submit,[successful_key]*8))
     assert len({r['job_id'] for r in replays})==1
     with factory() as db:
         counts={cls.__name__:db.scalar(select(func.count()).select_from(cls)) for cls in [GenerationJob,JobCharge,AgentUsage,OutboxEvent]}
-        assert set(counts.values())=={2},counts
-        assert db.get(User,user_id).credits==90
-        assert agent_auth.daily_usage(db,grant_id)==10
+        assert set(counts.values())=={20},counts
+        assert db.get(User,user_id).credits==0
     engine.dispose()
-    print(json.dumps({'postgres':version,'sql_migrations':'V1–V12 executed in isolated empty database','agent_tables':tables,'parallel_submissions':8,'accepted':2,'budget_rejections':6,'concurrent_replays':8,'replay_jobs':1,'records':counts,'balance':90},ensure_ascii=False))
+    print(json.dumps({'postgres':version,'sql_migrations':'all repository migrations executed in isolated empty database','agent_tables':tables,'parallel_submissions':8,'initial_accepted':8,'daily_budget_rejections':0,'additional_accepted':12,'insufficient_balance_rejections':4,'concurrent_replays':8,'replay_jobs':1,'records':counts,'balance':0},ensure_ascii=False))
 finally:
     pg.cleanup()

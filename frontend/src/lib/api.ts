@@ -221,7 +221,7 @@ export function fetchUserGallery(username: string, page = 1, pageSize = 20) {
   return apiRequest<GalleryPageResponse>(`/api/v1/gallery/${username}?page=${page}&page_size=${pageSize}`)
 }
 
-export function updateProfile(data: { display_name?: string; is_public?: boolean }) {
+export function updateProfile(data: { username?: string; display_name?: string; is_public?: boolean }) {
   return apiRequest<UserInfo>('/api/v1/users/me', {
     method: 'PUT',
     body: JSON.stringify(data),

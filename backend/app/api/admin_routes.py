@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from redis import Redis
 from sqlalchemy import desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -414,7 +415,7 @@ def admin_create_user(
     db: Session = Depends(get_db),
     _: dict = Depends(require_admin),
 ) -> UserResponse:
-    existing = db.scalar(select(User).where(User.username == body.username))
+    existing = db.scalar(select(User).where(func.lower(User.username) == body.username))
     if existing:
         raise HTTPException(status_code=409, detail="用户名已存在。")
     normalized_email = str(body.email).strip().lower() if body.email else None
@@ -430,7 +431,11 @@ def admin_create_user(
         group_code=assigned_group_code,
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="用户名或邮箱已存在。") from None
     db.refresh(user)
     return _admin_user_response(user, db)
 
@@ -479,8 +484,12 @@ def admin_delete_user(
     user = db.scalar(select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True))
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在。")
+    from app.models.payment import RechargeOrder, CreditLot
+
     has_financial_history = any(
         (
+            db.scalar(select(RechargeOrder.id).where(RechargeOrder.user_id == user.id).limit(1)),
+            db.scalar(select(CreditLot.id).where(CreditLot.user_id == user.id).limit(1)),
             db.scalar(select(CreditTransaction.id).where(CreditTransaction.user_id == user.id).limit(1)),
             db.scalar(select(JobCharge.id).where(JobCharge.user_id == user.id).limit(1)),
             db.scalar(

@@ -2,8 +2,8 @@ import { authenticatedFetch } from './auth'
 import { randomId, sha256Hex } from './browser-crypto'
 
 export interface AgentConnection {
-  id: string; label: string; scopes: string[]; max_per_job: number; daily_limit: number
-  used_today: number; created_at: string; expires_at: string; active: boolean
+  id: string; label: string; scopes: string[]; max_per_job: number
+  created_at: string; expires_at: string; active: boolean
 }
 export interface AgentConfig { enabled: boolean; endpoint: string | null; scopes: Record<string, string> }
 export async function agentApi<T>(path: string, init: RequestInit = {}): Promise<T> {
