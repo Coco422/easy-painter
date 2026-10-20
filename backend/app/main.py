@@ -8,6 +8,9 @@ from redis import Redis
 from sqlalchemy.orm import Session
 
 from app.api import admin_router, announcement_router, auth_router, community_admin_router, inspiration_router, media_router, reference_router, router, user_group_router, user_router
+from app.api.agent_routes import agent_router, oauth_router
+from app.api.agent_content_routes import content_router
+from app.services.mcp_server import build_mcp_server
 from app.api.artwork_routes import artwork_router
 from app.api.artwork_media_routes import artwork_media_router
 from app.api.canvas_routes import canvas_router
@@ -21,12 +24,14 @@ from app.services.redis_client import get_redis
 
 configure_logging()
 settings = get_settings()
+mcp_server, mcp_app = build_mcp_server()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    yield
+    async with mcp_server.session_manager.run():
+        yield
 
 
 app = FastAPI(
@@ -72,3 +77,9 @@ def legacy_healthz(
         response.status_code = 503
         return {"status": "degraded", "components": components}
     return {"status": "ok", "components": components}
+
+app.include_router(agent_router, prefix=f"{settings.api_v1_prefix}/agent")
+app.include_router(oauth_router)
+app.include_router(content_router)
+# Registered after concrete /api routes, so browser APIs keep their own auth.
+app.mount("/api", mcp_app)

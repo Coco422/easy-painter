@@ -1,3 +1,4 @@
+from app.models.agent import AgentClient, AgentGrant, AgentAuthorization, AgentCredential, AgentUsage
 from app.models.artwork import Favorite, CommunitySubmission
 from app.models.announcement import Announcement
 from app.models.auth_session import AuthSession

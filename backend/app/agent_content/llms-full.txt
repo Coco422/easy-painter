@@ -1,0 +1,32 @@
+# Easy Painter / 一丝绘画站
+
+Easy Painter is an AI image creation website. Web creation: {{ORIGIN}}/create
+Agent setup: {{ORIGIN}}/mcp
+Agent-readable installation: {{ORIGIN}}/mcp/install.md
+MCP endpoint: {{MCP_URL}}
+Portable Skill: {{ORIGIN}}/mcp/skill/SKILL.md
+
+## Implemented capabilities
+
+- Text-to-image generation with configurable enabled models, supported sizes, per-model prices, reference support and user-group pricing.
+- Website: text/reference/edit modes, purpose and style presets, language instructions, final prompt preview, batch jobs, image history, downloads and manual community publication.
+- Website creation versions and branching relationships are browser-local, account-scoped and bounded to 100 entries. Browser-local canvas projects use IndexedDB and may optionally sync for eligible VIP users. MCP cannot read or write browser-local version graphs or canvases.
+- Agent tools: list_models, get_balance, estimate_cost, generate_image, edit_image, get_job. Each paid call submits one image. Agent edits use an owned, available source job ID, not arbitrary URLs or local files.
+- Async jobs share the existing account credit balance. Submission reserves credits; delivery settles; final failure refunds. Client request IDs prevent repeated charges for the same exact request.
+- Result image links expire within five minutes; authorization and media validity are rechecked. Ordinary media normally lasts 48 hours; user-group policy may differ. Access through MCP does not extend retention.
+
+## Authorization and budgets
+
+Remote Streamable HTTP, OAuth authorization code with mandatory PKCE S256, public-client dynamic registration, resource-bound opaque access tokens (15 minutes) and rotating refresh tokens bounded by grant expiry. User chooses 7/30/90-day grants and scopes account:read, jobs:read, jobs:create. Browser login tokens cannot authenticate MCP; MCP credentials cannot authenticate ordinary browser APIs.
+
+Each connection has a per-job and Asia/Shanghai-calendar-day limit. Pending reservations count; refunds release allowance. The tool max_cost also caps each request. Limits and account balance are enforced server-side in the same transaction as job/charge/outbox creation. Revoking a connection or resetting the user's password invalidates it. Existing accepted jobs continue after revocation.
+
+Free calls: models, balance, quote and job status. Paid calls use current model and user-group prices returned by list_models/estimate_cost; no fixed MCP plan or extra MCP fee is defined. Never promise a price before checking the current model.
+
+## Boundaries
+
+Model-generated diagrams may need human correction. No guarantee of scientific correctness or journal acceptance. No real-data chart computation, editable SVG/PPTX conversion, layer editing or masks is provided by these tools. No public webhook, external-image fetcher or admin tools are exposed. The MCP endpoint supports standard clients; actual third-party product/account availability must be checked in that client.
+
+## Reliable agent behavior
+
+Discover models and quote costs; stay within user authorization. Preserve exact arguments and a stable request_id before paid calls. Retry unknown submissions with those same arguments; poll known jobs. Do not increase max_cost or switch request IDs to bypass errors. Deliver preview/download information and report failure/refund accurately. Do not expose long-lived credentials.

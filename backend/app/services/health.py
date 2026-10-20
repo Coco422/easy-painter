@@ -17,7 +17,7 @@ from app.services.tasks import celery_app
 
 
 DISPATCHER_HEARTBEAT_KEY = "easy-painter:dispatcher:heartbeat"
-EXPECTED_FLYWAY_VERSION = "11"
+EXPECTED_FLYWAY_VERSION = "12"
 
 
 def _as_utc(value: datetime) -> datetime:

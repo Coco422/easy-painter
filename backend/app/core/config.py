@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     site_name: str = "一丝绘画站"
     app_env: str = "production"
     api_v1_prefix: str = "/api/v1"
+    # Empty disables agent endpoints until the canonical external HTTPS URL is configured.
+    mcp_public_url: str = ""
 
     database_url: str = "postgresql+psycopg://easy_painter:easy_painter@postgres:5432/easy_painter"
     redis_url: str = "redis://redis:6379/0"

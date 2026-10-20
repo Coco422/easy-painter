@@ -240,6 +240,24 @@ async def create_job(
     current_user: User = Depends(require_current_user),
 ) -> CreateJobResponse:
     parsed_payload = await _parse_create_job_payload(request)
+    return create_generation_job(parsed_payload, idempotency_key, db, redis_client, settings, current_user)
+
+
+def create_generation_job(
+    parsed_payload: ParsedCreateJobPayload,
+    idempotency_key: str | None,
+    db: Session,
+    redis_client: Redis,
+    settings: Settings,
+    current_user: User,
+    *,
+    agent_context: tuple[str, str, str, int] | None = None,
+) -> CreateJobResponse:
+    # Browser and MCP submissions share one job, charge and outbox transaction.
+    agent_grant = None
+    if agent_context:
+        from app.services.agent_auth import grant_for_update
+        agent_grant, current_user = grant_for_update(db, agent_context[0], user_id=current_user.id)
     payload = parsed_payload.request
     prompt = payload.prompt.strip()
     if idempotency_key is not None and not IDEMPOTENCY_KEY_PATTERN.fullmatch(idempotency_key):
@@ -334,6 +352,9 @@ async def create_job(
         base_credit_cost,
         group_policy.billing_multiplier_bps,
     )
+    if agent_grant is not None:
+        from app.services.agent_auth import check_budget
+        check_budget(db, agent_grant, credit_cost, agent_context[3])
     model_row = db.get(ModelConfig, payload.model)
     provider_row = db.get(UpstreamProvider, model_row.provider_id) if model_row else None
 
@@ -435,6 +456,10 @@ async def create_job(
             base_credit_cost=base_credit_cost,
             billing_multiplier_bps=group_policy.billing_multiplier_bps,
         )
+        if agent_context:
+            from app.models.agent import AgentUsage
+            db.add(AgentUsage(job_id=job.id, grant_id=agent_context[0], request_key=agent_context[1],
+                              request_digest=agent_context[2], created_at=utcnow()))
         db.add(
             OutboxEvent(
                 event_type="generation.job.created",

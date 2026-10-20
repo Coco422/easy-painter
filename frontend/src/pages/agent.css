@@ -1,0 +1,65 @@
+/* Layout grounded in OpenDesign's Linear spec: 4px rhythm, 24px gutters,
+   thin borders, 6/12px radii, 13px code; retain Easy Painter's brand colors. */
+.agent-page { max-width: 1152px; margin: 0 auto; padding: 24px 0 48px; color: var(--text-primary); }
+.agent-heading { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:32px; }
+.agent-eyebrow { font-size:11px; letter-spacing:.1em; color:var(--accent-strong); margin:0 0 12px; }
+.agent-heading h1 { font-size:32px; font-weight:500; letter-spacing:-.7px; margin:0 0 12px; }
+.agent-heading p:last-child, .agent-card p, .agent-resources p { color:var(--text-secondary); font-size:13px; line-height:1.7; }
+.agent-heading p:last-child { margin:0; }
+.agent-badge { display:inline-flex; align-items:center; gap:8px; font-size:12px; white-space:nowrap; color:var(--accent-strong); }
+.agent-layout { display:grid; grid-template-columns:minmax(0, 2fr) minmax(260px, 1fr); gap:24px; margin-bottom:24px; }
+.agent-card { padding:24px; border:1px solid var(--border); border-radius:12px; background:var(--bg-surface); min-width:0; }
+.agent-section-heading { display:flex; align-items:center; gap:12px; margin-bottom:24px; }
+.agent-section-heading > button { margin-left:auto; }
+.agent-card h2, .agent-resources h2 { font-size:18px; font-weight:500; margin:0 0 8px; }
+.agent-section-heading p { margin:0; }
+.agent-step { color:var(--accent-strong); font:13px ui-monospace,monospace; }
+.agent-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); padding-bottom:12px; flex-wrap:wrap; }
+.agent-tabs button { background:none; border:0; border-radius:6px; color:var(--text-secondary); padding:8px 12px; cursor:pointer; font:inherit; font-size:13px; }
+.agent-tabs button[aria-pressed=true] { color:var(--accent-strong); background:var(--accent-soft); }
+.agent-page pre { padding:16px; margin:20px 0; background:var(--bg-input); border:1px solid var(--border); border-radius:6px; font:13px/1.7 ui-monospace,SFMono-Regular,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+.agent-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.agent-button { display:inline-flex; justify-content:center; align-items:center; gap:8px; font:inherit; font-size:12px; padding:10px 12px; color:var(--text-primary); border:1px solid var(--border); border-radius:6px; background:var(--bg-input); cursor:pointer; text-decoration:none; }
+.agent-button:hover:not(:disabled) { border-color:var(--border-accent); }
+.agent-button.primary { background:var(--accent); border-color:var(--accent); color:var(--text-inverse); }
+.agent-button:disabled { opacity:.5; cursor:wait; }
+.agent-page .agent-fine { font-size:11px; margin:16px 0 0; }
+.agent-summary > h2 { margin-top:16px; line-height:1.6; }
+.agent-summary ul { list-style:none; padding:0; display:grid; gap:20px; margin:24px 0; }
+.agent-summary li { display:flex; gap:12px; }
+.agent-summary li > svg { flex-shrink:0; color:var(--accent-strong); margin-top:2px; }
+.agent-summary strong { font-size:13px; font-weight:500; }
+.agent-summary li p { margin:6px 0 0; font-size:12px; }
+.agent-doc-link { display:inline-flex; align-items:center; gap:8px; color:var(--accent-strong); font-size:12px; text-decoration:none; }
+.agent-message { padding:12px 16px; border:1px solid var(--border-accent); border-radius:6px; color:var(--text-primary); background:var(--accent-soft); font-size:13px; line-height:1.7; overflow-wrap:anywhere; }
+.agent-message.error { border-color:var(--danger,#c65a4b); }
+.agent-muted { color:var(--text-secondary); font-size:13px; line-height:1.7; }
+.agent-muted a { color:var(--accent-strong); }
+.agent-connection { padding:20px 0; border-top:1px solid var(--border); }
+.agent-connection:last-child { padding-bottom:0; }
+.agent-connection-title { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+.agent-connection-title strong { font-size:14px; font-weight:500; }
+.agent-connection-title time { margin-left:auto; color:var(--text-secondary); font-size:12px; }
+.agent-status { font-size:11px; color:var(--accent-strong); background:var(--accent-soft); padding:4px 8px; border-radius:4px; }
+.agent-status.inactive { color:var(--text-secondary); background:var(--bg-input); }
+.agent-connection-bottom { display:flex; align-items:center; flex-wrap:wrap; gap:24px; font-size:12px; color:var(--text-secondary); }
+.agent-connection-bottom > .agent-actions { margin-left:auto; }
+.agent-connection-bottom strong { font-weight:500; color:var(--text-primary); }
+.agent-inline-form { display:flex; align-items:end; flex-wrap:wrap; gap:12px; padding:16px; margin-top:16px; background:var(--bg-input); border-radius:6px; }
+.agent-inline-form label, .agent-field { display:grid; gap:8px; color:var(--text-secondary); font-size:12px; }
+.agent-page input, .agent-page select, .agent-page textarea { color:var(--text-primary); background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:10px 12px; font:inherit; min-width:0; width:100%; box-sizing:border-box; }
+.agent-inline-form input { max-width:160px; }
+.agent-resources { display:flex; justify-content:space-between; align-items:center; gap:32px; padding:32px 0 0; }
+.agent-resources > div:first-child { max-width:600px; }
+.agent-resource-links { display:flex; align-items:start; gap:12px; flex-direction:column; flex-shrink:0; }
+.agent-page button:focus-visible, .agent-page a:focus-visible, .agent-page input:focus-visible, .agent-page textarea:focus-visible, .agent-page select:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.agent-consent { max-width:620px; margin:0 auto; }
+.agent-consent .agent-heading { display:block; }
+.agent-consent h1 { font-size:26px; }
+.agent-permissions { display:grid; gap:16px; margin:24px 0; }
+.agent-permissions label { display:flex; align-items:center; gap:12px; font-size:13px; }
+.agent-permissions input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); }
+.agent-limit-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:24px 0; }
+.agent-test-result img { max-width:100%; border-radius:6px; }
+@media(max-width:850px) { .agent-layout { grid-template-columns:1fr; } .agent-heading { align-items:start; flex-direction:column; gap:16px; } .agent-resources { flex-direction:column; align-items:start; } }
+@media(max-width:480px) { .agent-page { padding-top:12px; } .agent-heading h1 { font-size:26px; } .agent-card { padding:20px 16px; } .agent-tabs button { padding:8px 10px; } .agent-connection-title time { margin-left:0; } .agent-connection-bottom > .agent-actions { margin-left:0; } .agent-limit-grid { grid-template-columns:1fr; } .agent-page input, .agent-page select, .agent-page textarea { font-size:16px; } .agent-button { min-height:42px; } }

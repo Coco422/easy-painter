@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Eye, EyeOff } from 'lucide-vue-next'
 
 import { AuthApiError, login, register, requestEmailCode, resetPassword } from '@/lib/auth'
 import { fetchPublicMeta } from '@/lib/api'
+import { loginDestination } from '@/lib/login-redirect'
 import type { EmailCodePurpose } from '@/lib/types'
 
 type AuthMode = 'login' | 'register' | 'forgot'
 
 const router = useRouter()
+const route = useRoute()
 const mode = ref<AuthMode>('login')
 const error = ref('')
 const notice = ref('')
@@ -85,7 +87,7 @@ async function handleLogin() {
   notice.value = ''
   try {
     await login(loginForm.identifier, loginForm.password)
-    await router.push('/')
+    await router.push(loginDestination(route.query.redirect))
   } catch (e) {
     error.value = e instanceof Error ? e.message : '登录失败。'
   } finally {
@@ -117,7 +119,7 @@ async function handleRegister() {
       email_code: registerForm.code,
       password: registerForm.password,
     })
-    await router.push('/')
+    await router.push(loginDestination(route.query.redirect))
   } catch (e) {
     error.value = e instanceof Error ? e.message : '注册失败。'
   } finally {

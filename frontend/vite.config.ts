@@ -24,6 +24,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '^/(llms(-full)?\\.txt|mcp/(install\\.md|skill/SKILL\\.md|easy-painter-skill\\.zip))$': { target: apiProxyTarget, changeOrigin: true },
+      '/.well-known': { target: apiProxyTarget, changeOrigin: true },
       '/api': {
         target: apiProxyTarget,
         changeOrigin: true,

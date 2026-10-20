@@ -86,6 +86,13 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 See `docs/creation-workspace.md` for usage and local mock preview.
 
+### Agent / MCP
+
+- MCP uses the official SDK at `/api/mcp`, separate resource-bound opaque OAuth credentials and Flyway V12 additive tables. Empty `MCP_PUBLIC_URL` disables access; production requires the exact canonical HTTPS endpoint. Setup, protocol and local preview: `docs/mcp-integration.md`.
+- Lock owner then grant. Agent usage, job, credit reservation and outbox must commit together through `create_generation_job`; include pending reservations in Beijing-day budgets and exclude refunds. Scope idempotency to the grant and preserve exact request parameters before paid calls.
+- Never accept website JWTs at MCP or agent credentials at browser APIs. Check grant/password/resource/expiry on every call and result media access. SDK transport auth does not authorize business actions by itself.
+- Agent content and Skill ZIP share `backend/app/agent_content/`; browser-local canvases/version graphs are not accessible to remote tools. `scripts/preview-mcp.py` is an isolated development fixture, never an application startup or production seed path.
+
 ### Infinite Canvas
 
 - Browser IndexedDB stores account-scoped project JSON and content-hashed image Blobs. Layout undo is separate from paid generation runs; save the idempotency key and exact request before submission. Unknown submission results require confirmation with the same key.

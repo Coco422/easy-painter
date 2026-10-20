@@ -3,6 +3,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { isLoggedIn } from '@/lib/auth'
 
 const routes = [
+  { path: '/mcp', component: () => import('@/pages/AgentConnectPage.vue') },
+  { path: '/mcp/authorize', component: () => import('@/pages/AgentAuthorizePage.vue') },
+  { path: '/mcp/callback', component: () => import('@/pages/AgentTestPage.vue') },
   { path: '/', component: () => import('@/pages/InspirationPage.vue') },
   { path: '/create', component: () => import('@/pages/CreatePage.vue') },
   { path: '/canvas/:id?', component: () => import('@/pages/CanvasPage.vue'), beforeEnter: () => { if (!isLoggedIn()) return '/login' } },

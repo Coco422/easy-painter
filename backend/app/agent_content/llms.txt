@@ -1,0 +1,8 @@
+# Easy Painter
+
+AI image generation and instruction-based editing using one account and credit balance.
+
+- [Capabilities and boundaries]({{ORIGIN}}/llms-full.txt)
+- [MCP setup]({{ORIGIN}}/mcp/install.md)
+- [Connect and manage authorizations]({{ORIGIN}}/mcp)
+- [Portable Skill]({{ORIGIN}}/mcp/skill/SKILL.md)
