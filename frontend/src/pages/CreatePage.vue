@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { randomId } from '@/lib/browser-crypto'
 
 import { useRoute, useRouter } from 'vue-router'
@@ -9,6 +9,10 @@ import { fetchArtwork, type Artwork } from '@/lib/artworks'
 import CurrentJobBatch from '@/components/CurrentJobBatch.vue'
 import { groupJobs } from '@/lib/job-batches'
 import GeneratePanel from '@/components/GeneratePanel.vue'
+import CreationVersions from '@/components/CreationVersions.vue'
+import { useCreationVersions } from '@/composables/useCreationVersions'
+import { ArrowUpRight, FlaskConical, Image, Layers, LayoutTemplate, Package, Palette, Workflow } from 'lucide-vue-next'
+import { creationTemplates, type CreationMode } from '@/lib/creation-presets'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import {
   ApiError,
@@ -52,6 +56,12 @@ const route = useRoute()
 
 const meta = ref<PublicMetaResponse | null>(null)
 const prompt = ref('')
+const mode = ref<CreationMode>('text')
+const generatePanel = ref<InstanceType<typeof GeneratePanel> | null>(null)
+const resultsPanel = ref<HTMLElement | null>(null)
+const templateIcons = { free: Palette, workflow: Workflow, mechanism: FlaskConical, poster: LayoutTemplate, product: Package }
+const referenceIds = computed(() => mode.value === 'text' ? [] : selectedReferenceImage.value.map(item => item.id))
+const pendingCount = computed(() => activeJobs.value.filter(isLiveJob).length)
 const selectedModel = ref('')
 const selectedSize = ref<ImageSize>('auto')
 const selectedBatchCount = ref<BatchCount>(1)
@@ -66,6 +76,26 @@ const pollingTimers = new Map<string, number>()
 
 const pollingInterval = computed(() => meta.value?.polling_interval_ms ?? 2000)
 const availableModels = computed(() => meta.value?.models ?? [])
+const versions = useCreationVersions({
+  jobs: activeJobs, models: availableModels, selectedModel, selectedSize,
+  maxLength: computed(() => meta.value?.prompt_max_length ?? 4000), feedback,
+  register(result, request) {
+    const job = makeQueuedJob(result, request.prompt, request.model, request.size)
+    jobBatches.value[job.job_id] = randomId()
+    upsertActiveJob(job)
+    cacheJob(job.job_id)
+    pollJob(job.job_id)
+    saveJobBatches()
+    void scrollToResults()
+  },
+  restore(job) { if (isLiveJob(job)) restoreLiveJob(job); else upsertActiveJob(job) },
+})
+let pageEpoch = 0
+
+async function scrollToResults() {
+  await nextTick()
+  resultsPanel.value?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+}
 
 async function loadMeta() {
   meta.value = await fetchPublicMeta()
@@ -89,7 +119,7 @@ async function refreshJobMedia(job: JobDetailResponse) {
 }
 
 function supportsCurrentReferenceInput(model: PublicModel | undefined) {
-  return Boolean(model?.enabled) && (selectedReferenceImage.value.length === 0 || model?.supports_reference_image !== false)
+  return Boolean(model?.enabled) && (mode.value === 'text' || model?.supports_reference_image !== false)
 }
 
 function supportsCurrentSize(model: PublicModel | undefined, size: ImageSize) {
@@ -143,6 +173,7 @@ function upsertActiveJob(job: JobDetailResponse) {
   } else {
     activeJobs.value.unshift(job)
   }
+  versions.record(job.job_id)
 }
 
 function clearJobTimer(jobId: string) {
@@ -157,6 +188,7 @@ function removeActiveJob(jobId: string) {
   clearJobTimer(jobId)
   uncacheJob(jobId)
   activeJobs.value = activeJobs.value.filter((item) => item.job_id !== jobId)
+  versions.forget(jobId)
   saveJobBatches()
 }
 
@@ -183,10 +215,12 @@ function makeQueuedJob(result: CreateJobResponse, promptText: string, model: str
 }
 
 async function handleSettledJob(job: JobDetailResponse) {
+  const epoch = pageEpoch
   clearJobTimer(job.job_id)
   uncacheJob(job.job_id)
   upsertActiveJob(job)
   await fetchCurrentUser().catch(() => undefined)
+  if (epoch !== pageEpoch) return
   if (job.status === 'succeeded') {
     feedback.value = '作品已生成，你可以将其加入画廊。'
     return
@@ -198,9 +232,11 @@ async function handleSettledJob(job: JobDetailResponse) {
 
 function pollJob(jobId: string) {
   clearJobTimer(jobId)
+  const epoch = pageEpoch
   const run = async () => {
     try {
       const job = await fetchJob(jobId)
+      if (epoch !== pageEpoch) return
       if (!isLiveJob(job)) {
         await handleSettledJob(job)
         return
@@ -208,8 +244,10 @@ function pollJob(jobId: string) {
       upsertActiveJob(job)
       cacheJob(job.job_id)
     } catch {
+      if (epoch !== pageEpoch) return
       feedback.value = '任务状态暂时获取失败，正在继续同步。'
     }
+    if (epoch !== pageEpoch) return
     pollingTimers.set(jobId, window.setTimeout(run, pollingInterval.value))
   }
   void run()
@@ -222,12 +260,14 @@ function restoreLiveJob(job: JobDetailResponse) {
 }
 
 async function restoreCachedJobs() {
+  const epoch = pageEpoch
   const serverJobIds = new Set<string>()
   let restoredCount = 0
 
   if (isLoggedIn()) {
     try {
       const serverJobs = await fetchActiveJobs()
+      if (epoch !== pageEpoch) return
       for (const job of serverJobs) {
         serverJobIds.add(job.job_id)
         if (isLiveJob(job)) {
@@ -246,6 +286,7 @@ async function restoreCachedJobs() {
     cachedIds.filter((jobId) => !serverJobIds.has(jobId)).map(async (jobId) => {
       try {
         const job = await fetchJob(jobId)
+        if (epoch !== pageEpoch) return
         if (!isLiveJob(job)) {
           await handleSettledJob(job)
           return
@@ -253,6 +294,7 @@ async function restoreCachedJobs() {
         restoreLiveJob(job)
         restoredCount += 1
       } catch {
+        if (epoch !== pageEpoch) return
         uncacheJob(jobId)
       }
     }),
@@ -269,6 +311,7 @@ async function submitJobs(options: {
   batchCount: BatchCount
   referenceImageIds: string[]
 }) {
+  const epoch = pageEpoch
   const model = availableModels.value.find((item) => item.id === options.model)
   if (options.referenceImageIds.length > (model?.max_reference_images ?? 5)) {
     throw new Error(`当前模型单次最多支持 ${model?.max_reference_images ?? 5} 张参考图，请移除多余图片。`)
@@ -288,6 +331,7 @@ async function submitJobs(options: {
     })
   })
   const results = await Promise.allSettled(submissions)
+  if (epoch !== pageEpoch) throw new Error('登录状态已变化，请重新打开创作台。')
   const fulfilled = results.filter((item): item is PromiseFulfilledResult<CreateJobResponse> => item.status === 'fulfilled')
   const rejected = results.filter((item): item is PromiseRejectedResult => item.status === 'rejected')
   const batchId = randomId()
@@ -299,6 +343,7 @@ async function submitJobs(options: {
     pollJob(job.job_id)
   }
   saveJobBatches()
+  if (fulfilled[0]) versions.selectedId.value = fulfilled[0].value.job_id
   if (fulfilled.length === 0) {
     const firstError = rejected[0]?.reason
     throw firstError instanceof Error ? firstError : new Error('提交失败，请稍后重试。')
@@ -310,14 +355,15 @@ async function submitJobs(options: {
     rejected.length > 0
       ? `已提交 ${fulfilled.length} 个任务，${rejected.length} 个任务提交失败；实际预扣 ${actualReserved} 丝。本分钟还可再创建 ${remaining} 次。`
       : `已提交 ${fulfilled.length} 个任务，实际预扣 ${actualReserved} 丝。本分钟还可再创建 ${remaining} 次。`
+  void scrollToResults()
 }
 
-async function submitPrompt() {
+async function submitPrompt(promptText: string) {
+  if (submitting.value || versions.busy.value) return
   if (!isLoggedIn()) {
     router.push('/login')
     return
   }
-  const promptText = prompt.value.trim()
   if (!promptText) {
     feedback.value = '先写下一句你想看到的画面吧。'
     return
@@ -330,7 +376,7 @@ async function submitPrompt() {
       model: selectedModel.value,
       size: selectedSize.value,
       batchCount: selectedBatchCount.value,
-      referenceImageIds: selectedReferenceImage.value.map((item) => item.id),
+      referenceImageIds: referenceIds.value,
     })
   } catch (error) {
     if (error instanceof ApiError && error.status === 402) {
@@ -345,10 +391,10 @@ async function submitPrompt() {
 }
 
 async function retryJob(job: JobDetailResponse) {
+  if (submitting.value || versions.busy.value) return
+  if (versions.history.value.parents[job.job_id]) { await versions.retryRevision(job); return }
   submitting.value = true
   feedback.value = ''
-  removeActiveJob(job.job_id)
-  prompt.value = job.prompt
   selectedModel.value = job.model
   selectedSize.value = job.size as ImageSize
   try {
@@ -357,7 +403,7 @@ async function retryJob(job: JobDetailResponse) {
       model: job.model,
       size: job.size as ImageSize,
       batchCount: 1,
-      referenceImageIds: selectedReferenceImage.value.map((item) => item.id),
+      referenceImageIds: referenceIds.value,
     })
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '提交失败，请稍后重试。'
@@ -367,22 +413,36 @@ async function retryJob(job: JobDetailResponse) {
 }
 
 async function openArtwork(job: JobDetailResponse, action?: 'gallery') {
-  try { selectedArtwork.value = await fetchArtwork('job', job.job_id); artworkAction.value = action }
-  catch (error) { feedback.value = error instanceof Error ? error.message : '作品读取失败。' }
+  const epoch = pageEpoch
+  try {
+    const artwork = await fetchArtwork('job', job.job_id)
+    if (epoch !== pageEpoch) return
+    selectedArtwork.value = artwork
+    artworkAction.value = action
+  } catch (error) { if (epoch === pageEpoch) feedback.value = error instanceof Error ? error.message : '作品读取失败。' }
 }
 function handleAddToGallery(job: JobDetailResponse) { void openArtwork(job, 'gallery') }
 
 async function bootstrap() {
+  const epoch = pageEpoch
   try {
     await loadMeta()
+    if (epoch !== pageEpoch) return
     if (typeof route.query.prompt === 'string' && route.query.prompt.trim()) {
       prompt.value = route.query.prompt.trim()
     }
-    await restoreCachedJobs()
+    if (isLoggedIn()) {
+      await fetchCurrentUser()
+      if (epoch !== pageEpoch) return
+      await versions.load()
+      if (epoch !== pageEpoch) return
+      await restoreCachedJobs()
+    }
   } catch (error) {
+    if (epoch !== pageEpoch) return
     feedback.value = error instanceof Error ? error.message : '页面初始化失败，请刷新重试。'
   } finally {
-    loading.value = false
+    if (epoch === pageEpoch) loading.value = false
   }
 }
 
@@ -392,10 +452,24 @@ watch(() => route.query.prompt, (val) => {
   }
 })
 
-watch([availableModels, selectedReferenceImage], ensureSelectableModel)
+watch(selectedReferenceImage, (images, previous) => {
+  if (mode.value === 'text' && images.some(item => !previous.some(entry => entry.id === item.id))) mode.value = 'reference'
+})
+watch([availableModels, mode], ensureSelectableModel)
 watch([availableModels, selectedModel, selectedSize], ensureSelectableSize)
+watch(() => authState.sessionId, () => {
+  pageEpoch++
+  pollingTimers.forEach(timer => window.clearTimeout(timer))
+  pollingTimers.clear()
+  activeJobs.value = []
+  selectedArtwork.value = null
+  feedback.value = ''
+  submitting.value = false
+  if (isLoggedIn()) void bootstrap()
+})
 
 onBeforeUnmount(() => {
+  pageEpoch++
   pollingTimers.forEach((timer) => window.clearTimeout(timer))
   pollingTimers.clear()
 })
@@ -406,28 +480,44 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="create-section">
+  <section class="creation-workspace">
+    <header class="workspace-heading">
+      <div><p class="section-label">Painter's studio</p><h1>创作工作台</h1><p>从一个想法、一张参考图开始。</p></div>
+      <div class="workspace-heading-actions"><button v-if="activeJobs.length" type="button" class="workspace-results-jump" @click="scrollToResults">查看作品</button><router-link to="/canvas" class="workspace-canvas-link"><Layers :size="16" aria-hidden="true" />无限画布<ArrowUpRight :size="15" aria-hidden="true" /></router-link></div>
+    </header>
+    <div class="workspace-columns">
+    <aside class="workspace-settings" aria-label="创作设置">
     <GeneratePanel
+      ref="generatePanel"
       :prompt="prompt"
+      :mode="mode"
       :selected-model="selectedModel"
       :selected-size="selectedSize"
       :selected-batch-count="selectedBatchCount"
       :models="availableModels"
       :max-length="meta?.prompt_max_length ?? 4000"
-      :submitting="submitting"
+      :submitting="submitting || versions.busy.value"
       :credits="isLoggedIn() ? (authState.user?.credits ?? 0) : null"
       @update:prompt="prompt = $event"
+      @update:mode="mode = $event"
       @update:model="selectedModel = $event"
       @update:size="selectedSize = $event"
       @update:batch-count="selectedBatchCount = $event"
       @submit="submitPrompt"
     />
-  </section>
+    </aside>
 
-  <p v-if="feedback" class="feedback-banner">{{ feedback }}</p>
+    <section ref="resultsPanel" class="workspace-results" aria-label="创作结果" :aria-busy="loading">
+      <div class="workspace-results-heading"><h2>{{ activeJobs.length ? '本次创作' : '让想法有个起点' }}</h2><span v-if="pendingCount" role="status">{{ pendingCount }} 张生成中</span><router-link v-else-if="isLoggedIn()" to="/history">查看历史<ArrowUpRight :size="14" aria-hidden="true" /></router-link></div>
+      <p v-if="feedback" class="feedback-banner" role="status">{{ feedback }}</p>
+      <p v-if="versions.storageError.value" class="feedback-banner" role="alert">{{ versions.storageError.value }}</p>
+      <div v-if="!activeJobs.length && versions.history.value.pending" class="feedback-banner" role="status">上次改图的提交结果尚未确认。<button type="button" class="ghost-button" :disabled="versions.busy.value" @click="versions.confirm">确认上次改图任务</button></div>
 
-  <div v-if="activeJobs.length > 0" class="current-jobs-stack">
-    <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
+      <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
+      <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="versions.editModel.value?.credit_cost ?? 0" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
+        @select="versions.selectedId.value = $event" @revise="versions.revise" @confirm="versions.confirm" @canvas="versions.addToCanvas" @details="openArtwork($event)" @gallery="handleAddToGallery" @refresh="refreshJobMedia" />
+      <details v-if="activeJobs.length" class="workspace-task-details" :open="pendingCount > 0"><summary>任务详情与计费 · {{ activeJobs.length }} 张</summary>
+      <div class="current-jobs-stack">
     <CurrentJobBatch
       v-for="batch in activeBatches"
       :key="batch.id"
@@ -438,5 +528,60 @@ onMounted(() => {
       @details="openArtwork($event)"
       @refresh-media="refreshJobMedia"
     />
-  </div>
+      </div>
+      </details>
+      <div v-if="!activeJobs.length" class="workspace-empty">
+        <div class="workspace-intro"><span class="workspace-intro-icon"><Image :size="28" aria-hidden="true" /></span><h3>这次想创作什么？</h3><p>选一个用途带入示例，或直接写下你的想法。<br />生成的作品会显示在这里。</p></div>
+        <div class="workspace-templates">
+          <button v-for="item in creationTemplates.filter(item => item.id !== 'free')" :key="item.id" type="button" :disabled="submitting" @click="mode === 'edit' && (mode = 'text'); generatePanel?.applyTemplate(item.id)">
+            <component :is="templateIcons[item.id]" :size="22" aria-hidden="true" /><strong>{{ item.label }}</strong><span>{{ item.detail }}</span><ArrowUpRight :size="15" class="template-arrow" aria-hidden="true" />
+          </button>
+        </div>
+        <p class="workspace-empty-note">模板帮助组织描述。模型与费用可以在左侧查看，科研内容请核对细节。</p>
+      </div>
+    </section>
+    </div>
+  </section>
 </template>
+
+<style scoped>
+.creation-workspace { font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; }
+.workspace-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+.workspace-heading .section-label { margin: 0 0 8px; font-size: 11px; font-weight: 500; }
+.workspace-heading h1 { margin: 0; font-size: 26px; font-weight: 500; line-height: 1.3; }
+.workspace-heading p:last-child { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
+.workspace-canvas-link { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); text-decoration: none; font-size: 13px; white-space: nowrap; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; }
+.workspace-canvas-link:hover { color: var(--accent-strong); border-color: var(--border-accent); }
+.workspace-heading-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.workspace-results-jump { display: none; border: 0; background: transparent; color: var(--accent-strong); font: inherit; font-size: 12px; padding: 8px 0; cursor: pointer; }
+.workspace-columns { display: grid; grid-template-columns: 340px minmax(0, 1fr); align-items: start; gap: 24px; }
+.workspace-settings, .workspace-results { min-width: 0; }
+.workspace-results { padding: 24px; min-height: 650px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); scroll-margin-top: 16px; }
+.workspace-results-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.workspace-results-heading h2 { font-size: 15px; font-weight: 500; margin: 0; }
+.workspace-results-heading > span, .workspace-results-heading a { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); text-decoration: none; }
+.workspace-results .feedback-banner { margin: 16px 0 0; padding: 12px; font-size: 13px; border-radius: 6px; background: var(--bg-input); overflow-wrap: anywhere; }
+.workspace-intro { text-align: center; padding: 48px 0 32px; }
+.workspace-intro-icon { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-strong); }
+.workspace-intro h3 { font-size: 22px; font-weight: 500; margin: 20px 0 12px; }
+.workspace-intro p { color: var(--text-secondary); font-size: 13px; line-height: 1.8; margin: 0; }
+.workspace-templates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.workspace-templates button { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; padding: 20px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--accent-strong); text-align: left; font: inherit; cursor: pointer; transition: background 160ms, border-color 160ms; }
+.workspace-templates button:hover { background: var(--bg-elevated); border-color: var(--border-accent); }
+.workspace-templates button:focus-visible, .workspace-canvas-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.workspace-templates strong { color: var(--text-primary); font-size: 14px; font-weight: 500; }
+.workspace-templates span { color: var(--text-secondary); font-size: 12px; }
+.workspace-templates .template-arrow { position: absolute; right: 16px; top: 20px; color: var(--text-muted); }
+.workspace-empty-note { margin: 24px 0 0; font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+.workspace-results .current-jobs-stack { margin-top: 20px; }
+.workspace-task-details { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
+.workspace-task-details > summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.workspace-results :deep(.current-job-batch) { padding: 0 0 20px; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.workspace-results :deep(.current-job-batch:last-child) { border-bottom: 0; padding-bottom: 0; }
+.workspace-results :deep(.batch-job-grid:has(> :only-child)) { grid-template-columns: minmax(0, 1fr); }
+.workspace-results :deep(.batch-job-item) { border-radius: 6px; }
+@media (max-width: 1050px) { .workspace-columns { grid-template-columns: 310px minmax(0, 1fr); gap: 16px; } .workspace-results { padding: 20px; } .workspace-templates button { padding: 16px; } }
+@media (max-width: 900px) { .workspace-columns { grid-template-columns: minmax(0, 1fr); } .workspace-results { min-height: 0; } .workspace-heading { margin-bottom: 20px; } .workspace-intro { padding-top: 24px; } }
+@media (max-width: 900px) { .workspace-results-jump { display: block; } }
+@media (max-width: 450px) { .workspace-heading h1 { font-size: 22px; } .workspace-canvas-link { gap: 4px; padding: 8px; font-size: 12px; } .workspace-results { padding: 16px; } .workspace-templates { grid-template-columns: minmax(0, 1fr); } .workspace-heading .section-label { letter-spacing: .06em; } }
+</style>

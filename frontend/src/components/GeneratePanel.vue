@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import ProtectedImage from '@/components/ProtectedImage.vue'
 import MediaExpiry from '@/components/MediaExpiry.vue'
-import { Check, ChevronDown, History, ImagePlus, Loader2, TriangleAlert, X } from 'lucide-vue-next'
+import { Check, ChevronDown, History, ImagePlus, Loader2, PencilLine, Sparkles, TriangleAlert, X } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import ReferenceHistoryDrawer from '@/components/ReferenceHistoryDrawer.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import { ApiError } from '@/lib/api'
 import { resolveImageLayout } from '@/lib/image-layout'
+import { buildCreationPrompt, creationInputError, creationLanguages, creationStyles, creationTemplates, type CreationMode } from '@/lib/creation-presets'
 import type { BatchCount, ImageSize, PublicModel, ReferenceImageItem } from '@/lib/types'
 
 const props = defineProps<{
   prompt: string
+  mode: CreationMode
   selectedModel: string
   selectedSize: ImageSize
   selectedBatchCount: BatchCount
@@ -23,10 +25,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:prompt': [value: string]
+  'update:mode': [value: CreationMode]
   'update:model': [value: string]
   'update:size': [value: ImageSize]
   'update:batch-count': [value: BatchCount]
-  submit: []
+  submit: [promptText: string]
 }>()
 
 const {
@@ -43,6 +46,34 @@ const {
 
 const promptLength = computed(() => props.prompt.length)
 const promptOverLimit = computed(() => promptLength.value > props.maxLength)
+const template = ref('free')
+const style = ref('auto')
+const language = ref('auto')
+const submissionError = ref('')
+const presetNotice = ref('')
+const finalPrompt = computed(() => buildCreationPrompt(props.prompt, {
+  mode: props.mode, template: template.value, style: style.value, language: language.value,
+}))
+const currentTemplate = computed(() => creationTemplates.find(item => item.id === template.value) ?? creationTemplates[0])
+const currentModelLabel = computed(() => selectedModelConfig.value?.label ?? '暂无可用模型')
+const modes: { id: CreationMode; label: string; icon: typeof Sparkles }[] = [
+  { id: 'text', label: '灵感生图', icon: Sparkles },
+  { id: 'reference', label: '参考生图', icon: ImagePlus },
+  { id: 'edit', label: '修改图片', icon: PencilLine },
+]
+
+function applyTemplate(id: string) {
+  const item = creationTemplates.find(entry => entry.id === id)
+  if (!item) return
+  template.value = id
+  if (!props.prompt.trim()) {
+    emit('update:prompt', item.example)
+    presetNotice.value = `已填入${item.label}示例，可以继续修改。`
+  } else {
+    presetNotice.value = `已选择${item.label}，保留了你写的描述。`
+  }
+}
+defineExpose({ applyTemplate })
 const sizeOptions: Array<{ value: ImageSize; label: string; detail: string }> = [
   { value: 'auto', label: '自动', detail: '由渠道决定' },
   { value: '1024x1024', label: '方图', detail: '1024 × 1024' },
@@ -68,7 +99,7 @@ const sizePickerDialog = ref<HTMLElement | null>(null)
 const referenceError = ref('')
 const uploadingBatch = ref(false)
 const referenceLimit = computed(() => selectedModelConfig.value?.supports_reference_image === false ? 0 : (selectedModelConfig.value?.max_reference_images ?? 5))
-const referencesOverLimit = computed(() => selected.value.length > referenceLimit.value)
+const referencesOverLimit = computed(() => props.mode !== 'text' && selected.value.length > referenceLimit.value)
 const selectedSizeOption = computed(() => sizeOptions.find((option) => option.value === props.selectedSize) ?? sizeOptions[0])
 const selectedSizeLayout = computed(() => resolveImageLayout(selectedSizeOption.value.value))
 const selectedModelConfig = computed(() => props.models.find((model) => model.id === props.selectedModel))
@@ -86,7 +117,8 @@ onBeforeUnmount(() => {
 
 function handleSubmit() {
   if (uploading.value || uploadingBatch.value || referencesOverLimit.value || props.submitting) return
-  emit('submit')
+  submissionError.value = creationInputError(props.mode, props.prompt, finalPrompt.value, selected.value.length, props.maxLength)
+  if (!submissionError.value) emit('submit', finalPrompt.value)
 }
 
 async function handleUpload(file: File) {
@@ -180,7 +212,7 @@ function handleSelect(item: ReferenceImageItem) {
 }
 
 function modelSupportsCurrentInput(model: PublicModel) {
-  return model.enabled && (selected.value.length === 0 || model.supports_reference_image !== false)
+  return model.enabled && (props.mode === 'text' || model.supports_reference_image !== false)
 }
 
 function sizeSupportedBySelectedModel(size: ImageSize) {
@@ -216,13 +248,26 @@ watch(sizePickerOpen, (open) => {
   if (open) window.addEventListener('keydown', handleSizePickerKeydown)
   else window.removeEventListener('keydown', handleSizePickerKeydown)
 })
+watch([() => props.prompt, () => props.mode, template, style, language, selected], () => { submissionError.value = '' })
 </script>
 
 <template>
   <div class="generate-panel" id="create">
+    <div class="creation-mode-picker" role="group" aria-label="创作模式">
+      <button v-for="item in modes" :key="item.id" type="button" :aria-pressed="mode === item.id" :disabled="submitting || uploading || uploadingBatch" @click="emit('update:mode', item.id)">
+        <component :is="item.icon" :size="17" aria-hidden="true" />{{ item.label }}
+      </button>
+    </div>
+    <p class="creation-mode-hint">{{ mode === 'edit' ? '上传已有图片，描述想修改的内容。模型会重绘整张图。' : mode === 'reference' ? '上传草图或参考图片，结合描述生成新作品。' : '写下你的想法，或从右侧用途模板开始。' }}</p>
+    <label v-if="mode !== 'edit'" class="field-label creation-template-field">
+      <span>创作用途</span>
+      <select v-model="template" class="model-select" :disabled="submitting" @change="presetNotice = ''">
+        <option v-for="item in creationTemplates" :key="item.id" :value="item.id">{{ item.label }}</option>
+      </select>
+    </label>
     <div class="prompt-stack">
       <div class="panel-topline">
-        <span class="section-label">创作提示</span>
+        <label for="creation-prompt" class="section-label">{{ mode === 'edit' ? '修改要求' : '描述你的想法' }}</label>
         <p class="char-count" :class="{ over: promptOverLimit }">{{ promptLength }} / {{ maxLength }}</p>
       </div>
       <div
@@ -234,9 +279,11 @@ watch(sizePickerOpen, (open) => {
         @drop.prevent="handleDrop"
       >
         <textarea
+          id="creation-prompt"
           :value="prompt"
+          :disabled="submitting"
           class="prompt-textarea"
-          placeholder="请输入画面描述，也可以直接粘贴或拖入参考图"
+          :placeholder="mode === 'edit' ? '例如：将标题改成英文，保留其他内容与布局' : '描述主体、布局和需要的文字，也可以粘贴或拖入参考图'"
           @input="emit('update:prompt', ($event.target as HTMLTextAreaElement).value)"
         />
 
@@ -257,8 +304,8 @@ watch(sizePickerOpen, (open) => {
             <Loader2 :size="16" class="reference-chip-spinner" />
           </div>
         </div>
-        <p class="reference-count" :class="{ 'reference-error': referencesOverLimit }" aria-live="polite">
-          已选 {{ selected.length }} / {{ referenceLimit }} 张参考图{{ referencesOverLimit ? '，请移除多余图片后提交' : '，按编号顺序提交' }}
+        <p v-if="selected.length || mode !== 'text'" class="reference-count" :class="{ 'reference-error': referencesOverLimit }" aria-live="polite">
+          {{ mode === 'text' && selected.length ? `已保留 ${selected.length} 张参考图，灵感生图不使用它们` : `已选 ${selected.length} / ${referenceLimit} 张参考图，按编号顺序提交` }}{{ referencesOverLimit ? '，请移除多余图片后提交' : '' }}
         </p>
         <p v-if="referenceError" class="reference-error">{{ referenceError }}</p>
 
@@ -272,6 +319,7 @@ watch(sizePickerOpen, (open) => {
             @click="openReferencePicker"
           >
             <ImagePlus :size="18" />
+            <span>上传图片</span>
           </button>
           <button
             type="button"
@@ -282,6 +330,7 @@ watch(sizePickerOpen, (open) => {
             @click="drawerOpen = true"
           >
             <History :size="18" />
+            <span>历史</span>
           </button>
           <input
             ref="fileInput"
@@ -293,23 +342,39 @@ watch(sizePickerOpen, (open) => {
           />
         </div>
       </div>
+      <div v-if="mode !== 'edit'" class="creation-example-row">
+        <button type="button" class="creation-text-button" :disabled="submitting" @click="emit('update:prompt', currentTemplate.example); presetNotice = '已填入示例描述，可以继续修改。'">填入示例描述</button>
+        <span v-if="template !== 'free'">{{ currentTemplate.detail }}</span>
+      </div>
+      <p v-if="presetNotice && mode !== 'edit'" class="creation-notice" role="status">{{ presetNotice }}</p>
     </div>
 
     <ReferenceHistoryDrawer v-model:open="drawerOpen" :selection-limit="referenceLimit" :selection-disabled="uploadingBatch || submitting" @select="handleSelect" />
 
+    <div class="creation-preset-fields">
+      <label class="field-label"><span>视觉风格</span><select v-model="style" class="model-select" :disabled="submitting"><option v-for="item in creationStyles" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
+      <label class="field-label"><span>图中文字</span><select v-model="language" class="model-select" :disabled="submitting"><option v-for="item in creationLanguages" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
+    </div>
+
     <div class="panel-actions">
+      <details class="creation-advanced">
+        <summary>模型与提示词 <span>{{ currentModelLabel }}</span></summary>
       <label class="field-label">
         <span>模型</span>
         <select
           :value="selectedModel"
           class="model-select"
+          :disabled="submitting || uploading || uploadingBatch"
           @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="model in models" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
-            {{ model.label }}{{ selected.length > 0 && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张{{ model.base_credit_cost !== model.credit_cost ? `，原价 ${model.base_credit_cost} 丝` : '' }}）
+            {{ model.label }}{{ mode !== 'text' && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张{{ model.base_credit_cost !== model.credit_cost ? `，原价 ${model.base_credit_cost} 丝` : '' }}）
           </option>
         </select>
       </label>
+      <p class="creation-notice">预设会补充到描述之后，实际效果取决于所选模型。</p>
+      <div class="creation-final-prompt"><span>最终提示词 · {{ finalPrompt.length }} / {{ maxLength }} 字</span><p>{{ finalPrompt || '填写描述后，可以在这里检查包含预设的完整提示词。' }}</p></div>
+      </details>
 
       <div class="field-label">
         <span>尺寸</span>
@@ -318,6 +383,7 @@ watch(sizePickerOpen, (open) => {
           class="size-picker-trigger"
           aria-haspopup="dialog"
           :aria-expanded="sizePickerOpen"
+          :disabled="submitting"
           @click="openSizePicker"
         >
           <span
@@ -343,6 +409,7 @@ watch(sizePickerOpen, (open) => {
             type="button"
             :class="{ active: selectedBatchCount === count }"
             :aria-pressed="selectedBatchCount === count"
+            :disabled="submitting"
             @click="emit('update:batch-count', count)"
           >
             {{ count }} 张
@@ -350,8 +417,9 @@ watch(sizePickerOpen, (open) => {
         </span>
       </label>
 
+      <p v-if="submissionError" class="creation-submit-error" role="alert">{{ submissionError }}</p>
       <button class="primary-button" :disabled="submitting || uploading || uploadingBatch || referencesOverLimit || !selectedModel" @click="handleSubmit">
-        {{ submitting ? '正在提交...' : '开始创作' }}
+        <Sparkles :size="17" aria-hidden="true" />{{ submitting ? '正在提交...' : mode === 'edit' ? '生成修改版' : '开始创作' }}
       </button>
 
       <div class="billing-estimate" :class="{ insufficient: insufficientCredits }" aria-live="polite">
@@ -426,6 +494,48 @@ watch(sizePickerOpen, (open) => {
 </template>
 
 <style scoped>
+.generate-panel { display: grid; gap: 20px; padding: 22px; border-radius: 12px; box-shadow: none; }
+.creation-mode-picker { display: flex; gap: 4px; }
+.creation-mode-picker button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 4px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: background 160ms, border-color 160ms; }
+.creation-mode-picker button[aria-pressed='true'] { color: var(--accent-strong); background: var(--accent-soft); border-color: var(--border-accent); }
+.creation-mode-picker button:disabled { cursor: wait; opacity: .6; }
+.creation-mode-hint { margin: -8px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.creation-template-field, .creation-preset-fields .field-label { min-width: 0; }
+.generate-panel .section-label { font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--text-primary); font-weight: 500; }
+.generate-panel .char-count { white-space: nowrap; font-size: 11px; }
+.generate-panel .prompt-textarea { min-height: 168px; font-size: 14px; line-height: 1.7; padding: 12px; }
+.generate-panel .reference-chips { padding: 0 10px; }
+.generate-panel .reference-count { margin: 0 12px 8px; }
+.generate-panel .prompt-toolbar { justify-content: flex-start; gap: 8px; padding: 8px; }
+.generate-panel .prompt-tool-button { display: inline-flex; align-items: center; justify-content: center; width: auto; height: auto; min-height: 36px; gap: 6px; padding: 8px; font-size: 12px; }
+.creation-example-row { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--text-secondary); }
+.creation-text-button { padding: 0; border: 0; background: transparent; color: var(--accent-strong); font: inherit; cursor: pointer; text-align: left; }
+.creation-text-button:disabled { opacity: .6; cursor: wait; }
+.creation-notice { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.creation-preset-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.generate-panel .model-select { padding: 10px 30px 10px 10px; font-size: 13px; border-radius: 6px; }
+.generate-panel .panel-actions { grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 16px; margin: 0; }
+.generate-panel .field-label { gap: 8px; font-size: 13px; }
+.creation-advanced { grid-row: 3; min-width: 0; }
+.creation-advanced summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.creation-advanced summary::before { content: '+'; }
+.creation-advanced[open] summary::before { content: '−'; }
+.creation-advanced summary span { flex: 1; text-align: right; color: var(--text-primary); overflow-wrap: anywhere; }
+.creation-advanced .field-label { margin: 12px 0; }
+.creation-final-prompt { margin-top: 12px; color: var(--text-secondary); font-size: 12px; }
+.creation-final-prompt p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin: 8px 0 0; }
+.generate-panel .size-picker-trigger { border-radius: 6px; }
+.generate-panel .size-trigger-copy { min-width: 0; }
+.generate-panel .primary-button { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; border-radius: 6px; }
+.generate-panel .billing-estimate { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; background: transparent; border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 16px 0 0; }
+.generate-panel .billing-estimate > div { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.generate-panel .billing-estimate span { font-size: 12px; letter-spacing: 0; }
+.generate-panel .billing-estimate strong { font-size: 12px; overflow-wrap: anywhere; }
+.generate-panel .billing-estimate p { justify-self: stretch; text-align: left; line-height: 1.6; }
+.creation-submit-error { margin: 0; color: var(--error); font-size: 13px; line-height: 1.6; }
+.generate-panel button:focus-visible, .creation-advanced summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 900px) { .generate-panel { padding: 20px; } }
+@media (pointer: coarse) { .generate-panel .prompt-textarea, .generate-panel .model-select { font-size: 16px; } .generate-panel .creation-text-button, .generate-panel .prompt-tool-button { min-height: 44px; } }
 .reference-chip :deep(.protected-image) { width: 38px; height: 38px; min-height: 0; flex: 0 0 38px; border-radius: var(--radius-sm); }
 .reference-chip :deep(.image-placeholder) { min-height: 0; padding: 2px; font-size: 9px; }
 .reference-chip-details { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }

@@ -26,7 +26,7 @@ make backend
 # Start frontend dev server (port 5173, proxies /api → localhost:8000)
 make frontend
 
-# Production deploy (builds images, starts all services)
+# Local container deployment (production uses formal-tag CD)
 make deploy
 
 # Run backend tests
@@ -77,6 +77,14 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 - Admin access via secret key (`ADMIN_SECRET_KEY` env var), produces a separate JWT with `role=admin` claim
 - Frontend routes: `/` (community), `/create`, `/history`, `/gallery`, `/gallery/:username` (shared portfolio), `/favorites`, `/profile`, `/login`, `/admin`
 - `/canvas` and `/canvas/:id` are the separate local-first canvas library/editor; `/create` remains available. Read `docs/v0.20.0-release.md` for storage, recovery, cloud quotas and migration details.
+
+### Creation Workspace
+
+- `/create` tracks up to 100 version ancestry links per account in browser localStorage (`easy-painter:creation-versions:<ownerId>`), restoring job details through existing authorized APIs. This is local workspace metadata, not a server-side conversation or a media-retention extension.
+- Result edits fetch the selected original, stage it as a new reference without silent eviction, and submit one job. Persist the exact pending request and idempotency key before POST; unknown responses require explicit confirmation with the same request after refresh. Account/session changes invalidate in-flight UI updates.
+- Adding a result to a new or existing canvas first saves the authorized image Blob through existing IndexedDB assets/projects, with capacity and revision checks. Append an image, provenance note and connected, unsubmitted generation node; never replay the original job or auto-submit a paid run.
+
+See `docs/creation-workspace.md` for usage and local mock preview.
 
 ### Infinite Canvas
 
@@ -145,7 +153,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 - `App.vue` — Router shell with persistent header
 - `router.ts` — Vue Router config
-- `pages/CreatePage.vue` — Generation panel and active jobs. Each submission groups its accepted jobs in one compact batch card; browser-local job/batch membership survives refresh, while jobs restored without membership stay separate. Prompts collapse to two lines and expand into a bounded scroll area; one shared animated waiting ritual remains visible while any job is pending; image actions and polling remain per job.
+- `pages/CreatePage.vue` — Two-column creation workspace, presets, result selection and version branching. `useCreationVersions.ts` owns account-scoped ancestry and safe edit requests; `CreationVersions.vue` presents results. Accepted jobs retain browser-local batch membership, per-job polling and billing details; the waiting panel is shared per batch.
 - `pages/InspirationPage.vue` — Permanent community feed
 - `pages/ArtworkLibraryPage.vue` — History, personal/shared portfolio and favorites
 - `components/ArtworkModal.vue` — Gallery membership, favorites, explicit community consent and lifecycle actions
