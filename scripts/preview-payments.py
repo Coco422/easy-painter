@@ -92,12 +92,26 @@ def main():
             payments.confirm_payment(db, order_id=oid, gateway=gateway)
         return RedirectResponse('/recharge/return?out_trade_no=' + oid)
 
+    @app.get('/__fixture__/responsive', response_class=HTMLResponse)
+    def responsive(width: int = 390):
+        width = min(1280, max(320, width))
+        return ('<!doctype html><meta charset="utf-8"><title>本地响应式预览</title>'
+                '<style>body{margin:0;background:#ddd}iframe{display:block;border:0;height:100vh}</style>'
+                f'<iframe title="个人中心窄屏预览" src="/profile" style="width:{width}px"></iframe>')
+
     @app.get('/api/v1/users/me')
     def me():
         with factory() as db:
             user = db.get(User, user_id)
             return {'id': user.id, 'username': user.username, 'display_name': user.display_name, 'email': user.email,
-                    'credits': user.credits, 'is_public': False, 'created_at': user.created_at, 'group': None}
+                    'credits': user.credits, 'is_public': False, 'created_at': user.created_at,
+                    'group': {'code': 'vip', 'name': 'VIP', 'billing_multiplier_bps': 9000,
+                              'generated_retention_hours': 720, 'reference_retention_hours': 720,
+                              'max_reference_images': 100}}
+
+    @app.get('/api/v1/users/me/credits')
+    def credit_history():
+        return {'items': [], 'total': 0, 'page': 1, 'page_size': 20}
 
     @app.get('/api/v1/meta/public')
     def meta():

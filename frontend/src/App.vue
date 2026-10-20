@@ -12,6 +12,7 @@ const route = useRoute()
 const siteName = ref('一丝绘画站')
 const isAdminRoute = computed(() => route.path === '/admin')
 const isCanvasRoute = computed(() => route.path === '/canvas' || route.path.startsWith('/canvas/'))
+const isAccountRoute = computed(() => route.path === '/profile' || route.path === '/recharge' || route.path.startsWith('/recharge/'))
 
 onMounted(async () => {
   initTheme()
@@ -30,7 +31,7 @@ onMounted(async () => {
 <template>
   <div class="page-shell">
     <AppHeader v-if="!isAdminRoute" :site-name="siteName" />
-    <GenerationStatsTicker v-if="!isAdminRoute && !isCanvasRoute" />
+    <GenerationStatsTicker v-if="!isAdminRoute && !isCanvasRoute && !isAccountRoute" />
     <AnnouncementBanner v-if="!isAdminRoute && !isCanvasRoute" />
     <main class="page-content" :class="{ 'page-content--admin': isAdminRoute, 'page-content--canvas': isCanvasRoute }">
       <router-view />

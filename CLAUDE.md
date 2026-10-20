@@ -176,7 +176,7 @@ See `docs/creation-workspace.md` for usage and local mock preview.
 - `components/VersionReleaseDialog.vue` — Build version, changelog timeline, and read-only GitHub Release check
 - `pages/admin/sections/AdminCommunitySubmissions.vue` — Explicit user submission review queue
 - `pages/admin/AdminPage.vue` — Naive UI admin shell with lazy-loaded overview, upstream, model, user, job, billing, and announcement sections
-- `components/AppHeader.vue` — Header with auth-aware navigation
+- `components/AppHeader.vue` — Three core navigation links, wallet and account disclosure menu; recharge lives in the profile wallet
 - `lib/auth.ts` — Reactive auth state, login/logout/admin-verify functions
 - `lib/api.ts` — API client with auto-injected auth headers
 - `lib/types.ts` — TypeScript type definitions

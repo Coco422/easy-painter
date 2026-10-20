@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowUpRight, Wallet } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -269,20 +270,24 @@ onBeforeUnmount(stopBindCountdown)
 
 <template>
   <div class="profile-page">
-    <h1 class="profile-title">个人中心</h1>
+    <div class="profile-heading">
+      <h1 class="profile-title">个人中心</h1>
+      <p>管理钱包、账户资料与创作权益。</p>
+    </div>
 
     <div class="profile-grid">
       <!-- Credits card -->
       <section class="profile-card credits-card">
-        <p class="card-label">灵感丝线余额</p>
-        <p class="credits-value">{{ authState.user?.credits ?? 0 }}</p>
+        <p class="card-label wallet-label"><Wallet :size="16" aria-hidden="true" />我的钱包</p>
+        <p class="credits-value">{{ authState.user?.credits ?? 0 }}<span class="credits-unit">丝</span></p>
         <p class="credits-hint">每张图片消耗模型对应灵感丝线</p>
-        <router-link to="/recharge" class="secondary-button">前往充值中心</router-link>
+        <router-link to="/recharge" class="secondary-button wallet-recharge">前往充值中心<ArrowUpRight :size="16" aria-hidden="true" /></router-link>
       </section>
 
       <!-- Redeem card -->
       <section class="profile-card redeem-card">
         <p class="card-label">兑换灵感丝线</p>
+        <p class="redeem-hint">已有兑换码？在这里兑换到钱包。</p>
         <div class="redeem-row">
           <input
             v-model="redeemInput"
@@ -303,15 +308,17 @@ onBeforeUnmount(stopBindCountdown)
       </section>
 
       <!-- Profile card -->
-      <section v-if="authState.user?.group" class="profile-card">
-        <p class="card-label">当前用户组</p>
-        <div class="group-policy-grid">
-          <strong>{{ authState.user.group.name }}</strong>
-          <span>结算倍率 {{ (authState.user.group.billing_multiplier_bps / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 }) }}×</span>
-          <span>生成图保留 {{ authState.user.group.generated_retention_hours }} 小时</span>
-          <span>参考图保留 {{ authState.user.group.reference_retention_hours }} 小时</span>
-          <span>参考图上限 {{ authState.user.group.max_reference_images }} 张</span>
+      <section v-if="authState.user?.group" class="profile-card group-policy-card">
+        <div class="group-policy-heading">
+          <p class="card-label">当前用户组</p>
+          <strong class="group-policy-badge">{{ authState.user.group.name }}</strong>
         </div>
+        <dl class="group-policy-grid">
+          <div><dt>结算倍率</dt><dd>{{ (authState.user.group.billing_multiplier_bps / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 }) }}<small>×</small></dd></div>
+          <div><dt>生成图保留</dt><dd>{{ authState.user.group.generated_retention_hours }}<small>小时</small></dd></div>
+          <div><dt>参考图保留</dt><dd>{{ authState.user.group.reference_retention_hours }}<small>小时</small></dd></div>
+          <div><dt>参考图上限</dt><dd>{{ authState.user.group.max_reference_images }}<small>张</small></dd></div>
+        </dl>
         <p class="field-hint">分组策略仅影响后续创作与上传，已生成内容的价格和保留期不会变更。</p>
       </section>
 
@@ -477,7 +484,32 @@ onBeforeUnmount(stopBindCountdown)
 </template>
 
 <style scoped>
-.group-policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; color: var(--text-secondary); font-size: 14px; }
-.group-policy-grid strong { color: var(--text-primary); font-size: 17px; grid-column: 1 / -1; }
-@media (max-width: 520px) { .group-policy-grid { grid-template-columns: 1fr; } }
+.profile-heading { margin-bottom: 28px; }
+.profile-heading .profile-title { margin: 0 0 8px; }
+.profile-heading > p { margin: 0; }
+.profile-heading > p, .redeem-hint { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.wallet-label { display: flex; align-items: center; gap: 8px; }
+.credits-card .wallet-label { margin: 0 0 20px; }
+.credits-card .credits-value { margin: 0 0 12px; }
+.credits-card .credits-hint { margin: 0; }
+.credits-unit { margin-left: 10px; color: var(--text-muted); font: 400 14px var(--font-body); }
+.wallet-recharge { align-self: flex-start; gap: 8px; margin-top: 20px; }
+.redeem-card { display: flex; flex-direction: column; justify-content: center; }
+.redeem-hint { margin-bottom: 20px; }
+.redeem-row { align-items: stretch; }
+.redeem-input { min-width: 0; }
+.redeem-row .primary-button { min-width: 88px; min-height: 44px; }
+.group-policy-card { grid-column: 1 / -1; }
+.group-policy-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.group-policy-heading .card-label { margin: 0; }
+.group-policy-badge { padding: 4px 10px; border-radius: 6px; background: var(--accent-glow); color: var(--accent-strong); font-size: 12px; }
+.group-policy-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; margin: 0 0 20px; }
+.group-policy-grid > div + div { border-left: 1px solid var(--border); padding-left: 24px; }
+.group-policy-grid dt { color: var(--text-muted); font-size: 12px; margin-bottom: 8px; }
+.group-policy-grid dd { margin: 0; color: var(--text-primary); font: 500 24px var(--font-mono); }
+.group-policy-grid small { margin-left: 6px; color: var(--text-secondary); font: 400 12px var(--font-body); }
+@media (max-width: 640px) {
+  .group-policy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
+  .group-policy-grid > div + div { border: 0; padding-left: 0; }
+}
 </style>
