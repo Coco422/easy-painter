@@ -9,14 +9,22 @@ from app.core.config import get_settings
 class RedactSecretsFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         settings = get_settings()
-        message = record.getMessage()
-        for secret in (settings.upstream_base_url, settings.upstream_api_key, settings.zpay_key.get_secret_value(), settings.payment_config_encryption_key.get_secret_value()):
-            if secret:
-                message = message.replace(secret, "[REDACTED]")
-        # Dashboard-managed credentials are decrypted on demand, not in Settings.
-        message = re.sub(r'([?&](?:key|sign)=)[^&\s\"\']+', r'\1[REDACTED]', message)
-        record.msg = message
-        record.args = ()
+
+        def redact(message: str) -> str:
+            for secret in (settings.upstream_base_url, settings.upstream_api_key, settings.zpay_key.get_secret_value(), settings.payment_config_encryption_key.get_secret_value()):
+                if secret:
+                    message = message.replace(secret, "[REDACTED]")
+            # Dashboard credentials are decrypted on demand, not in Settings.
+            return re.sub(r'([?&](?:key|sign)=)[^&\s\"\']+', r'\1[REDACTED]', message)
+
+        if record.name == "uvicorn.access" and isinstance(record.args, tuple) and len(record.args) == 5:
+            # AccessFormatter unpacks this structured tuple even after filtering.
+            # Keep its shape and redact only the request target.
+            client, method, target, version, code = record.args
+            record.args = (client, method, redact(str(target)), version, code)
+        else:
+            record.msg = redact(record.getMessage())
+            record.args = ()
         return True
 
 

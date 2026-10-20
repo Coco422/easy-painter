@@ -484,3 +484,16 @@ def test_pending_payment_preserves_user_for_late_notifications(env):
     assert result.status_code == 409
     with env.factory() as db:
         assert db.get(User, env.user_id) is not None
+
+
+def test_access_log_redaction_preserves_uvicorn_formatter_arguments(env, monkeypatch):
+    import logging
+    from uvicorn.logging import AccessFormatter
+    from app.core import logging as app_logging
+    monkeypatch.setattr(app_logging, 'get_settings', lambda: env.settings)
+    record = logging.LogRecord('uvicorn.access', logging.INFO, 'fixture', 1, '%s - "%s %s HTTP/%s" %d',
+        ('127.0.0.1:1234', 'GET', '/api/v1/payments/zpay/notify?sign=private-signature&key=dynamic-key', '1.1', 400), None)
+    app_logging.RedactSecretsFilter().filter(record)
+    formatted = AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False).format(record)
+    assert 'GET /api/v1/payments/zpay/notify?' in formatted and '400' in formatted
+    assert 'private-signature' not in formatted and 'dynamic-key' not in formatted
