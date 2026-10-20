@@ -37,6 +37,8 @@ MCP_PUBLIC_URL=https://painter.example.com/api/mcp
 
 必须是用户访问的完整规范地址，路径固定 `/api/mcp`、无查询串、无末尾斜杠；生产要求 HTTPS。空值禁用接入。开发环境允许回环 HTTP。修改规范地址会使旧授权失效，用户需重新连接。反向代理应保留正确 Host，不缓存认证响应；仓库 nginx 已转发 `/api/`、`/.well-known/` 和下述文档路径。MCP SDK 校验 Host/Origin，默认只接受本站 Origin；服务端客户端通常不发送 Origin，不将授权接口开放为带凭证的跨站 CORS。
 
+存在域名迁移时，先在浏览器确认应用页面最终落地的新站地址，再绑定 MCP。旧站的 API/健康接口仍可能可访问，不能仅凭 API 返回 200 判断正式域名。macOS 的终端 Node 客户端也可能不继承系统代理；浏览器可访问而终端超时时，为当前 dsh 进程设置 `HTTP_PROXY` / `HTTPS_PROXY`，并给 `mcp-remote` 添加 `--enable-proxy`。
+
 生产发布仍需新正式 tag、按 [自动部署](continuous-deployment.md) 保存并校验升级前快照、先执行 V12 再同步启动配套服务。旧版 readiness 期望 V11，不能只切换旧镜像便声称健康回退；按 [备份恢复](backup-and-disaster-recovery.md) 评估，优先前向修复，不删除授权或账务记录。
 
 ## 协议与接口
@@ -102,3 +104,9 @@ node --experimental-strip-types --test tests/*.test.mjs
 - 隔离账号、数据库与对象存储中调用真实 `gpt-image-2-c` 上游：一张 PNG 成功交付，预扣转结算 2 丝，余额 100 → 98；完全相同请求重放返回同一任务；低于报价的 max_cost 与每日超额提交均拒绝，未重复扣费。
 - 强制客户端缓存过期后，dsh 桥接成功轮换访问与刷新凭证；撤销后 MCP 返回 401、原图片链接返回 404、刷新返回 400。
 - 独立 PostgreSQL 16 容器使用 Flyway 11.10 实际执行 V1–V12，历史表确认 `12 / success`；另有 PostgreSQL 并发额度/重放断言。上述隔离测试不替代上线后的真实 worker、RustFS 与公网代理冒烟。
+
+### 2026-10-20 v0.23.0 生产验收
+
+- 独立发布快照：后端 226 项、前端 47 项、部署脚本 4 项测试通过，前端构建和版本检查通过。正式 tag 的三镜像构建、自动部署及 GitHub Release 成功；API、worker、dispatcher、nginx 均固定 v0.23.0，readiness 为 schema 12。
+- 经公网代理走 dsh 原生 MCP 管线，独立测试账号通过真实 worker 和 RustFS 生成、下载一张 `gpt-image-2` PNG，结算 2 丝，余额 2 → 0。重复原请求仍为同一任务；低报价及每日超额提交均拒绝。
+- 生产凭证自动续期成功；网页 JWT 与 MCP 凭证互不通用。测试连接已撤销，MCP/原图/刷新分别拒绝为 401/404/400；没有遗留有效测试授权。升级前数据库与配置快照存在，数据库 SHA-256 校验通过。
