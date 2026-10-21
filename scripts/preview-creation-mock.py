@@ -27,6 +27,7 @@ MODELS = [dict(id='mock-image', label='Mock 绘图模型', enabled=True, support
 JOBS, REFERENCES, TOKENS, IDEMPOTENCY = {}, {}, {}, {}
 REQUESTS = []
 CONTROL = {}
+GENERATION_SECONDS = 1.7
 LOCK = threading.RLock()
 
 
@@ -80,7 +81,7 @@ def fake_image(prompt, number):
 def public_job(job):
     result = {key: value for key, value in job.items() if not key.startswith('_')}
     age = time.monotonic() - job['_started']
-    result['status'] = 'queued' if age < .5 else 'processing' if age < 1.7 else 'succeeded'
+    result['status'] = 'queued' if age < .5 else 'processing' if age < GENERATION_SECONDS else 'succeeded'
     if result['status'] == 'succeeded':
         result.update(image_url=f"/api/v1/mock-media/{job['job_id']}.png", thumbnail_url=f"/api/v1/mock-media/{job['job_id']}.png", billing_status='settled', finished_at=job['created_at'], media_state='available')
     return result
@@ -180,6 +181,10 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=18931)
+    parser.add_argument('--generation-seconds', type=float, default=1.7, help='Mock 生成等待秒数，可延长以观察趣话轮换')
     args = parser.parse_args()
+    if not .5 < args.generation_seconds <= 300:
+        parser.error('生成等待时间需大于 0.5 且不超过 300 秒。')
+    GENERATION_SECONDS = args.generation_seconds
     print(f'Mock API: http://127.0.0.1:{args.port} | demo / {PASSWORD}', flush=True)
     ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()

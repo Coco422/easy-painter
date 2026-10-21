@@ -1,13 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import * as vue from 'vue'
-import { compileComponent, node, renderer, all, hasClass, textOf } from './helpers/vue-renderer.mjs'
+import { compileComponent, compileModule, node, renderer, all, hasClass, textOf } from './helpers/vue-renderer.mjs'
 import * as versions from '../src/lib/creation-versions.ts'
 import * as media from '../src/lib/media-state.ts'
+import * as quipLibrary from '../src/lib/generation-quips.ts'
 
 // Mount the real SFC with Vue's renderer; media is stubbed to avoid private image requests.
 const filename = new URL('../src/components/CreationVersions.vue', import.meta.url)
 const icon = () => vue.h('svg')
+const clock = vue.ref(Date.now())
+const mediaClock = { useMediaClock: () => clock }
 const modules = {
   vue,
   'lucide-vue-next': { ArrowRight: icon, GitBranch: icon, Layers: icon, Loader2: icon, PencilLine: icon, Plus: icon, Sparkles: icon },
@@ -15,12 +19,15 @@ const modules = {
   './MediaExpiry.vue': { __esModule: true, default: () => vue.h('span') },
   '@/lib/creation-versions': versions,
   '@/lib/media-state': media,
-  '@/composables/useMediaClock': { useMediaClock: () => vue.ref(Date.now()) },
+  '@/composables/useMediaClock': mediaClock, './useMediaClock': mediaClock,
+  '@/lib/generation-quips': quipLibrary,
 }
+modules['@/composables/useGenerationQuips'] = compileModule(fs.readFileSync(new URL('../src/composables/useGenerationQuips.ts', import.meta.url), 'utf8'), modules)
+modules['./GenerationWaiting.vue'] = { __esModule: true, default: compileComponent(new URL('../src/components/GenerationWaiting.vue', import.meta.url), modules) }
 const Component = compileComponent(filename, modules)
-function mount({ parents = {}, selectedId = 'a', ids = ['a', 'b', 'c'], edits = [], overrides = {} } = {}) {
+function mount({ parents = {}, selectedId = 'a', ids = ['a', 'b', 'c'], edits = [], overrides = {}, membership = {} } = {}) {
   const jobs = [...ids, ...edits].map((job_id, index) => ({ job_id, created_at: `2026-01-01T00:00:0${index}Z`, prompt: '绘图描述', status: 'succeeded', model: 'm', size: 'auto', credit_cost: 5, billing_status: 'settled', media_state: 'available', image_url: `/image/${job_id}`, ...overrides[job_id] }))
-  const props = vue.reactive({ jobs, parents, selectedId, drafting: false, membership: { a: 'one', b: 'one', c: 'two', 'b-edit': 'edit-submission' }, busy: false, pending: false, editModel: 'm', editCost: 5, editSize: 'auto', maxLength: 4000, canvases: [] })
+  const props = vue.reactive({ jobs, parents, selectedId, drafting: false, membership: { a: 'one', b: 'one', c: 'two', 'b-edit': 'edit-submission', ...membership }, busy: false, pending: false, editModel: 'm', editCost: 5, editSize: 'auto', maxLength: 4000, canvases: [] })
   const selected = []
   const events = []
   const app = renderer.createApp({ setup: () => () => vue.h(Component, { ...props, onSelect: id => { selected.push(id); props.selectedId = id; props.drafting = false }, onNew: () => { props.drafting = true }, onRetry: job => events.push(['retry', job.job_id]), onDismiss: id => events.push(['dismiss', id]) }) })
@@ -44,6 +51,34 @@ test('results render separate batches of peer candidate cards without version la
     assert.deepEqual(view.selected, ['b'])
     assert.match(textOf(view.find('version-title')[0]), /第 1 批 · 候选图 2/)
     assert.equal(second.props['aria-pressed'], true)
+  } finally { view.app.unmount() }
+})
+
+test('each live candidate has a rotating quip, shared with its preview, and finished jobs stop showing it', async () => {
+  const ids = ['a', 'b', 'c', 'd']
+  const view = mount({ ids, membership: { c: 'one', d: 'one' }, overrides: Object.fromEntries(ids.map(id => [id, { status: 'queued', billing_status: 'reserved' }])) })
+  try {
+    const cards = view.find('candidate-card')
+    const cardLines = cards.map(card => all(card).find(item => hasClass(item, 'waiting-quip')))
+    assert.equal(cardLines.length, 4)
+    assert.ok(cardLines.every(line => quipLibrary.GENERATION_QUIPS.includes(textOf(line))))
+    const preview = () => all(view.find('version-preview')[0]).find(item => hasClass(item, 'waiting-quip'))
+    assert.equal(textOf(cardLines[0]), textOf(preview()), 'one job uses the same line in both views')
+    assert.match(textOf(view.find('version-preview')[0]), /无需重复提交/)
+    const firstNode = preview()
+    view.props.jobs[0].status = 'processing'
+    await vue.nextTick()
+    assert.equal(preview(), firstNode)
+    assert.equal(textOf(preview()), textOf(cardLines[0]), 'queue transitions cannot restart the phrase')
+    clock.value += 9000
+    await vue.nextTick()
+    assert.notEqual(preview(), firstNode, 'each phrase enters as a new node to replay its CSS animation')
+    assert.notEqual(textOf(preview()), textOf(firstNode))
+    assert.equal(view.find('waiting-quip-slot')[0].props['aria-live'], 'off', 'fun lines must not repeatedly interrupt screen readers')
+    view.props.jobs.forEach(job => { job.status = 'succeeded'; job.billing_status = 'settled' })
+    await vue.nextTick()
+    assert.equal(view.find('generation-waiting').length, 0)
+    assert.equal(view.find('batch-progress')[0].props['aria-valuenow'], 4)
   } finally { view.app.unmount() }
 })
 
@@ -84,6 +119,19 @@ test('a single image is displayed once as a result without candidates or version
     assert.match(textOf(view.find('batch-overview')[0]), /单张作品/)
     assert.doesNotMatch(textOf(view.root), /候选|V\d|修改分支/)
     assert.equal(view.find('drawing-tab')[0].props['aria-label'], '查看第 1 次绘图，1 张图片')
+  } finally { view.app.unmount() }
+})
+
+test('single-image waiting shows one animated quip with the submission reminder and no candidate layer', () => {
+  const view = mount({ ids: ['a'], overrides: { a: { status: 'processing', billing_status: 'reserved' } } })
+  try {
+    assert.equal(view.find('generation-waiting').length, 1)
+    assert.equal(view.find('candidate-card').length, 0)
+    assert.equal(view.find('version-history').length, 0)
+    assert.match(textOf(view.find('waiting-status')[0]), /生成中/)
+    assert.ok(quipLibrary.GENERATION_QUIPS.includes(textOf(view.find('waiting-quip')[0])))
+    assert.match(textOf(view.find('waiting-note')[0]), /无需重复提交/)
+    assert.equal(view.find('batch-progress')[0].props['aria-valuenow'], 0, 'playful text cannot advance real generation progress')
   } finally { view.app.unmount() }
 })
 

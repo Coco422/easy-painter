@@ -1,12 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import * as vue from 'vue'
 import * as presets from '../src/lib/creation-presets.ts'
 import * as versions from '../src/lib/creation-versions.ts'
 import * as media from '../src/lib/media-state.ts'
 import * as batches from '../src/lib/generation-batch.ts'
 import * as layout from '../src/lib/image-layout.ts'
-import { compileComponent, node, renderer, all, hasClass, textOf, teleportTarget } from './helpers/vue-renderer.mjs'
+import * as quipLibrary from '../src/lib/generation-quips.ts'
+import { compileComponent, compileModule, node, renderer, all, hasClass, textOf, teleportTarget } from './helpers/vue-renderer.mjs'
 
 const icon = () => vue.h('svg')
 const component = value => ({ __esModule: true, default: value })
@@ -56,6 +58,7 @@ function mount({ live = false, pending = null } = {}) {
     '@/lib/browser-crypto': { randomId: () => `key-${++identifier}` },
     '@/lib/creation-presets': presets, '@/lib/generation-batch': batches, '@/lib/image-layout': layout,
     '@/lib/creation-versions': versions, '@/lib/media-state': media,
+    '@/lib/generation-quips': quipLibrary,
     '@/composables/useMediaClock': { useMediaClock: () => vue.ref(Date.now()) },
     '@/composables/useReferenceImages': { useReferenceImages: () => ({ selected: selectedReferences, uploading, getObjectUrl: () => '', releaseObjectUrls() {}, clearSelected: () => { selectedReferences.value = [] }, deselect() {} }) },
     '@/composables/useCreationVersions': { useCreationVersions },
@@ -64,6 +67,9 @@ function mount({ live = false, pending = null } = {}) {
     '@/components/ArtworkModal.vue': component(() => vue.h('div')), '@/lib/artworks': {},
   }
   const environment = { window, localStorage }
+  modules['./useMediaClock'] = modules['@/composables/useMediaClock']
+  modules['@/composables/useGenerationQuips'] = compileModule(fs.readFileSync(new URL('../src/composables/useGenerationQuips.ts', import.meta.url), 'utf8'), modules)
+  modules['./GenerationWaiting.vue'] = component(compileComponent(new URL('../src/components/GenerationWaiting.vue', import.meta.url), modules, environment))
   modules['@/components/GeneratePanel.vue'] = component(compileComponent(new URL('../src/components/GeneratePanel.vue', import.meta.url), modules, environment))
   modules['@/components/CreationVersions.vue'] = component(compileComponent(new URL('../src/components/CreationVersions.vue', import.meta.url), modules, environment))
   const Page = compileComponent(new URL('../src/pages/CreatePage.vue', import.meta.url), modules, environment)

@@ -8,10 +8,14 @@ import * as vue from 'vue'
 export function compileComponent(filename, modules, environment = {}) {
   const { descriptor } = parse(fs.readFileSync(filename, 'utf8'), { filename: filename.pathname })
   const script = compileScript(descriptor, { id: 'component-test', inlineTemplate: true })
-  const compiled = ts.transpileModule(script.content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  return compileModule(script.content, modules, environment).default
+}
+
+export function compileModule(source, modules, environment = {}) {
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const context = { exports: {}, require: name => { assert.ok(modules[name], name); return modules[name] }, ...environment }
   vm.runInNewContext(compiled, context)
-  return context.exports.default
+  return context.exports
 }
 
 export function node(tag = '', text = '') {

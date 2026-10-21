@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowRight, GitBranch, Layers, Loader2, PencilLine, Plus, Sparkles } from 'lucide-vue-next'
+import { ArrowRight, GitBranch, Layers, PencilLine, Plus, Sparkles } from 'lucide-vue-next'
 import ProtectedImage from './ProtectedImage.vue'
 import MediaExpiry from './MediaExpiry.vue'
+import GenerationWaiting from './GenerationWaiting.vue'
+import { useGenerationQuips } from '@/composables/useGenerationQuips'
 import { creationResultBatches, creationVersionRows, type CreationHistory } from '@/lib/creation-versions'
 import { mediaAvailable } from '@/lib/media-state'
 import { useMediaClock } from '@/composables/useMediaClock'
@@ -36,6 +38,7 @@ const emit = defineEmits<{
   new: []
 }>()
 const now = useMediaClock()
+const quips = useGenerationQuips(computed(() => props.jobs))
 const instruction = ref('')
 const target = ref('')
 const rows = computed(() => creationVersionRows(props.jobs, props.parents, props.membership))
@@ -94,7 +97,8 @@ function billingLabel(job: JobDetailResponse) {
       <div class="candidate-grid" role="group" :aria-label="`选择第 ${currentBatch.number} 批候选图`">
         <button v-for="candidate in currentBatch.candidates" :key="candidate.id" type="button" class="candidate-card" :aria-pressed="selected.rootId === candidate.id" :aria-label="`第 ${currentBatch.number} 批，${candidate.label}，${statusLabel[candidate.job.status]}`" @click="emit('select', candidate.job.job_id)">
           <ProtectedImage v-if="candidate.job.status === 'succeeded'" :src="candidate.job.thumbnail_url || candidate.job.image_url" :state="candidate.job.media_state" :expires-at="candidate.job.media_expires_at" :alt="candidate.label" @invalid="emit('refresh', candidate.job)" />
-          <span v-else class="candidate-placeholder" role="status"><Loader2 v-if="candidate.job.status !== 'failed'" :size="22" class="version-spinner" />{{ statusLabel[candidate.job.status] }}</span>
+          <GenerationWaiting v-else-if="candidate.job.status === 'queued' || candidate.job.status === 'processing'" class="candidate-waiting" :status="candidate.job.status" :quip="quips.get(candidate.job.job_id)!" compact />
+          <span v-else class="candidate-placeholder" role="status">{{ statusLabel[candidate.job.status] }}</span>
           <span class="candidate-caption"><strong>{{ candidate.label }}</strong><small>{{ candidate.rows.some(row => row.parentId) ? `${candidate.rows.filter(row => row.parentId).length} 个修改版本` : statusLabel[candidate.job.status] }}</small></span>
           <span class="candidate-billing" :class="{ 'candidate-billing--refunded': candidate.job.billing_status === 'refunded' }">{{ billingLabel(candidate.job) }}</span>
         </button>
@@ -103,7 +107,8 @@ function billingLabel(job: JobDetailResponse) {
     <div v-if="hasPeers || hasBranch" class="version-title"><strong>{{ batchTitle }} · {{ resultLabel }} <span v-if="sourceLabel">{{ sourceLabel }}</span></strong><span>{{ statusLabel[selected.job.status] }}</span></div>
     <div class="version-preview">
       <ProtectedImage v-if="selected.job.status === 'succeeded'" :key="selected.job.job_id" :src="selected.job.image_url" :state="selected.job.media_state" :expires-at="selected.job.media_expires_at" :alt="hasPeers || hasBranch ? `${batchTitle} · ${resultLabel}` : '生成结果'" eager preview @invalid="emit('refresh', selected.job)" />
-      <div v-else class="version-placeholder" role="status"><Loader2 v-if="selected.job.status !== 'failed'" :size="28" class="version-spinner" /><strong>{{ statusLabel[selected.job.status] }}</strong><span>{{ selected.job.error_message || '结果会自动显示在这里，无需重复提交。' }}</span></div>
+      <GenerationWaiting v-else-if="selected.job.status === 'queued' || selected.job.status === 'processing'" :key="selected.job.job_id" :status="selected.job.status" :quip="quips.get(selected.job.job_id)!" :hint="selected.job.error_message" />
+      <div v-else class="version-placeholder" role="status"><strong>{{ statusLabel[selected.job.status] }}</strong><span>{{ selected.job.error_message || '这张图片生成失败。' }}</span></div>
     </div>
     <div v-if="hasPeers || hasBranch || selected.job.status === 'succeeded'" class="version-meta"><span v-if="hasPeers || hasBranch">{{ selected.job.model_label || selected.job.model }} · {{ selected.job.size }} · {{ billingLabel(selected.job) }}</span><MediaExpiry v-if="selected.job.status === 'succeeded'" :state="selected.job.media_state ?? 'none'" :expires-at="selected.job.media_expires_at" /></div>
     <div v-if="selected.job.status === 'failed'" class="version-failure" role="alert"><p>{{ selected.job.error_message || '这张图片生成失败。' }}<span v-if="selected.job.billing_status === 'refunded'"> {{ selected.job.credit_cost }} 丝已全额退回余额。</span></p><div class="version-actions"><button type="button" :disabled="busy || pending" @click="emit('retry', selected.job)">重新生成</button><button type="button" :disabled="busy" @click="emit('dismiss', selected.job.job_id)">收起这张图</button></div></div>
@@ -179,7 +184,7 @@ function billingLabel(job: JobDetailResponse) {
 .candidate-grid:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
 .candidate-card { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 0; padding: 10px; text-align: left; }
 .candidate-card[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); }
-.candidate-card :deep(.protected-image), .candidate-placeholder { height: 200px; min-height: 0; border-radius: 3px; }
+.candidate-card :deep(.protected-image), .candidate-placeholder, .candidate-waiting { height: 200px; min-height: 0; border-radius: 3px; }
 .candidate-placeholder { display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--text-secondary); }
 .candidate-caption strong { font-weight: 500; }
 .version-title, .version-meta, .version-editor-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
@@ -190,8 +195,6 @@ function billingLabel(job: JobDetailResponse) {
 .version-preview { height: 340px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; }
 .version-preview :deep(.protected-image) { background: var(--bg-input); }
 .version-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 100%; background: var(--bg-input); color: var(--text-secondary); font-size: 13px; padding: 24px; text-align: center; }
-.version-spinner { animation: version-spin 1.4s linear infinite; }
-@keyframes version-spin { to { transform: rotate(360deg); } }
 .version-actions, .version-canvas-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 button, select, textarea { font: inherit; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; }
 button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 11px; font-size: 12px; cursor: pointer; }
@@ -220,7 +223,7 @@ textarea { width: 100%; min-height: 88px; padding: 12px; font-size: 14px; line-h
 .version-history-placeholder { display: grid; place-items: center; height: 70px; }
 .version-local-note { margin: 0; line-height: 1.7; }
 button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-@media (max-width: 450px) { .candidate-card :deep(.protected-image), .candidate-placeholder { height: 120px; } .version-preview { height: 240px; } .version-canvas-actions label { width: 100%; } .version-canvas-actions select { flex: 1; max-width: none; } }
+@media (max-width: 450px) { .candidate-card :deep(.protected-image), .candidate-placeholder, .candidate-waiting { height: 120px; } .version-preview { height: 240px; } .version-canvas-actions label { width: 100%; } .version-canvas-actions select { flex: 1; max-width: none; } }
 @media (pointer: coarse) { button { min-height: 44px; } textarea, select { font-size: 16px; } }
-@media (prefers-reduced-motion: reduce) { .version-spinner { animation: none; } .batch-progress > span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .batch-progress > span { transition: none; } }
 </style>
