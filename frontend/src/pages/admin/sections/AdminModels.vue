@@ -57,6 +57,7 @@ const form = reactive({
   supports_reference_image: true,
   max_reference_images: 5,
   credit_cost: 2,
+  credit_cost_by_size: '',
   supported_sizes: '',
 })
 
@@ -108,6 +109,7 @@ function resetForm() {
   form.supports_reference_image = true
   form.max_reference_images = 5
   form.credit_cost = 2
+  form.credit_cost_by_size = ''
   form.supported_sizes = ''
   formRef.value?.restoreValidation()
 }
@@ -127,6 +129,7 @@ function openEdit(model: ModelConfig) {
   form.supports_reference_image = model.supports_reference_image
   form.max_reference_images = model.max_reference_images
   form.credit_cost = model.credit_cost
+  form.credit_cost_by_size = Object.entries(model.credit_cost_by_size ?? {}).map(([size, cost]) => `${size}=${cost}`).join(', ')
   form.supported_sizes = model.supported_sizes.join(', ')
   formRef.value?.restoreValidation()
   modalOpen.value = true
@@ -134,6 +137,18 @@ function openEdit(model: ModelConfig) {
 
 function parseSizes() {
   return [...new Set(form.supported_sizes.split(',').map((item) => item.trim()).filter(Boolean))]
+}
+
+function parsePriceMap() {
+  const result: Record<string, number> = {}
+  for (const entry of form.credit_cost_by_size.split(',').map((item) => item.trim()).filter(Boolean)) {
+    const separator = entry.indexOf('=')
+    if (separator <= 0) continue
+    const size = entry.slice(0, separator).trim().toLowerCase()
+    const cost = Number(entry.slice(separator + 1).trim())
+    if (size && Number.isInteger(cost) && cost >= 1) result[size] = cost
+  }
+  return result
 }
 
 async function saveModel() {
@@ -151,6 +166,7 @@ async function saveModel() {
     max_reference_images: form.max_reference_images,
     supported_sizes: parseSizes(),
     credit_cost: form.credit_cost,
+    credit_cost_by_size: parsePriceMap(),
   }
   try {
     if (editingId.value) {
@@ -365,7 +381,7 @@ const columns = computed<DataTableColumns<ModelConfig>>(() => [
     title: '参考图', key: 'supports_reference_image', width: 90,
     render: (row) => h(NTag, { size: 'small', type: row.supports_reference_image ? 'success' : 'default', bordered: false }, { default: () => row.supports_reference_image ? `最多 ${row.max_reference_images} 张` : '不支持' }),
   },
-  { title: '丝/张', key: 'credit_cost', width: 75 },
+  { title: '丝/张', key: 'credit_cost', width: 75, render: (row) => Object.keys(row.credit_cost_by_size ?? {}).length ? `${row.credit_cost}（分档）` : String(row.credit_cost) },
   {
     title: '状态', key: 'enabled', width: 112,
     render: (row) => h('div', { class: 'model-status-cell' }, [
@@ -421,7 +437,8 @@ onBeforeUnmount(clearDragState)
         <NFormItem label="上游" path="provider_id"><NSelect v-model:value="form.provider_id" :options="providerOptions" filterable /></NFormItem>
         <NFormItem label="支持尺寸（逗号分隔，留空不限制）"><NInput v-model:value="form.supported_sizes" placeholder="1024x1024, 1280x720" /></NFormItem>
         <div class="form-grid-2">
-          <NFormItem label="丝/张" path="credit_cost"><NInputNumber v-model:value="form.credit_cost" :min="1" /></NFormItem>
+          <NFormItem label="默认丝/张" path="credit_cost"><NInputNumber v-model:value="form.credit_cost" :min="1" /></NFormItem>
+          <NFormItem label="按尺寸分档（尺寸=丝，逗号分隔）"><NInput v-model:value="form.credit_cost_by_size" placeholder="1k=5, 2k=8, 4k=12" /></NFormItem>
           <NFormItem label="单次参考图上限" path="max_reference_images"><NInputNumber v-model:value="form.max_reference_images" :min="1" :precision="0" :disabled="!form.supports_reference_image" /></NFormItem>
           <NFormItem label="支持参考图"><NSwitch v-model:value="form.supports_reference_image" /></NFormItem>
           <NFormItem label="启用模型"><NSwitch v-model:value="form.enabled" /></NFormItem>

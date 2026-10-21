@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.user_group import UserGroup
 from app.services.group_policy import calculate_effective_credit_cost
 from app.services.billing import refund_job_charge
+from app.services.model_pricing import base_credit_cost_for_size, size_pricing_tier
 
 
 def make_session():
@@ -28,8 +29,8 @@ def make_session():
     return sessionmaker(bind=engine, expire_on_commit=False)()
 
 
-def make_request() -> Request:
-    body = b'{"prompt":"hello","model":"model-1","size":"1024x1024"}'
+def make_request(size: str = "1024x1024") -> Request:
+    body = f'{{"prompt":"hello","model":"model-1","size":"{size}"}}'.encode()
 
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
@@ -59,6 +60,31 @@ class AllowRateLimiter:
 )
 def test_effective_credit_cost_uses_integer_ceiling(base: int, bps: int, expected: int):
     assert calculate_effective_credit_cost(base, bps) == expected
+
+
+@pytest.mark.parametrize(
+    ("size", "tier", "cost"),
+    [
+        ("auto", "1k", 5),
+        ("1024x1792", "1k", 5),
+        ("2048x1152", "2k", 8),
+        ("3840x2160", "4k", 12),
+    ],
+)
+def test_resolution_maps_to_configured_price_tier(size: str, tier: str, cost: int):
+    model = {"credit_cost": 4, "credit_cost_by_size": {"1k": 5, "2k": 8, "4k": 12}}
+    assert size_pricing_tier(size) == tier
+    assert base_credit_cost_for_size(model, size) == cost
+
+
+def test_public_model_policy_exposes_size_prices():
+    result = routes._models_for_policy(
+        [{"id": "model-1", "credit_cost": 5, "credit_cost_by_size": {"1k": 5, "2k": 8, "4k": 12}}],
+        type("Policy", (), {"billing_multiplier_bps": 10_000})(),
+    )
+    assert result[0]["credit_cost"] == 5
+    assert result[0]["base_credit_cost_by_size"] == {"1k": 5, "2k": 8, "4k": 12}
+    assert result[0]["credit_cost_by_size"] == {"1k": 5, "2k": 8, "4k": 12}
 
 
 @pytest.mark.anyio
@@ -147,4 +173,30 @@ async def test_create_job_snapshots_group_policy_and_effective_price(
         )
         assert refund.amount == 0
         assert db.get(User, user.id).credits == 10
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_create_job_charges_price_for_requested_size(monkeypatch):
+    db = make_session()
+    db.add(UserGroup(code="standard", name="普通用户", billing_multiplier_bps=10_000,
+                     generated_retention_hours=48, reference_retention_hours=48, max_reference_images=3,
+                     is_default=True))
+    user = User(id="user-size", username="size", password_hash="hash", group_code="standard", credits=20)
+    db.add(user)
+    db.add(CreditTransaction(user_id=user.id, amount=20, balance_after=20, reason="test:opening",
+                             transaction_type=CreditTransactionType.OPENING_BALANCE, idempotency_key="opening:size"))
+    db.commit()
+    monkeypatch.setattr(routes, "GenerationRateLimiter", AllowRateLimiter)
+    monkeypatch.setattr(routes, "load_models_from_db", lambda _: [{
+        "id": "model-1", "label": "Model One", "enabled": True, "supports_reference_image": True,
+        "supported_sizes": [], "credit_cost": 5, "credit_cost_by_size": {"1k": 5, "2k": 8, "4k": 12},
+    }])
+    response = await routes.create_job(make_request("2048x2048"), idempotency_key="pricing-size", db=db,
+                                       redis_client=object(), settings=Settings(), current_user=user)
+    job = db.get(GenerationJob, response.job_id)
+    assert response.credit_cost == 8
+    assert job.base_credit_cost_snapshot == 8
+    assert job.credit_cost_snapshot == 8
+    assert db.get(User, user.id).credits == 12
     db.close()

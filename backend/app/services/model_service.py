@@ -45,7 +45,7 @@ class FailoverProvider:
     max_reference_images: int = 1
 
 
-def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str] | int]]:
+def load_models_from_db(db: Session) -> list[dict[str, Any]]:
     stmt = select(ModelConfig).order_by(ModelConfig.sort_order, ModelConfig.id)
     models = db.scalars(stmt).all()
     return [
@@ -57,6 +57,7 @@ def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str] | 
             "max_reference_images": m.max_reference_images if m.max_reference_images is not None else 5,
             "supported_sizes": list(m.supported_sizes) if m.supported_sizes else [],
             "credit_cost": m.credit_cost if m.credit_cost is not None else 2,
+            "credit_cost_by_size": dict(m.credit_cost_by_size) if isinstance(m.credit_cost_by_size, dict) else {},
         }
         for m in models
     ]

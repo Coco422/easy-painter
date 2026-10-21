@@ -12,6 +12,7 @@ import CreationVersions from '@/components/CreationVersions.vue'
 import { useCreationVersions } from '@/composables/useCreationVersions'
 import { ArrowUpRight, FlaskConical, Image, Layers, LayoutTemplate, Package, Palette, Plus, Workflow } from 'lucide-vue-next'
 import { creationTemplates, type CreationMode } from '@/lib/creation-presets'
+import { modelCreditCost } from '@/lib/model-pricing'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import {
   ApiError,
@@ -534,7 +535,7 @@ onMounted(() => {
       <div v-if="(!activeJobs.length || drafting) && versions.history.value.pending" class="feedback-banner" role="status">上次改图的提交结果尚未确认。<button type="button" class="ghost-button" :disabled="versions.busy.value" @click="versions.confirm">确认上次改图任务</button></div>
 
       <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
-      <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :membership="jobBatches" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :drafting="drafting" :can-start-new="canStartNewDrawing" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="versions.editModel.value?.credit_cost ?? 0" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
+      <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :membership="jobBatches" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :drafting="drafting" :can-start-new="canStartNewDrawing" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="modelCreditCost(versions.editModel.value, versions.editSize.value)" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
         @select="selectResult" @new="startNewDrawing" @revise="versions.revise" @confirm="versions.confirm" @canvas="versions.addToCanvas" @details="openArtwork($event)" @gallery="handleAddToGallery" @refresh="refreshJobMedia" @retry="retryJob" @dismiss="removeActiveJob" />
       <div v-if="!activeJobs.length || drafting" class="workspace-empty">
         <div class="workspace-intro"><span class="workspace-intro-icon"><Image :size="28" aria-hidden="true" /></span><h3>{{ drafting ? '换一个全新的想法' : '这次想创作什么？' }}</h3><p>{{ drafting ? '描述和参考图已清空，写下这次想画的内容。' : '选一个用途带入示例，或直接写下你的想法。' }}<br />{{ activeJobs.length ? '之前的作品保留在上方「最近绘图」，随时可以切回。' : '生成的作品会显示在这里。' }}</p></div>

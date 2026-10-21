@@ -8,6 +8,7 @@ import ReferenceHistoryDrawer from '@/components/ReferenceHistoryDrawer.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import { ApiError } from '@/lib/api'
 import { resolveImageLayout } from '@/lib/image-layout'
+import { modelBaseCreditCost, modelCreditCost } from '@/lib/model-pricing'
 import { validGenerationCount } from '@/lib/generation-batch'
 import { buildCreationPrompt, creationInputError, creationLanguages, creationStyles, creationTemplates, type CreationMode } from '@/lib/creation-presets'
 import type { BatchCount, ImageSize, PublicModel, ReferenceImageItem } from '@/lib/types'
@@ -123,8 +124,8 @@ const referencesOverLimit = computed(() => props.mode !== 'text' && selected.val
 const selectedSizeOption = computed(() => sizeOptions.find((option) => option.value === props.selectedSize) ?? sizeOptions[0])
 const selectedSizeLayout = computed(() => resolveImageLayout(selectedSizeOption.value.value))
 const selectedModelConfig = computed(() => props.models.find((model) => model.id === props.selectedModel))
-const unitCost = computed(() => selectedModelConfig.value?.credit_cost ?? 0)
-const baseUnitCost = computed(() => selectedModelConfig.value?.base_credit_cost ?? unitCost.value)
+const unitCost = computed(() => modelCreditCost(selectedModelConfig.value, props.selectedSize))
+const baseUnitCost = computed(() => modelBaseCreditCost(selectedModelConfig.value, props.selectedSize))
 const hasDiscount = computed(() => baseUnitCost.value !== unitCost.value)
 const estimatedCost = computed(() => unitCost.value * props.selectedBatchCount)
 const estimatedBalance = computed(() => props.credits === null ? null : props.credits - estimatedCost.value)
@@ -390,7 +391,7 @@ watch([() => props.prompt, () => props.mode, template, style, language, selected
           @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
         >
           <option v-for="model in models.filter((item) => item.enabled)" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
-            {{ model.label }}{{ mode !== 'text' && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张{{ model.base_credit_cost !== model.credit_cost ? `，原价 ${model.base_credit_cost} 丝` : '' }}）
+            {{ model.label }}{{ mode !== 'text' && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ modelCreditCost(model, selectedSize) }} 丝/张{{ modelBaseCreditCost(model, selectedSize) !== modelCreditCost(model, selectedSize) ? `，原价 ${modelBaseCreditCost(model, selectedSize)} 丝` : '' }}）
           </option>
         </select>
       </label>

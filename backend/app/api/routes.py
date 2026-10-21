@@ -52,6 +52,11 @@ from app.services.group_policy import (
     policy_from_group,
     resolve_user_policy,
 )
+from app.services.model_pricing import (
+    base_credit_cost_for_size,
+    effective_credit_cost_map,
+    normalize_credit_cost_by_size,
+)
 from app.services.job_lifecycle import mark_generation_failed
 from app.services.media_lifecycle import enqueue_deletion
 from app.api.media_routes import job_media_url
@@ -141,6 +146,14 @@ def _models_for_policy(
         model["credit_cost"] = calculate_effective_credit_cost(
             base_cost,
             policy.billing_multiplier_bps,
+        )
+        base_map = model.get("credit_cost_by_size", {})
+        base_map = normalize_credit_cost_by_size(base_map)
+        model["base_credit_cost_by_size"] = dict(base_map)
+        model["credit_cost_by_size"] = effective_credit_cost_map(
+            {"credit_cost_by_size": base_map},
+            policy.billing_multiplier_bps,
+            calculate_effective_credit_cost,
         )
         personalized.append(model)
     return personalized
@@ -344,8 +357,7 @@ def create_generation_job(
             )
         staged_reference_images.append(staged_reference_image)
 
-    raw_credit_cost = model_config.get("credit_cost", 2)
-    base_credit_cost = raw_credit_cost if isinstance(raw_credit_cost, int) and raw_credit_cost >= 0 else 2
+    base_credit_cost = base_credit_cost_for_size(model_config, payload.size)
     credit_cost = calculate_effective_credit_cost(
         base_credit_cost,
         group_policy.billing_multiplier_bps,

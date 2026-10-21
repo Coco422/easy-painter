@@ -18,6 +18,7 @@ from app.services import agent_auth as auth
 from app.services.auth_sessions import utcnow
 from app.services.reference_images import MAX_REFERENCE_IMAGE_BYTES, validate_reference_image
 from app.services.storage import MinioStorageService, StorageError
+from app.services.model_pricing import base_credit_cost_for_size
 
 
 def owned_job(db: Session, user_id: str, job_id: str) -> GenerationJob:
@@ -34,7 +35,12 @@ def estimate(db: Session, user: User, model: str, size: str = 'auto', *, editing
     if not item: raise HTTPException(422, '当前模型不可用。')
     if editing and not item.supports_reference_image: raise HTTPException(422, '当前模型不支持改图。')
     if item.supported_sizes and request.size not in item.supported_sizes: raise HTTPException(422, '模型不支持此尺寸。')
-    return {'model': item.id, 'size': request.size, 'credit_cost': item.credit_cost, 'images': 1}
+    return {
+        'model': item.id,
+        'size': request.size,
+        'credit_cost': base_credit_cost_for_size(item.model_dump(), request.size),
+        'images': 1,
+    }
 
 
 def submit(db: Session, redis_client, grant_id: str, *, prompt: str, model: str, size: str,

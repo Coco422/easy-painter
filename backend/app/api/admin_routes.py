@@ -25,6 +25,7 @@ from app.models.job_charge import JobCharge, JobChargeStatus
 from app.models.media import MediaState
 from app.services.community import withdraw_pending
 from app.models.model_config import ModelConfig
+from app.services.model_pricing import normalize_credit_cost_by_size
 from app.models.outbox_event import OutboxEvent
 from app.models.redemption_code import RedemptionCode
 from app.models.upstream_provider import UpstreamProvider
@@ -579,6 +580,7 @@ class ModelResponse(BaseModel):
     supported_sizes: list[str]
     sort_order: int
     credit_cost: int = 2
+    credit_cost_by_size: dict[str, int] = Field(default_factory=dict)
 
 
 class CreateModelRequest(BaseModel):
@@ -591,6 +593,7 @@ class CreateModelRequest(BaseModel):
     supported_sizes: list[str] = []
     sort_order: int = 0
     credit_cost: int = Field(default=2, ge=1)
+    credit_cost_by_size: dict[str, int] = Field(default_factory=dict)
 
 
 class UpdateModelRequest(BaseModel):
@@ -602,6 +605,7 @@ class UpdateModelRequest(BaseModel):
     supported_sizes: list[str] | None = None
     sort_order: int | None = None
     credit_cost: int | None = Field(default=None, ge=1)
+    credit_cost_by_size: dict[str, int] | None = None
 
 
 def _model_response(m: ModelConfig) -> ModelResponse:
@@ -611,6 +615,7 @@ def _model_response(m: ModelConfig) -> ModelResponse:
         max_reference_images=m.max_reference_images if m.max_reference_images is not None else 5,
         supported_sizes=list(m.supported_sizes) if m.supported_sizes else [],
         sort_order=m.sort_order, credit_cost=m.credit_cost if m.credit_cost is not None else 2,
+        credit_cost_by_size=normalize_credit_cost_by_size(m.credit_cost_by_size),
     )
 
 
@@ -708,6 +713,7 @@ def admin_create_model(
         max_reference_images=body.max_reference_images,
         supported_sizes=body.supported_sizes, sort_order=body.sort_order,
         credit_cost=body.credit_cost,
+        credit_cost_by_size=normalize_credit_cost_by_size(body.credit_cost_by_size),
     )
     db.add(model)
     db.commit()
@@ -732,6 +738,8 @@ def admin_update_model(
     for field in type(body).model_fields:
         value = getattr(body, field)
         if value is not None:
+            if field == "credit_cost_by_size":
+                value = normalize_credit_cost_by_size(value)
             setattr(model, field, value)
     db.commit()
     db.refresh(model)

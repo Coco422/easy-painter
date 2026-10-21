@@ -212,6 +212,10 @@ class Settings(BaseSettings):
                     "upstream_model_id": str(item.get("upstream_model_id", item["id"])),
                     "max_reference_images": max(1, int(item.get("max_reference_images", 5))),
                     "credit_cost": max(1, int(item.get("credit_cost", 2))),
+                    "credit_cost_by_size": {
+                        str(size).strip().lower(): max(1, int(cost))
+                        for size, cost in item.get("credit_cost_by_size", {}).items()
+                    } if isinstance(item.get("credit_cost_by_size", {}), dict) else {},
                 }
                 for item in data
             ]

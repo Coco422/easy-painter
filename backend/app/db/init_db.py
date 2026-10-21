@@ -21,6 +21,7 @@ from app.models.user import User
 from app.models.user_group import UserGroup
 from app.models.user_group import STANDARD_GROUP_CODE
 from app.services.group_policy import get_default_group
+from app.services.model_pricing import normalize_credit_cost_by_size
 
 
 logger = logging.getLogger(__name__)
@@ -131,11 +132,7 @@ def _seed_providers_and_models() -> None:
             model.supported_sizes = list(model_dict.get("supported_sizes", []))
             model.sort_order = int(model_dict.get("sort_order", index))
             model.credit_cost = max(1, int(model_dict.get("credit_cost", 2)))
-
-        if settings.sync_public_models_from_env:
-            for model in db.scalars(select(ModelConfig)).all():
-                if model.id not in configured_model_ids:
-                    model.enabled = False
+            model.credit_cost_by_size = normalize_credit_cost_by_size(model_dict.get("credit_cost_by_size"))
 
         for provider_config in settings.additional_upstreams:
             provider = db.scalar(
@@ -187,6 +184,7 @@ def _seed_providers_and_models() -> None:
                 if model_config.get("fallback_for"):
                     continue
                 model_id = model_config["id"]
+                configured_model_ids.add(model_id)
                 existing_model = db.get(ModelConfig, model_id)
                 if existing_model:
                     if existing_model.provider_id != provider.id:
@@ -194,6 +192,15 @@ def _seed_providers_and_models() -> None:
                             "Skipping additional upstream model %s: that model ID is already assigned to another provider.",
                             model_id,
                         )
+                    elif settings.sync_public_models_from_env:
+                        existing_model.label = model_config.get("label", model_id)
+                        existing_model.enabled = bool(model_config.get("enabled", True))
+                        existing_model.supports_reference_image = bool(model_config.get("supports_reference_image", False))
+                        existing_model.max_reference_images = max(1, int(model_config.get("max_reference_images", 1)))
+                        existing_model.supported_sizes = list(model_config.get("supported_sizes", []))
+                        existing_model.sort_order = int(model_config.get("sort_order", index))
+                        existing_model.credit_cost = max(1, int(model_config.get("credit_cost", 2)))
+                        existing_model.credit_cost_by_size = normalize_credit_cost_by_size(model_config.get("credit_cost_by_size"))
                     continue
                 db.add(ModelConfig(
                     id=model_id,
@@ -205,7 +212,13 @@ def _seed_providers_and_models() -> None:
                     supported_sizes=list(model_config.get("supported_sizes", [])),
                     sort_order=int(model_config.get("sort_order", index)),
                     credit_cost=max(1, int(model_config.get("credit_cost", 2))),
+                    credit_cost_by_size=normalize_credit_cost_by_size(model_config.get("credit_cost_by_size")),
                 ))
+
+        if settings.sync_public_models_from_env:
+            for model in db.scalars(select(ModelConfig)).all():
+                if model.id not in configured_model_ids:
+                    model.enabled = False
         db.commit()
     finally:
         db.close()

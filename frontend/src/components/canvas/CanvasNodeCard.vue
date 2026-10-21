@@ -10,6 +10,7 @@ import {
 } from 'lucide-vue-next'
 import type { CanvasNode, CanvasRun } from '@/lib/canvas/model'
 import type { PublicModel } from '@/lib/types'
+import { modelCreditCost } from '@/lib/model-pricing'
 const props = defineProps<{
   node: CanvasNode
   selected: boolean
@@ -194,7 +195,7 @@ function selectModel() {
         >
           <Sparkles :size="14" />{{ busy ? '正在提交…' : '生成图片'
           }}<span v-if="model"
-            >{{ model.credit_cost * (node.count ?? 1) }} 丝</span
+            >{{ modelCreditCost(model, node.size) * (node.count ?? 1) }} 丝</span
           >
         </button>
       </div>

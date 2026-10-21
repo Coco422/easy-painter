@@ -30,6 +30,8 @@ class PublicModel(BaseModel):
     supported_sizes: list[str] = Field(default_factory=list)
     credit_cost: int = 2
     base_credit_cost: int = 2
+    credit_cost_by_size: dict[str, int] = Field(default_factory=dict)
+    base_credit_cost_by_size: dict[str, int] = Field(default_factory=dict)
 
 
 class PublicMetaResponse(BaseModel):

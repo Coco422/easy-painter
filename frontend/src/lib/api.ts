@@ -420,6 +420,7 @@ export function adminCreateModel(data: {
   supported_sizes?: string[]
   sort_order?: number
   credit_cost?: number
+  credit_cost_by_size?: Record<string, number>
 }) {
   return adminApiRequest<ModelConfig>('/api/v1/admin/models', {
     method: 'POST',

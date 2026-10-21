@@ -24,4 +24,5 @@ class ModelConfig(Base):
     supported_sizes: Mapped[list] = mapped_column(JSON, default=list)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     credit_cost: Mapped[int] = mapped_column(Integer, default=2)
+    credit_cost_by_size: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

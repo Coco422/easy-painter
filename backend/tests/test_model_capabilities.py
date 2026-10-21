@@ -173,6 +173,13 @@ def test_syncing_public_models_disables_unlisted_rows_and_rebinds_configured_mod
                     'enabled': True,
                     'fallback_for': 'primary-image',
                     'supports_reference_image': True,
+                }, {
+                    'id': 'remote-image',
+                    'label': '第三方独立模型',
+                    'enabled': True,
+                    'supports_reference_image': True,
+                    'credit_cost': 6,
+                    'credit_cost_by_size': {'1k': 6, '2k': 10, '4k': 15},
                 }],
             }]),
             sync_public_models_from_env=True,
@@ -191,6 +198,10 @@ def test_syncing_public_models_disables_unlisted_rows_and_rebinds_configured_mod
         assert legacy.enabled is False
         assert session.scalar(select(ModelConfig.id).where(ModelConfig.enabled.is_(True))) == 'primary-image'
         assert len(providers) == 3
+        remote = session.get(ModelConfig, 'remote-image')
+        assert remote is not None and remote.enabled is True
+        assert remote.provider_id == next(provider for provider in providers if provider.name == '第三方').id
+        assert remote.credit_cost_by_size == {'1k': 6, '2k': 10, '4k': 15}
         assert session.get(ModelConfig, 'primary-image').provider_id != next(
             provider for provider in providers if provider.name == '第三方'
         ).id
@@ -229,6 +240,17 @@ def test_primary_model_config_can_map_to_a_provider_specific_model_name():
 
     assert model["id"] == "primary-image"
     assert model["upstream_model_id"] == "chatgpt2api-image-model"
+
+
+def test_public_model_config_accepts_size_pricing():
+    settings = Settings(
+        public_models_json=(
+            '[{"id":"tiered-image","credit_cost":5,'
+            '"credit_cost_by_size":{"1K":5,"2k":8,"4k":12}}]'
+        ),
+    )
+    [model] = settings.public_models
+    assert model["credit_cost_by_size"] == {"1k": 5, "2k": 8, "4k": 12}
 
 
 def test_default_upstream_timeout_allows_slow_image_models():

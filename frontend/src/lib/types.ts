@@ -9,6 +9,8 @@ export interface PublicModel {
   supported_sizes: string[]
   base_credit_cost: number
   credit_cost: number
+  credit_cost_by_size: Record<string, number>
+  base_credit_cost_by_size: Record<string, number>
 }
 
 export interface UserGroupSummary {
@@ -309,6 +311,7 @@ export interface ModelConfig {
   supported_sizes: string[]
   sort_order: number
   credit_cost: number
+  credit_cost_by_size: Record<string, number>
 }
 
 export interface InspirationItem {
