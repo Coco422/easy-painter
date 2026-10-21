@@ -36,10 +36,19 @@ onMounted(async () => {
     <main class="page-content" :class="{ 'page-content--admin': isAdminRoute, 'page-content--canvas': isCanvasRoute }">
       <router-view />
     </main>
+    <nav v-if="!isAdminRoute && !isCanvasRoute" class="related-sites" aria-label="88dog 站点导航">
+      <a href="https://88888888.dog/home" target="_blank" rel="noopener noreferrer">88dog 中转主站 ↗</a>
+      <a href="https://doc.88888888.dog/" target="_blank" rel="noopener noreferrer">使用文档 ↗</a>
+      <a href="https://getplus.88888888.dog/" target="_blank" rel="noopener noreferrer">会员代充 ↗</a>
+    </nav>
   </div>
 </template>
 
 <style scoped>
+.related-sites { display:flex; flex-wrap:wrap; justify-content:center; gap:12px 24px; padding:24px 16px; border-top:1px solid var(--border); color:var(--text-secondary); font-size:13px; }
+.related-sites a { color:inherit; text-decoration:none; }
+.related-sites a:hover { color:var(--accent-strong); }
+.related-sites a:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 .page-content--canvas { max-width: none; padding: 16px 24px; }
 @media (max-width: 700px) { .page-content--canvas { padding: 10px; } }
 </style>
