@@ -79,7 +79,7 @@ const pollingTimers = new Map<string, number>()
 const pollingInterval = computed(() => meta.value?.polling_interval_ms ?? 2000)
 const availableModels = computed(() => meta.value?.models ?? [])
 const versions = useCreationVersions({
-  jobs: activeJobs, models: availableModels, selectedModel, selectedSize,
+  jobs: activeJobs, membership: jobBatches, models: availableModels, selectedModel, selectedSize,
   maxLength: computed(() => meta.value?.prompt_max_length ?? 4000), feedback,
   register(result, request) {
     const job = makeQueuedJob(result, request.prompt, request.model, request.size)
@@ -517,7 +517,7 @@ onMounted(() => {
       <div v-if="!activeJobs.length && versions.history.value.pending" class="feedback-banner" role="status">上次改图的提交结果尚未确认。<button type="button" class="ghost-button" :disabled="versions.busy.value" @click="versions.confirm">确认上次改图任务</button></div>
 
       <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
-      <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="versions.editModel.value?.credit_cost ?? 0" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
+      <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :membership="jobBatches" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="versions.editModel.value?.credit_cost ?? 0" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
         @select="versions.selectedId.value = $event" @revise="versions.revise" @confirm="versions.confirm" @canvas="versions.addToCanvas" @details="openArtwork($event)" @gallery="handleAddToGallery" @refresh="refreshJobMedia" />
       <details v-if="activeJobs.length" class="workspace-task-details" :open="pendingCount > 0"><summary>任务详情与计费 · {{ activeJobs.length }} 张</summary>
       <div class="current-jobs-stack">

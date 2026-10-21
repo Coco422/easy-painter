@@ -37,7 +37,7 @@ function setup({ storage = new Map(), storageFailure = false, create, upload, so
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => { if (storageFailure) throw new Error('quota'); storage.set(key, value) } },
   }
   vm.runInNewContext(compiled, context)
-  const options = { jobs: ref([source]), models: ref([{ id: 'm', label: '模型', enabled: true, supports_reference_image: true, max_reference_images: 5, supported_sizes: ['auto'], credit_cost: 5 }]), selectedModel: ref('m'), selectedSize: ref('auto'), maxLength: ref(4000), feedback: ref(''), register: result => calls.registered.push(result), restore: () => {} }
+  const options = { jobs: ref([source]), membership: ref({ source: 'batch-one' }), models: ref([{ id: 'm', label: '模型', enabled: true, supports_reference_image: true, max_reference_images: 5, supported_sizes: ['auto'], credit_cost: 5 }]), selectedModel: ref('m'), selectedSize: ref('auto'), maxLength: ref(4000), feedback: ref(''), register: result => calls.registered.push(result), restore: () => {} }
   const app = context.exports.useCreationVersions(options)
   app.selectedId.value = 'source'
   app.history.value.parents.source = null
@@ -80,6 +80,24 @@ test('retrying a failed edit uses its original parent and exact prompt, retainin
   assert.deepEqual(calls.posts[0].request.reference_image_ids, ['ref-source'])
   assert.ok(options.jobs.value.includes(failed))
   assert.equal(app.history.value.parents.child, 'source')
+})
+
+test('editing a selected parallel candidate references only that image and preserves its peers', async () => {
+  const { app, calls, options, source, storage } = setup()
+  const candidate = { ...source, job_id: 'candidate-two', image_url: '/files/candidate-two', created_at: '2026-01-02' }
+  options.jobs.value.push(candidate)
+  options.membership.value[candidate.job_id] = 'batch-one'
+  app.record(candidate.job_id)
+  app.selectedId.value = candidate.job_id
+  await app.revise('改成蓝色')
+  assert.deepEqual(calls.images, ['/files/candidate-two'])
+  assert.equal(calls.posts.length, 1)
+  assert.equal(app.history.value.parents.child, candidate.job_id)
+  assert.equal(app.history.value.parents.source, null)
+  assert.equal(app.history.value.parents[candidate.job_id], null)
+  assert.ok(options.jobs.value.includes(source))
+  assert.ok(options.jobs.value.includes(candidate))
+  assert.equal(versions.parseCreationHistory(storage.get(versions.creationHistoryKey('owner'))).parents.child, candidate.job_id)
 })
 
 test('account switch during reference upload cannot create a job or register results for the next account', async () => {

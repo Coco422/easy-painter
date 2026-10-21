@@ -88,6 +88,7 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 ### Creation Workspace
 
 - `/create` tracks up to 100 version ancestry links per account in browser localStorage (`easy-painter:creation-versions:<ownerId>`), restoring job details through existing authorized APIs. This is local workspace metadata, not a server-side conversation or a media-retention extension.
+- Explicit browser-local submission batches display independent candidate images side by side. Only result edits form version branches within a candidate (original V1, edits V2+); edits remain in the root candidate's batch. Missing batch membership never merges identical prompts.
 - Result edits fetch the selected original, stage it as a new reference without silent eviction, and submit one job. Persist the exact pending request and idempotency key before POST; unknown responses require explicit confirmation with the same request after refresh. Account/session changes invalidate in-flight UI updates.
 - Adding a result to a new or existing canvas first saves the authorized image Blob through existing IndexedDB assets/projects, with capacity and revision checks. Append an image, provenance note and connected, unsubmitted generation node; never replay the original job or auto-submit a paid run.
 

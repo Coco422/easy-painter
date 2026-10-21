@@ -13,6 +13,7 @@ import type { CreateJobRequest, CreateJobResponse, ImageSize, JobDetailResponse,
 
 export function useCreationVersions(options: {
   jobs: Ref<JobDetailResponse[]>
+  membership: Ref<Record<string, string>>
   models: Ref<PublicModel[]>
   selectedModel: Ref<string>
   selectedSize: Ref<ImageSize>
@@ -89,7 +90,7 @@ export function useCreationVersions(options: {
       }))
     }
     assertOwner()
-    const rows = creationVersionRows(options.jobs.value, history.value.parents)
+    const rows = creationVersionRows(options.jobs.value, history.value.parents, options.membership.value)
     selectedId.value = rows[rows.length - 1]?.job.job_id ?? ''
     try {
       const projects = await listProjects(owner)
@@ -180,8 +181,8 @@ export function useCreationVersions(options: {
       const owner = assertOwner(), blob = await sourceBlob(job, assertOwner)
       const item = await makeAsset(owner, blob, `创作-${job.job_id}.png`)
       assertOwner()
-      const row = creationVersionRows(options.jobs.value, history.value.parents).find(row => row.job.job_id === job.job_id)
-      const label = `创作 V${row?.number ?? ''}`
+      const row = creationVersionRows(options.jobs.value, history.value.parents, options.membership.value).find(row => row.job.job_id === job.job_id)
+      const label = row ? `第 ${row.batchNumber} 批 · ${row.label}` : '创作图片'
       const project = targetId ? await getProject(owner, targetId) : newProject(owner, label)
       assertOwner()
       if (!project) throw new Error('目标画布已移除，请重新选择。')
