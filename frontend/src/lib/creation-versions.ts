@@ -56,7 +56,7 @@ export function creationVersionRows<T extends { job_id: string; created_at: stri
   const acceptedOrder = new Map(Object.keys(membership).map((id, index) => [id, index]))
   for (const batch of batches) batch.jobs.sort((a, b) => (acceptedOrder.get(a.job_id) ?? Number.MAX_SAFE_INTEGER) - (acceptedOrder.get(b.job_id) ?? Number.MAX_SAFE_INTEGER))
   const locations = new Map(batches.flatMap((batch, batchIndex) => batch.jobs.map((candidate, candidateIndex) => [candidate.job_id, {
-    batchId: batch.id, batchNumber: batchIndex + 1, candidateNumber: candidateIndex + 1,
+    batchId: batch.id, batchNumber: batchIndex + 1, candidateNumber: candidateIndex + 1, candidateCount: batch.jobs.length,
   }] as const)))
   // Number edits within their own candidate tree. Parallel draws never advance versions.
   const counts = new Map<string, number>()
@@ -71,9 +71,10 @@ export function creationVersionRows<T extends { job_id: string; created_at: stri
     const location = locations.get(rootId)!
     const parentId = parents[job.job_id] ?? null
     const number = numbers.get(job.job_id)!
-    const candidateLabel = `候选图 ${location.candidateNumber}`
+    const isCandidate = location.candidateCount > 1
+    const candidateLabel = isCandidate ? `候选图 ${location.candidateNumber}` : '作品'
     return { job, rootId, ...location, candidateLabel, number, parentId, parentNumber: numbers.get(parentId ?? ''),
-      label: parentId ? `${candidateLabel} · V${number}` : candidateLabel }
+      label: isCandidate ? (parentId ? `${candidateLabel} · V${number}` : candidateLabel) : parentId ? `V${number}` : '生成结果' }
   })
 }
 

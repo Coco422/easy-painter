@@ -1,72 +1,41 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import vm from 'node:vm'
-import ts from 'typescript'
-import { parse, compileScript } from '@vue/compiler-sfc'
 import * as vue from 'vue'
+import { compileComponent, node, renderer, all, hasClass, textOf } from './helpers/vue-renderer.mjs'
 import * as versions from '../src/lib/creation-versions.ts'
 import * as media from '../src/lib/media-state.ts'
 
 // Mount the real SFC with Vue's renderer; media is stubbed to avoid private image requests.
 const filename = new URL('../src/components/CreationVersions.vue', import.meta.url)
-const { descriptor } = parse(fs.readFileSync(filename, 'utf8'), { filename: filename.pathname })
-const script = compileScript(descriptor, { id: 'creation-results-test', inlineTemplate: true })
-const compiled = ts.transpileModule(script.content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const icon = () => vue.h('svg')
 const modules = {
   vue,
-  'lucide-vue-next': { ArrowRight: icon, GitBranch: icon, Layers: icon, Loader2: icon, PencilLine: icon, Sparkles: icon },
+  'lucide-vue-next': { ArrowRight: icon, GitBranch: icon, Layers: icon, Loader2: icon, PencilLine: icon, Plus: icon, Sparkles: icon },
   './ProtectedImage.vue': { __esModule: true, default: { props: ['alt'], setup: props => () => vue.h('img', { alt: props.alt }) } },
   './MediaExpiry.vue': { __esModule: true, default: () => vue.h('span') },
   '@/lib/creation-versions': versions,
   '@/lib/media-state': media,
   '@/composables/useMediaClock': { useMediaClock: () => vue.ref(Date.now()) },
 }
-const context = { exports: {}, require: name => { assert.ok(modules[name], name); return modules[name] } }
-vm.runInNewContext(compiled, context)
-const Component = context.exports.default
-
-function node(tag = '', text = '') {
-  return { tag, text, props: {}, children: [], parent: null, listeners: {},
-    addEventListener(event, handler) { this.listeners[event] = handler },
-    get options() { return this.children.filter(child => child.tag === 'option') },
-  }
-}
-const renderer = vue.createRenderer({
-  createElement: tag => node(tag), createText: text => node('', text), createComment: () => node(),
-  setText: (item, text) => { item.text = text },
-  setElementText: (item, text) => { item.children = []; item.text = text },
-  patchProp: (item, key, _, value) => { item.props[key] = value },
-  insert(item, parent, anchor = null) {
-    if (item.parent) item.parent.children.splice(item.parent.children.indexOf(item), 1)
-    const index = anchor ? parent.children.indexOf(anchor) : -1
-    parent.children.splice(index < 0 ? parent.children.length : index, 0, item)
-    item.parent = parent
-  },
-  remove(item) { if (item.parent) item.parent.children.splice(item.parent.children.indexOf(item), 1) },
-  parentNode: item => item.parent,
-  nextSibling: item => item.parent?.children[item.parent.children.indexOf(item) + 1] ?? null,
-})
-const all = root => [root, ...root.children.flatMap(all)]
-const hasClass = (item, name) => String(item.props.class ?? '').split(' ').includes(name)
-const textOf = item => item.text + item.children.map(textOf).join('')
-function mount({ parents = {}, selectedId = 'a', edits = [] } = {}) {
-  const jobs = ['a', 'b', 'c', ...edits].map((job_id, index) => ({ job_id, created_at: `2026-01-01T00:00:0${index}Z`, status: 'succeeded', model: 'm', size: 'auto', media_state: 'available', image_url: `/image/${job_id}` }))
-  const props = vue.reactive({ jobs, parents, selectedId, membership: { a: 'one', b: 'one', c: 'two', 'b-edit': 'edit-submission' }, busy: false, pending: false, editModel: 'm', editCost: 5, editSize: 'auto', maxLength: 4000, canvases: [] })
+const Component = compileComponent(filename, modules)
+function mount({ parents = {}, selectedId = 'a', ids = ['a', 'b', 'c'], edits = [], overrides = {} } = {}) {
+  const jobs = [...ids, ...edits].map((job_id, index) => ({ job_id, created_at: `2026-01-01T00:00:0${index}Z`, prompt: '绘图描述', status: 'succeeded', model: 'm', size: 'auto', credit_cost: 5, billing_status: 'settled', media_state: 'available', image_url: `/image/${job_id}`, ...overrides[job_id] }))
+  const props = vue.reactive({ jobs, parents, selectedId, drafting: false, membership: { a: 'one', b: 'one', c: 'two', 'b-edit': 'edit-submission' }, busy: false, pending: false, editModel: 'm', editCost: 5, editSize: 'auto', maxLength: 4000, canvases: [] })
   const selected = []
-  const app = renderer.createApp({ setup: () => () => vue.h(Component, { ...props, onSelect: id => { selected.push(id); props.selectedId = id } }) })
+  const events = []
+  const app = renderer.createApp({ setup: () => () => vue.h(Component, { ...props, onSelect: id => { selected.push(id); props.selectedId = id; props.drafting = false }, onNew: () => { props.drafting = true }, onRetry: job => events.push(['retry', job.job_id]), onDismiss: id => events.push(['dismiss', id]) }) })
   const root = node('root')
   app.mount(root)
-  return { root, props, selected, app, find: cls => all(root).filter(item => hasClass(item, cls)) }
+  return { root, props, selected, events, app, find: cls => all(root).filter(item => hasClass(item, cls)) }
 }
 
 test('results render separate batches of peer candidate cards without version labels before an edit', async () => {
   const view = mount()
   try {
     const batches = view.find('candidate-batch')
-    assert.equal(batches.length, 2)
-    assert.deepEqual(batches.map(batch => all(batch).filter(item => hasClass(item, 'candidate-card')).length), [1, 2])
+    assert.equal(batches.length, 1, 'only the selected batch appears in the workspace')
+    assert.equal(view.find('drawing-tab').length, 2, 'other batches remain available in recent drawings')
+    assert.deepEqual(batches.map(batch => all(batch).filter(item => hasClass(item, 'candidate-card')).length), [2])
     assert.equal(view.find('version-history').length, 0)
     assert.doesNotMatch(textOf(view.root), /V\d/)
     const second = view.find('candidate-card').find(item => item.props['aria-label'].includes('第 1 批，候选图 2'))
@@ -81,7 +50,7 @@ test('results render separate batches of peer candidate cards without version la
 test('selecting an edited candidate shows only its version branch and preserves selection events', async () => {
   const view = mount({ parents: { 'b-edit': 'b', 'b-fork': 'b' }, selectedId: 'b-edit', edits: ['b-edit', 'b-fork'] })
   try {
-    assert.equal(view.find('candidate-card').length, 3, 'edits cannot become extra candidates or batches')
+    assert.equal(view.find('candidate-card').length, 2, 'edits cannot become extra candidates or batches')
     const history = view.find('version-history')[0]
     const versionButtons = history.children.filter(item => item.tag === 'button')
     assert.equal(versionButtons.length, 3)
@@ -95,10 +64,103 @@ test('selecting an edited candidate shows only its version branch and preserves 
     await vue.nextTick()
     assert.equal(view.find('version-history').length, 0, 'a peer without edits must not inherit another candidate’s branch')
     assert.match(textOf(view.find('version-title')[0]), /第 1 批 · 候选图 1/)
-    const anotherBatch = view.find('candidate-card').find(item => item.props['aria-label'].includes('第 2 批'))
+    const anotherBatch = view.find('drawing-tab').find(item => item.props['aria-label'].includes('第 2 次绘图'))
     anotherBatch.props.onClick()
     await vue.nextTick()
-    assert.match(textOf(view.find('version-title')[0]), /第 2 批 · 候选图 1/)
+    assert.equal(view.find('version-title').length, 0)
+    assert.equal(all(view.find('version-preview')[0]).find(item => item.tag === 'img').props.alt, '生成结果')
     assert.equal(view.find('version-history').length, 0)
+    assert.equal(view.find('candidate-card').length, 0)
+  } finally { view.app.unmount() }
+})
+
+test('a single image is displayed once as a result without candidates or versions', () => {
+  const view = mount({ ids: ['a'] })
+  try {
+    assert.equal(view.find('candidate-card').length, 0)
+    assert.equal(view.find('version-history').length, 0)
+    assert.equal(view.find('version-title').length, 0)
+    assert.equal(all(view.root).filter(item => item.tag === 'img').length, 1)
+    assert.match(textOf(view.find('batch-overview')[0]), /单张作品/)
+    assert.doesNotMatch(textOf(view.root), /候选|V\d|修改分支/)
+    assert.equal(view.find('drawing-tab')[0].props['aria-label'], '查看第 1 次绘图，1 张图片')
+  } finally { view.app.unmount() }
+})
+
+test('editing a single image reveals its modification history without introducing candidates', async () => {
+  const view = mount({ ids: ['a'], edits: ['a-edit'], parents: { 'a-edit': 'a' }, selectedId: 'a-edit' })
+  try {
+    assert.equal(view.find('candidate-card').length, 0)
+    assert.equal(view.find('drawing-tab').length, 1)
+    assert.equal(view.find('version-history').length, 1)
+    assert.match(textOf(view.find('version-title')[0]), /V2/)
+    assert.match(textOf(view.find('version-history-heading')[0]), /修改记录/)
+    assert.doesNotMatch(textOf(view.root), /候选/)
+    const original = all(view.find('version-history')[0]).find(item => item.tag === 'button')
+    original.props.onClick()
+    await vue.nextTick()
+    assert.match(textOf(view.find('version-title')[0]), /原图 · V1/)
+  } finally { view.app.unmount() }
+})
+
+test('progress and billing appear once above candidates and exclude unrelated batches', () => {
+  const view = mount({ overrides: { b: { status: 'processing', billing_status: 'reserved' }, c: { status: 'failed', billing_status: 'refunded' } } })
+  try {
+    const progress = all(view.root).filter(item => item.props.role === 'progressbar')
+    assert.equal(progress.length, 1)
+    assert.equal(progress[0].props['aria-valuemax'], 2)
+    assert.equal(progress[0].props['aria-valuenow'], 1)
+    assert.ok(all(view.root).indexOf(progress[0]) < all(view.root).indexOf(view.find('candidate-grid')[0]))
+    const overview = textOf(view.find('batch-overview')[0])
+    assert.match(overview, /已生成 1 \/ 2 张/)
+    assert.match(overview, /已预扣 5 丝/)
+    assert.match(overview, /已结算 5 丝/)
+    assert.doesNotMatch(overview, /已退回|任务详情与计费/)
+    assert.equal(view.find('current-job').length, 0)
+  } finally { view.app.unmount() }
+})
+
+test('failed results retain refund details and retry/dismiss actions in the selected result', () => {
+  const view = mount({ selectedId: 'b', overrides: { b: { status: 'failed', billing_status: 'refunded', error_message: '上游超时' } } })
+  try {
+    assert.match(textOf(view.find('batch-billing')[0]), /已退回 5 丝/)
+    assert.equal(view.find('batch-progress')[0].props['aria-valuenow'], 2)
+    const failure = view.find('version-failure')[0]
+    assert.match(textOf(failure), /上游超时.*5 丝已全额退回余额/)
+    const buttons = all(failure).filter(item => item.tag === 'button')
+    buttons[0].props.onClick()
+    buttons[1].props.onClick()
+    assert.deepEqual(view.events, [['retry', 'b'], ['dismiss', 'b']])
+  } finally { view.app.unmount() }
+})
+
+test('a running edit contributes to its original batch progress and not a new drawing tab', () => {
+  const view = mount({ parents: { 'b-edit': 'b' }, selectedId: 'b-edit', edits: ['b-edit'], overrides: { 'b-edit': { status: 'queued', billing_status: 'reserved' } } })
+  try {
+    assert.equal(view.find('drawing-tab').length, 2)
+    assert.equal(view.find('batch-progress')[0].props['aria-valuemax'], 3)
+    assert.equal(view.find('batch-progress')[0].props['aria-valuenow'], 2)
+    assert.match(textOf(view.find('batch-overview')[0]), /1 次修改.*1 张生成中/)
+  } finally { view.app.unmount() }
+})
+
+test('new drawing preserves recent batches and returning does not reopen the previous edit form', async () => {
+  const view = mount()
+  try {
+    const edit = view.find('version-actions')[0].children.find(item => item.tag === 'button')
+    edit.props.onClick()
+    await vue.nextTick()
+    assert.equal(view.find('version-editor').length, 1)
+    const jobs = [...view.props.jobs]
+    view.find('drawing-next')[0].children.find(item => item.tag === 'button').props.onClick()
+    await vue.nextTick()
+    assert.equal(view.find('candidate-card').length, 0)
+    assert.equal(view.find('version-editor').length, 0)
+    assert.equal(view.find('drawing-tab').length, 3)
+    assert.deepEqual(view.props.jobs, jobs, 'starting a drawing cannot delete or cancel existing jobs')
+    view.find('drawing-tab').find(item => item.props['aria-label']?.includes('第 1 批')).props.onClick()
+    await vue.nextTick()
+    assert.equal(view.find('candidate-card').length, 2)
+    assert.equal(view.find('version-editor').length, 0)
   } finally { view.app.unmount() }
 })

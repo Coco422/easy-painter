@@ -13,6 +13,16 @@ test('versions retain independent branches from older images and sort by creatio
 
 const draws = ids => ids.map((job_id, index) => ({ job_id, created_at: `2026-01-01T00:00:${String(index).padStart(2, '0')}Z`, prompt: 'same prompt', status: 'succeeded' }))
 
+test('single-image labels remain results until actual edits introduce version numbers', () => {
+  const original = creationVersionRows(draws(['a']), { a: null }, { a: 'single' })
+  assert.equal(original[0].candidateCount, 1)
+  assert.equal(original[0].label, '生成结果')
+  assert.doesNotMatch(original[0].label, /候选|V\d/)
+  const edited = creationVersionRows(draws(['a', 'edit']), { a: null, edit: 'a' }, { a: 'single', edit: 'edit-submission' })
+  assert.deepEqual(edited.map(row => row.label), ['生成结果', 'V2'])
+  assert.equal(creationResultBatches(edited).length, 1)
+})
+
 test('parallel draws are peer candidates and identical prompts in later batches stay separate', () => {
   const jobs = draws(['a', 'b', 'c', 'd'])
   const rows = creationVersionRows(jobs.toReversed(), { a: null, b: null, c: null, d: null }, { a: 'one', b: 'one', c: 'two', d: 'two' })

@@ -88,7 +88,8 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 ### Creation Workspace
 
 - `/create` tracks up to 100 version ancestry links per account in browser localStorage (`easy-painter:creation-versions:<ownerId>`), restoring job details through existing authorized APIs. This is local workspace metadata, not a server-side conversation or a media-retention extension.
-- Explicit browser-local submission batches display independent candidate images side by side. Only result edits form version branches within a candidate (original V1, edits V2+); edits remain in the root candidate's batch. Missing batch membership never merges identical prompts.
+- Explicit browser-local submission batches display independent candidate images side by side for multi-image runs. A single image displays directly as a result, with no candidate numbering or duplicate thumbnail. Only actual result edits reveal version history (original V1, edits V2+); edits remain in the root image's batch. Missing batch membership never merges identical prompts.
+- The result workspace shows one selected batch, with recent-batch navigation and a single progress/billing summary above candidates. Progress counts actual finished jobs (including failures); edits contribute to their original batch. New Drawing resets description, selected references and presets while retaining model/size/count, existing results, polling and unknown-revision confirmation. Switching results cannot overwrite the new draft.
 - Result edits fetch the selected original, stage it as a new reference without silent eviction, and submit one job. Persist the exact pending request and idempotency key before POST; unknown responses require explicit confirmation with the same request after refresh. Account/session changes invalidate in-flight UI updates.
 - Adding a result to a new or existing canvas first saves the authorized image Blob through existing IndexedDB assets/projects, with capacity and revision checks. Append an image, provenance note and connected, unsubmitted generation node; never replay the original job or auto-submit a paid run.
 
@@ -168,7 +169,7 @@ See `docs/creation-workspace.md` for usage and local mock preview.
 
 - `App.vue` — Router shell with persistent header
 - `router.ts` — Vue Router config
-- `pages/CreatePage.vue` — Two-column creation workspace, presets, result selection and version branching. `useCreationVersions.ts` owns account-scoped ancestry and safe edit requests; `CreationVersions.vue` presents results. Accepted jobs retain browser-local batch membership, per-job polling and billing details; the waiting panel is shared per batch.
+- `pages/CreatePage.vue` — Two-column creation workspace, presets, New Drawing and result selection. `useCreationVersions.ts` owns account-scoped ancestry and safe edit requests; `CreationVersions.vue` presents recent-batch navigation, progress/billing, candidates and version branches. Accepted jobs retain browser-local batch membership and per-job polling.
 - `pages/InspirationPage.vue` — Permanent community feed
 - `pages/ArtworkLibraryPage.vue` — History, personal/shared portfolio and favorites
 - `components/ArtworkModal.vue` — Gallery membership, favorites, explicit community consent and lifecycle actions

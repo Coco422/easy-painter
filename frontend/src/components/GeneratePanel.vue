@@ -43,6 +43,7 @@ const {
   uploadAndSelect,
   select,
   deselect,
+  clearSelected,
 } = useReferenceImages()
 
 const promptLength = computed(() => props.prompt.length)
@@ -74,7 +75,25 @@ function applyTemplate(id: string) {
     presetNotice.value = `已选择${item.label}，保留了你写的描述。`
   }
 }
-defineExpose({ applyTemplate })
+const promptInput = ref<HTMLTextAreaElement | null>(null)
+const isUploading = computed(() => uploading.value || uploadingBatch.value)
+function resetDraft() {
+  if (props.submitting || isUploading.value) return false
+  template.value = 'free'
+  style.value = 'auto'
+  language.value = 'auto'
+  submissionError.value = ''
+  presetNotice.value = ''
+  referenceError.value = ''
+  drawerOpen.value = false
+  sizePickerOpen.value = false
+  clearSelected()
+  emit('update:prompt', '')
+  emit('update:mode', 'text')
+  return true
+}
+function focusPrompt() { promptInput.value?.focus({ preventScroll: true }) }
+defineExpose({ applyTemplate, resetDraft, focusPrompt, isUploading })
 const sizeOptions: Array<{ value: ImageSize; label: string; detail: string }> = [
   { value: 'auto', label: '自动', detail: '由渠道决定' },
   { value: '1024x1024', label: '方图', detail: '1024 × 1024' },
@@ -281,6 +300,7 @@ watch([() => props.prompt, () => props.mode, template, style, language, selected
         @drop.prevent="handleDrop"
       >
         <textarea
+          ref="promptInput"
           id="creation-prompt"
           :value="prompt"
           :disabled="submitting"

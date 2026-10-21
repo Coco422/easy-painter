@@ -182,7 +182,7 @@ export function useCreationVersions(options: {
       const item = await makeAsset(owner, blob, `创作-${job.job_id}.png`)
       assertOwner()
       const row = creationVersionRows(options.jobs.value, history.value.parents, options.membership.value).find(row => row.job.job_id === job.job_id)
-      const label = row ? `第 ${row.batchNumber} 批 · ${row.label}` : '创作图片'
+      const label = row ? `第 ${row.batchNumber} ${row.candidateCount > 1 ? '批' : '次绘图'} · ${row.label}` : '创作图片'
       const project = targetId ? await getProject(owner, targetId) : newProject(owner, label)
       assertOwner()
       if (!project) throw new Error('目标画布已移除，请重新选择。')
