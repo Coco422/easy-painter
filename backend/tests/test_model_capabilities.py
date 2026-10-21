@@ -53,6 +53,184 @@ def test_public_models_json_allows_explicit_reference_image_capability():
     assert model["supported_sizes"] == ["1024x1024"]
 
 
+def test_additional_upstreams_json_parses_provider_and_model_config():
+    settings = Settings(
+        public_models_json='[{"id":"primary-image","enabled":true}]',
+        additional_upstreams_json=(
+            '[{"name":"第三方","base_url":"https://images.example.com/v1",'
+            '"api_key":"test-key","models":[{"id":"image-model",'
+            '"supports_reference_image":true,"credit_cost":3}]}]'
+        ),
+    )
+
+    [provider] = settings.additional_upstreams
+
+    assert provider["name"] == "第三方"
+    assert provider["models"][0]["id"] == "image-model"
+
+
+def test_additional_upstreams_json_rejects_invalid_provider_shape():
+    import pytest
+
+    with pytest.raises(ValueError, match="JSON array"):
+        Settings(additional_upstreams_json='{"name":"not-an-array"}').additional_upstreams
+
+    with pytest.raises(ValueError, match="models"):
+        Settings(additional_upstreams_json=(
+            '[{"name":"third-party","base_url":"https://third-party.example.com/v1",'
+            '"api_key":"test-key"}]'
+        )).additional_upstreams
+
+
+def test_additional_upstream_seed_is_additive_and_idempotent(monkeypatch):
+    import json
+    from sqlalchemy import create_engine, select, func
+    from sqlalchemy.orm import Session
+    from app.db.base import Base
+    from app.db import init_db
+    from app.models.upstream_provider import UpstreamProvider
+    from app.models.model_config import ModelConfig
+
+    engine = create_engine('sqlite+pysqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    monkeypatch.setattr(init_db, 'SessionLocal', lambda: session)
+    monkeypatch.setattr(
+        init_db,
+        'get_settings',
+        lambda: Settings(
+            upstream_base_url='https://self-hosted.example.com/v1',
+            upstream_api_key='self-hosted-key',
+            public_models_json='[{"id":"local-image","label":"自建模型"}]',
+            additional_upstreams_json=json.dumps([{
+                'name': '第三方',
+                'base_url': 'https://third-party.example.com/v1',
+                'api_key': 'third-party-key',
+                'models': [{'id': 'remote-image', 'label': '第三方模型', 'credit_cost': 3}],
+            }]),
+        ),
+    )
+    try:
+        init_db._seed_providers_and_models()
+        init_db._seed_providers_and_models()
+
+        providers = session.scalars(select(UpstreamProvider).order_by(UpstreamProvider.name)).all()
+        models = session.scalars(select(ModelConfig).order_by(ModelConfig.id)).all()
+        assert session.scalar(select(func.count()).select_from(UpstreamProvider)) == 2
+        assert session.scalar(select(func.count()).select_from(ModelConfig)) == 2
+        provider_by_name = {provider.name: provider for provider in providers}
+        model_by_id = {model.id: model for model in models}
+        assert provider_by_name['chatgpt2api（自建）'].base_url == 'https://self-hosted.example.com/v1'
+        assert model_by_id['local-image'].provider_id == provider_by_name['chatgpt2api（自建）'].id
+        assert model_by_id['remote-image'].provider_id == provider_by_name['第三方'].id
+        assert model_by_id['remote-image'].credit_cost == 3
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_syncing_public_models_disables_unlisted_rows_and_rebinds_configured_model(monkeypatch):
+    import json
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+    from app.db.base import Base
+    from app.db import init_db
+    from app.models.upstream_provider import UpstreamProvider
+    from app.models.model_config import ModelConfig
+
+    engine = create_engine('sqlite+pysqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    old_provider = UpstreamProvider(name='旧渠道', base_url='https://old.example.com/v1', api_key='old-key')
+    third_party = UpstreamProvider(name='第三方', base_url='https://third-party.example.com/v1', api_key='old-third-party-key')
+    session.add_all([old_provider, third_party])
+    session.flush()
+    session.add_all([
+        ModelConfig(id='legacy-model', provider_id=old_provider.id, label='旧模型', enabled=True),
+        ModelConfig(id='gpt-image-2', provider_id=third_party.id, label='重复模型', enabled=True),
+    ])
+    session.commit()
+    monkeypatch.setattr(init_db, 'SessionLocal', lambda: session)
+    monkeypatch.setattr(
+        init_db,
+        'get_settings',
+        lambda: Settings(
+            upstream_base_url='https://self-hosted.example.com/v1',
+            upstream_api_key='self-hosted-key',
+            upstream_provider_name='chatgpt2api（自建）',
+            public_models_json=(
+                '[{"id":"primary-image","label":"主用绘图模型",'
+                '"enabled":true,"upstream_model_id":"chatgpt2api-image-model",'
+                '"supports_reference_image":true,"credit_cost":2}]'
+            ),
+            additional_upstreams_json=json.dumps([{
+                'name': '第三方',
+                'base_url': 'https://third-party.example.com/v1',
+                'api_key': 'third-party-key',
+                'models': [{
+                    'id': 'primary-image',
+                    'upstream_model_id': 'gpt-image-2',
+                    'enabled': True,
+                    'fallback_for': 'primary-image',
+                    'supports_reference_image': True,
+                }],
+            }]),
+            sync_public_models_from_env=True,
+        ),
+    )
+    try:
+        init_db._seed_providers_and_models()
+        configured = session.get(ModelConfig, 'primary-image')
+        legacy = session.get(ModelConfig, 'legacy-model')
+        providers = session.scalars(select(UpstreamProvider)).all()
+        primary = next(provider for provider in providers if provider.name == 'chatgpt2api（自建）')
+
+        assert configured.provider_id == primary.id
+        assert next(provider for provider in providers if provider.name == '旧渠道').base_url == 'https://old.example.com/v1'
+        assert configured.enabled is True
+        assert legacy.enabled is False
+        assert session.scalar(select(ModelConfig.id).where(ModelConfig.enabled.is_(True))) == 'primary-image'
+        assert len(providers) == 3
+        assert session.get(ModelConfig, 'primary-image').provider_id != next(
+            provider for provider in providers if provider.name == '第三方'
+        ).id
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_additional_upstream_model_can_be_configured_as_fallback_only():
+    settings = Settings(
+        public_models_json='[{"id":"primary-image","enabled":true}]',
+        additional_upstreams_json=(
+            '[{"name":"第三方","base_url":"https://images.example.com/v1",'
+            '"api_key":"test-key","models":[{"id":"primary-image",'
+            '"upstream_model_id":"gpt-image-2","enabled":true,'
+            '"fallback_for":"primary-image"}]}]'
+        ),
+    )
+
+    [provider] = settings.additional_upstreams
+    [model] = provider["models"]
+
+    assert model["fallback_for"] == "primary-image"
+    assert model["upstream_model_id"] == "gpt-image-2"
+
+
+def test_primary_model_config_can_map_to_a_provider_specific_model_name():
+    settings = Settings(
+        public_models_json=(
+            '[{"id":"primary-image","upstream_model_id":"chatgpt2api-image-model",'
+            '"enabled":true}]'
+        ),
+    )
+
+    [model] = settings.public_models
+
+    assert model["id"] == "primary-image"
+    assert model["upstream_model_id"] == "chatgpt2api-image-model"
+
+
 def test_default_upstream_timeout_allows_slow_image_models():
     assert Settings().upstream_timeout_seconds == 700
 

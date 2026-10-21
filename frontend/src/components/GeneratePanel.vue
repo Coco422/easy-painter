@@ -389,7 +389,7 @@ watch([() => props.prompt, () => props.mode, template, style, language, selected
           :disabled="submitting || uploading || uploadingBatch"
           @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
         >
-          <option v-for="model in models" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
+          <option v-for="model in models.filter((item) => item.enabled)" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
             {{ model.label }}{{ mode !== 'text' && model.supports_reference_image === false ? '（不支持参考图）' : '' }}（{{ model.credit_cost }} 丝/张{{ model.base_credit_cost !== model.credit_cost ? `，原价 ${model.base_credit_cost} 丝` : '' }}）
           </option>
         </select>

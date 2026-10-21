@@ -17,7 +17,12 @@ from app.services.job_lifecycle import (
     mark_generation_succeeded,
     update_retry_message,
 )
-from app.services.model_service import load_provider_by_id, load_provider_for_model
+from app.services.model_service import (
+    load_failover_providers_for_model,
+    load_primary_upstream_model_id,
+    load_provider_by_id,
+    load_provider_for_model,
+)
 from app.services.media_lifecycle import enqueue_deletion
 from app.services.reference_images import job_reference_images
 from app.services.storage import MinioStorageService, StorageError
@@ -48,6 +53,62 @@ celery_app.conf.update(
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _generate_with_failover(
+    db,
+    *,
+    job: GenerationJob,
+    provider_config: dict,
+    reference_images: list[ReferenceImageForUpstream],
+):
+    request = {
+        "prompt": job.prompt,
+        "model": load_primary_upstream_model_id(job.model),
+        "size": job.size,
+        "aspect_ratio": job.aspect_ratio,
+        "reference_images": reference_images,
+    }
+    try:
+        return UpstreamImageClient(provider_config).generate_image(**request)
+    except UpstreamServiceError as primary_error:
+        if not primary_error.failover_safe:
+            raise
+
+        fallbacks = load_failover_providers_for_model(db, job.model)
+        if not fallbacks:
+            raise
+
+        last_error = primary_error
+        for fallback in fallbacks:
+            if len(reference_images) > fallback.max_reference_images:
+                logger.info(
+                    "Skipping fallback provider=%s because it supports at most %s reference images.",
+                    fallback.name,
+                    fallback.max_reference_images,
+                )
+                continue
+            logger.warning(
+                "Primary upstream failed with a known unsuccessful response; trying configured fallback provider=%s model=%s.",
+                fallback.name,
+                fallback.model_id,
+            )
+            try:
+                return UpstreamImageClient(fallback.config.as_dict()).generate_image(
+                    **{**request, "model": fallback.model_id}
+                )
+            except UpstreamServiceError as fallback_error:
+                last_error = fallback_error
+                logger.warning(
+                    "Fallback upstream failed provider=%s model=%s failover_safe=%s.",
+                    fallback.name,
+                    fallback.model_id,
+                    fallback_error.failover_safe,
+                )
+                if not fallback_error.failover_safe:
+                    raise
+
+        raise last_error
 
 
 @celery_app.task(name="app.generate_image_task", bind=True, max_retries=2)
@@ -95,11 +156,10 @@ def generate_image_task(self, job_id: str) -> None:
                     image_bytes=stored_reference.image_bytes,
                 ))
 
-            result = UpstreamImageClient(provider_config.as_dict()).generate_image(
-                prompt=job.prompt,
-                model=job.model,
-                size=job.size,
-                aspect_ratio=job.aspect_ratio,
+            result = _generate_with_failover(
+                db,
+                job=job,
+                provider_config=provider_config.as_dict(),
                 reference_images=reference_images,
             )
             stored = storage.upload_generated_image(

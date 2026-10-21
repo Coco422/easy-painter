@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.model_config import ModelConfig
 from app.models.upstream_provider import UpstreamProvider
 
@@ -34,6 +35,14 @@ class ProviderConfig:
             "default_background": self.default_background,
             "default_moderation": self.default_moderation,
         }
+
+
+@dataclass(slots=True)
+class FailoverProvider:
+    name: str
+    config: ProviderConfig
+    model_id: str
+    max_reference_images: int = 1
 
 
 def load_models_from_db(db: Session) -> list[dict[str, str | bool | list[str] | int]]:
@@ -75,3 +84,58 @@ def load_provider_by_id(db: Session, provider_id: str) -> ProviderConfig | None:
         default_background=provider.default_background,
         default_moderation=provider.default_moderation,
     )
+
+
+def load_primary_upstream_model_id(model_id: str) -> str:
+    for model in get_settings().public_models:
+        if model["id"] == model_id:
+            return str(model.get("upstream_model_id", model_id))
+    return model_id
+
+
+def load_failover_providers_for_model(db: Session, model_id: str) -> list[FailoverProvider]:
+    settings = get_settings()
+    model_row = db.get(ModelConfig, model_id)
+    primary_provider = db.get(UpstreamProvider, model_row.provider_id) if model_row else None
+    primary_url = primary_provider.base_url.rstrip("/") if primary_provider else ""
+    result: list[FailoverProvider] = []
+
+    for provider_config in settings.additional_upstreams:
+        if primary_url and provider_config["base_url"].rstrip("/") == primary_url:
+            continue
+        for model_config in provider_config["models"]:
+            if (
+                model_config.get("fallback_for") != model_id
+                or not model_config.get("enabled", True)
+            ):
+                continue
+
+            provider = db.scalar(
+                select(UpstreamProvider).where(UpstreamProvider.base_url == provider_config["base_url"])
+            )
+            if provider:
+                config = load_provider_by_id(db, provider.id)
+            else:
+                config = ProviderConfig(
+                    base_url=provider_config["base_url"],
+                    api_key=provider_config["api_key"],
+                    timeout_seconds=int(provider_config.get("timeout_seconds", settings.upstream_timeout_seconds)),
+                    default_size=provider_config.get("default_size", settings.upstream_default_size),
+                    default_quality=provider_config.get("default_quality", settings.upstream_default_quality),
+                    default_output_format=provider_config.get("default_output_format", settings.upstream_default_output_format),
+                    default_output_compression=int(provider_config.get("default_output_compression", settings.upstream_default_output_compression)),
+                    default_background=provider_config.get("default_background", settings.upstream_default_background),
+                    default_moderation=provider_config.get("default_moderation", settings.upstream_default_moderation),
+                )
+            if config:
+                result.append(FailoverProvider(
+                    name=provider_config["name"],
+                    config=config,
+                    model_id=str(model_config.get("upstream_model_id", model_id)),
+                    max_reference_images=(
+                        max(1, int(model_config.get("max_reference_images", 1)))
+                        if model_config.get("supports_reference_image", False)
+                        else 0
+                    ),
+                ))
+    return result

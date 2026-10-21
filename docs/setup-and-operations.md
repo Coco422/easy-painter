@@ -19,8 +19,18 @@ cp .env.example .env
 ```
 
 将 `.env` 中的 `UPSTREAM_BASE_URL` 和 `UPSTREAM_API_KEY` 配置为实际使用的私有上游地址与密钥，不要把真实值写进前端或提交到仓库。
-模型下拉列表、参考图能力、单次参考图上限和尺寸限制以管理后台的模型配置为准。`PUBLIC_MODELS_JSON` 用于首次初始化与数据库读取失败时的回退；修改它不会覆盖已经入库的模型。
+模型下拉列表、参考图能力、单次参考图上限和尺寸限制以管理后台的模型配置为准。`PUBLIC_MODELS_JSON` 用于首次初始化与数据库读取失败时的回退；修改它不会覆盖已经入库的模型。 `upstream_model_id` 可在公共模型 ID 与主 chatgpt2api 实际模型名不同的时候使用。若要将现有数据库收敛到唯一公共模型并禁用旧模型，设置 `SYNC_PUBLIC_MODELS_FROM_ENV=true` 后重启 API/worker；该操作只禁用，不删除历史记录。
 部分绘图模型生成时间可能达到 30 到 600 秒，生产环境的 `UPSTREAM_TIMEOUT_SECONDS` 应保持在 700 左右。
+
+需要同时接入多个 OpenAI 兼容渠道时，可在 `.env` 设置 `ADDITIONAL_UPSTREAMS_JSON`。API 启动时只新增不存在的渠道和模型，不覆盖现有数据库配置；公共模型 ID 在数据库中全局唯一。备用映射可复用公共模型 ID，并设置 `fallback_for` 指向该模型，这样只保留一个前台选项。渠道凭证仅放在私有 `.env`，不能提交。渠道返回 `/v1/models` 不代表每个模型都兼容本站调用的 `/images/generations` 和 `/images/edits`，需要分别实测生成和参考图编辑；渠道价格也不自动换算为本站丝数。
+
+示例：
+
+```dotenv
+ADDITIONAL_UPSTREAMS_JSON=[{"name":"ggwk1（第一第三方）","base_url":"https://www.ggwk1.online/v1","api_key":"replace-with-private-key","timeout_seconds":700,"models":[{"id":"gpt-image-2","label":"备用模型","upstream_model_id":"gpt-image-2","fallback_for":"gpt-image-2","enabled":true,"supports_reference_image":true,"max_reference_images":1,"supported_sizes":[],"credit_cost":2}]}]
+```
+
+该示例沿用本站现有默认 2 丝/张；这与渠道自身定价是两套计费。备用映射不会创建重复的公共模型；独立模型 ID 被其他渠道占用时会保留原配置并跳过冲突项，后台可查看日志。主渠道连接失败或明确返回失败响应时才立即切换备用；读取超时或成功响应解析失败不立即切换，以减少结果不明时重复调用的风险。参考图数量超过备用配置上限时会跳过该备用；示例只启用已验证的单参考图备用能力。
 提示词输入不在前端截断，后端通过 `PROMPT_MAX_LENGTH` 做硬限制，默认 4000 字符。
 同一账号重复上传字节内容一致的参考图会复用仍有效的记录，不重复占用存储和图库配额，不延长有效期。
 `GENERATION_JOB_STALE_SECONDS` 与 `GENERATION_QUEUE_STALE_SECONDS` 分别控制执行中、排队中任务的 watchdog 超时。Dispatcher 每 2 秒投递 transactional outbox，并周期执行卡单退款和账务对账；这些间隔可通过 `OUTBOX_*`、`WATCHDOG_INTERVAL_SECONDS` 与 `RECONCILIATION_INTERVAL_SECONDS` 调整。

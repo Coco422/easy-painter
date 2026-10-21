@@ -13,10 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class UpstreamServiceError(RuntimeError):
-    def __init__(self, user_message: str, *, retryable: bool) -> None:
+    def __init__(self, user_message: str, *, retryable: bool, failover_safe: bool = False) -> None:
         super().__init__(user_message)
         self.user_message = user_message
         self.retryable = retryable
+        # Read timeouts and malformed successful responses can hide an already
+        # completed billable request. The client only fails over immediately when
+        # it receives an unsuccessful HTTP response or a pre-connect failure.
+        self.failover_safe = failover_safe
 
 
 @dataclass(slots=True)
@@ -81,9 +85,17 @@ class UpstreamImageClient:
             with httpx.Client(timeout=timeout) as client:
                 response = client.post(endpoint, **request_kwargs)
         except httpx.TimeoutException as exc:
-            raise UpstreamServiceError("生成服务响应超时，请稍后再试。", retryable=True) from exc
+            raise UpstreamServiceError(
+                "生成服务响应超时，请稍后再试。",
+                retryable=True,
+                failover_safe=isinstance(exc, httpx.ConnectTimeout),
+            ) from exc
         except httpx.HTTPError as exc:
-            raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True) from exc
+            raise UpstreamServiceError(
+                "生成服务暂时不可用，请稍后再试。",
+                retryable=True,
+                failover_safe=isinstance(exc, httpx.ConnectError),
+            ) from exc
 
         if response.status_code == 429:
             # OpenAI-compatible upstreams report an exhausted or cooling-down image
@@ -94,7 +106,7 @@ class UpstreamImageClient:
                 model,
                 self._error_snippet(response),
             )
-            raise UpstreamServiceError("生成服务当前额度不足，请稍后再试。", retryable=False)
+            raise UpstreamServiceError("生成服务当前额度不足，请稍后再试。", retryable=False, failover_safe=True)
         if response.status_code in (401, 403):
             # Wrong/revoked key, or a model the upstream account is not allowed to use.
             logger.error(
@@ -103,7 +115,7 @@ class UpstreamImageClient:
                 model,
                 self._error_snippet(response),
             )
-            raise UpstreamServiceError("生成服务配置异常，请联系管理员。", retryable=False)
+            raise UpstreamServiceError("生成服务配置异常，请联系管理员。", retryable=False, failover_safe=True)
         if response.status_code >= 500:
             logger.warning(
                 "Upstream image generation failed with %s for model=%s size=%s: %s",
@@ -112,7 +124,7 @@ class UpstreamImageClient:
                 request_payload["size"],
                 self._error_snippet(response),
             )
-            raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True)
+            raise UpstreamServiceError("生成服务暂时不可用，请稍后再试。", retryable=True, failover_safe=True)
         if response.status_code >= 400:
             logger.warning(
                 "Upstream image generation rejected request with %s for model=%s size=%s: %s",
@@ -121,7 +133,7 @@ class UpstreamImageClient:
                 request_payload["size"],
                 self._error_snippet(response),
             )
-            raise UpstreamServiceError("生成请求未能完成，请稍后调整提示词再试。", retryable=False)
+            raise UpstreamServiceError("生成请求未能完成，请稍后调整提示词再试。", retryable=False, failover_safe=True)
 
         try:
             response_payload = response.json()

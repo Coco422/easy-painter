@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, SecretStr
@@ -156,6 +156,9 @@ class Settings(BaseSettings):
     upstream_base_url: str = ""
     upstream_api_key: str = ""
     upstream_timeout_seconds: int = 700
+    upstream_provider_name: str = "chatgpt2api（自建）"
+    additional_upstreams_json: str | None = None
+    sync_public_models_from_env: bool = False
     github_api_token: str = ""
 
     default_model: str = "gpt-image-2"
@@ -206,12 +209,46 @@ class Settings(BaseSettings):
                         str(size)
                         for size in item.get("supported_sizes", MODEL_SUPPORTED_SIZES.get(item["id"], []))
                     ],
+                    "upstream_model_id": str(item.get("upstream_model_id", item["id"])),
                     "max_reference_images": max(1, int(item.get("max_reference_images", 5))),
                     "credit_cost": max(1, int(item.get("credit_cost", 2))),
                 }
                 for item in data
             ]
         return DEFAULT_PUBLIC_MODELS
+
+    @property
+    def additional_upstreams(self) -> list[dict[str, Any]]:
+        if not self.additional_upstreams_json:
+            return []
+
+        data = json.loads(self.additional_upstreams_json)
+        if not isinstance(data, list):
+            raise ValueError("ADDITIONAL_UPSTREAMS_JSON must be a JSON array.")
+        for provider in data:
+            if not isinstance(provider, dict):
+                raise ValueError("Each additional upstream must be an object.")
+            for field in ("name", "base_url", "api_key", "models"):
+                if field not in provider:
+                    raise ValueError(f"Each additional upstream must include {field}.")
+            if not all(str(provider[field]).strip() for field in ("name", "base_url", "api_key")):
+                raise ValueError("Additional upstream name, base_url and api_key must not be empty.")
+            if not isinstance(provider["models"], list):
+                raise ValueError("Additional upstream models must be a JSON array.")
+            for model in provider["models"]:
+                if not isinstance(model, dict) or not str(model.get("id", "")).strip():
+                    raise ValueError("Each additional upstream model must include an id.")
+                if model.get("fallback_for") and not model.get("enabled", True):
+                    raise ValueError("A fallback upstream model must be enabled.")
+                if "upstream_model_id" in model and not str(model["upstream_model_id"]).strip():
+                    raise ValueError("Additional upstream model upstream_model_id must not be empty.")
+        primary_model_ids = {str(model["id"]) for model in self.public_models}
+        for provider in data:
+            for model in provider["models"]:
+                fallback_for = model.get("fallback_for")
+                if fallback_for and fallback_for not in primary_model_ids:
+                    raise ValueError("Each fallback upstream model must target a configured public model id.")
+        return data
 
     @property
     def example_prompts(self) -> list[str]:
