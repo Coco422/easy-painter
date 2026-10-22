@@ -193,13 +193,16 @@ function renderPanel(scenarios: MockScenarioInfo[], current: string) {
   panel.querySelector('[data-action="exit"]')?.addEventListener('click', () => {
     localStorage.setItem(DISABLED_KEY, '1')
     localStorage.removeItem(TOKEN_KEY)
-    location.reload()
+    void fetch('/__mock/disable', { cache: 'no-store' }).finally(() => location.reload())
   })
   document.body.append(panel)
 }
 
 export async function bootstrapMock(): Promise<void> {
-  if (disabled()) return
+  if (disabled()) {
+    await fetch('/__mock/disable', { cache: 'no-store' }).catch(() => undefined)
+    return
+  }
   const state = await readState()
   // The middleware is only present in development; a production build never sees it.
   if (!state) return

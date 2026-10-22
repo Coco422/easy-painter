@@ -175,8 +175,8 @@ export function easyPainterMock(): Plugin {
       const { name, t0 } = scenarioFor(request)
       // Persist the scenario clock. Without this every request mints a new t0,
       // which changes the token and makes the client reload in a loop.
-      if (readCookie(request, T0_COOKIE) !== String(t0) || readCookie(request, SCENARIO_COOKIE) !== name) {
-        setCookies(response, { [SCENARIO_COOKIE]: name, [T0_COOKIE]: String(t0) })
+      if (readCookie(request, SESSION_COOKIE) !== '1' || readCookie(request, T0_COOKIE) !== String(t0) || readCookie(request, SCENARIO_COOKIE) !== name) {
+        setCookies(response, { [SESSION_COOKIE]: '1', [SCENARIO_COOKIE]: name, [T0_COOKIE]: String(t0) })
       }
       const owner = mockUser.id
       const jobs = buildJobs(mockScenarios[name] ?? mockScenarios['idle'], t0)
@@ -196,6 +196,11 @@ export function easyPainterMock(): Plugin {
           [`easy-painter:creation-versions:${owner}`]: JSON.stringify({ parents, pending: null }),
         },
       })
+      return
+    }
+    if (pathname === '/__mock/disable') {
+      setCookies(response, { [SESSION_COOKIE]: '0' })
+      json(response, 200, { ok: true })
       return
     }
     if (pathname === '/__mock/select') {
@@ -392,6 +397,11 @@ export function easyPainterMock(): Plugin {
       return
     }
     if (url.pathname.startsWith('/api/')) {
+      // The frontend can opt out of the mock and use Vite's normal API proxy.
+      if (readCookie(request, SESSION_COOKIE) === '0') {
+        next()
+        return
+      }
       void handleApi(request, response, url.pathname, url.searchParams).catch(() => {
         if (!response.headersSent) json(response, 500, { detail: 'mock 处理失败' })
       })
