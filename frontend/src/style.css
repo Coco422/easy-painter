@@ -3042,7 +3042,18 @@ a {
   box-shadow: var(--shadow-lg); backdrop-filter: blur(12px);
   font-family: var(--font-body); font-size: 12px; color: var(--text-primary);
 }
-.dev-mock-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 2px 4px 8px; }
+.dev-mock-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 2px 4px 8px; cursor: grab; touch-action: none; user-select: none; }
+.dev-mock-head:active { cursor: grabbing; }
+.dev-mock-collapse {
+  flex: none; width: 22px; height: 22px; min-height: 0; padding: 0;
+  border: 1px solid var(--border); border-radius: 5px; background: transparent;
+  color: var(--text-secondary); font-size: 10px; line-height: 1; cursor: pointer;
+}
+.dev-mock-collapse:hover { border-color: var(--border-accent); color: var(--accent-strong); }
+.dev-mock-panel.is-collapsed { width: auto; max-width: 220px; padding: 6px 8px; }
+.dev-mock-panel.is-collapsed .dev-mock-head { padding-bottom: 0; }
+.dev-mock-panel.is-collapsed .dev-mock-list,
+.dev-mock-panel.is-collapsed .dev-mock-foot { display: none; }
 .dev-mock-head strong { font-size: 12px; font-weight: 600; color: var(--accent-strong); }
 .dev-mock-head span { font-size: 10.5px; color: var(--text-muted); }
 .dev-mock-list { display: grid; gap: 3px; }
