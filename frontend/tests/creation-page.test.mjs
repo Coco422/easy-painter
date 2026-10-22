@@ -7,6 +7,7 @@ import * as versions from '../src/lib/creation-versions.ts'
 import * as media from '../src/lib/media-state.ts'
 import * as batches from '../src/lib/generation-batch.ts'
 import * as layout from '../src/lib/image-layout.ts'
+import * as pricing from '../src/lib/model-pricing.ts'
 import * as quipLibrary from '../src/lib/generation-quips.ts'
 import { compileComponent, compileModule, node, renderer, all, hasClass, textOf, teleportTarget } from './helpers/vue-renderer.mjs'
 
@@ -56,7 +57,7 @@ function mount({ live = false, pending = null } = {}) {
     'vue-router': { useRoute: () => ({ query: { prompt: '旧海报' } }), useRouter: () => ({ push() {} }) },
     '@/lib/api': api, '@/lib/auth': { authState: vue.reactive({ user: { id: 'owner', credits: 1000 }, sessionId: 'session' }), fetchCurrentUser: async () => {}, isLoggedIn: () => true },
     '@/lib/browser-crypto': { randomId: () => `key-${++identifier}` },
-    '@/lib/creation-presets': presets, '@/lib/generation-batch': batches, '@/lib/image-layout': layout,
+    '@/lib/creation-presets': presets, '@/lib/generation-batch': batches, '@/lib/image-layout': layout, '@/lib/model-pricing': pricing,
     '@/lib/creation-versions': versions, '@/lib/media-state': media,
     '@/lib/generation-quips': quipLibrary,
     '@/composables/useMediaClock': { useMediaClock: () => vue.ref(Date.now()) },

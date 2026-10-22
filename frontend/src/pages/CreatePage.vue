@@ -10,8 +10,8 @@ import { fetchArtwork, type Artwork } from '@/lib/artworks'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import CreationVersions from '@/components/CreationVersions.vue'
 import { useCreationVersions } from '@/composables/useCreationVersions'
-import { ArrowUpRight, FlaskConical, Image, Layers, LayoutTemplate, Package, Palette, Plus, Workflow } from 'lucide-vue-next'
-import { creationTemplates, type CreationMode } from '@/lib/creation-presets'
+import { Image, Plus } from 'lucide-vue-next'
+import type { CreationMode } from '@/lib/creation-presets'
 import { modelCreditCost } from '@/lib/model-pricing'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import {
@@ -60,7 +60,6 @@ const generatePanel = ref<InstanceType<typeof GeneratePanel> | null>(null)
 const resultsPanel = ref<HTMLElement | null>(null)
 const workspacePanel = ref<HTMLElement | null>(null)
 const drafting = ref(false)
-const templateIcons = { free: Palette, workflow: Workflow, mechanism: FlaskConical, poster: LayoutTemplate, product: Package }
 const referenceIds = computed(() => mode.value === 'text' ? [] : selectedReferenceImage.value.map(item => item.id))
 const pendingCount = computed(() => activeJobs.value.filter(isLiveJob).length)
 const selectedModel = ref('')
@@ -473,6 +472,7 @@ watch(() => route.query.prompt, (val) => {
 
 watch(selectedReferenceImage, (images, previous) => {
   if (mode.value === 'text' && images.some(item => !previous.some(entry => entry.id === item.id))) mode.value = 'reference'
+  if (mode.value === 'reference' && images.length === 0) mode.value = 'text'
 })
 watch([availableModels, mode], ensureSelectableModel)
 watch([availableModels, selectedModel, selectedSize], ensureSelectableSize)
@@ -501,91 +501,97 @@ onMounted(() => {
 
 <template>
   <section ref="workspacePanel" class="creation-workspace">
-    <header class="workspace-heading">
-      <div><p class="section-label">Painter's studio</p><h1>创作工作台</h1><p>从一个想法、一张参考图开始。</p></div>
-      <div class="workspace-heading-actions"><button v-if="activeJobs.length" type="button" class="workspace-results-jump" @click="scrollToResults">查看作品</button><button type="button" class="workspace-new-drawing" :disabled="!canStartNewDrawing" @click="startNewDrawing"><Plus :size="16" aria-hidden="true" />新绘图</button><router-link to="/canvas" class="workspace-canvas-link"><Layers :size="16" aria-hidden="true" />无限画布<ArrowUpRight :size="15" aria-hidden="true" /></router-link></div>
-    </header>
     <div class="workspace-columns">
-    <aside class="workspace-settings" aria-label="创作设置">
-    <GeneratePanel
-      ref="generatePanel"
-      :prompt="prompt"
-      :mode="mode"
-      :selected-model="selectedModel"
-      :selected-size="selectedSize"
-      :selected-batch-count="selectedBatchCount"
-      :models="availableModels"
-      :max-length="meta?.prompt_max_length ?? 4000"
-      :submitting="submitting || versions.busy.value"
-      :credits="isLoggedIn() ? (authState.user?.credits ?? 0) : null"
-      @update:prompt="prompt = $event"
-      @update:mode="mode = $event"
-      @update:model="selectedModel = $event"
-      @update:size="selectedSize = $event"
-      @update:batch-count="selectedBatchCount = $event"
-      @submit="submitPrompt"
-    />
-    <button v-if="submitting" type="button" class="ghost-button" :disabled="stopBatchRequested" @click="stopBatchRequested = true">{{ stopBatchRequested ? '正在停止继续提交…' : '停止继续提交' }}</button>
-    </aside>
+      <aside class="workspace-settings" aria-label="创作设置">
+        <GeneratePanel
+          ref="generatePanel"
+          :prompt="prompt"
+          :mode="mode"
+          :selected-model="selectedModel"
+          :selected-size="selectedSize"
+          :selected-batch-count="selectedBatchCount"
+          :models="availableModels"
+          :max-length="meta?.prompt_max_length ?? 4000"
+          :submitting="submitting || versions.busy.value"
+          :credits="isLoggedIn() ? (authState.user?.credits ?? 0) : null"
+          @update:prompt="prompt = $event"
+          @update:mode="mode = $event"
+          @update:model="selectedModel = $event"
+          @update:size="selectedSize = $event"
+          @update:batch-count="selectedBatchCount = $event"
+          @submit="submitPrompt"
+        />
+        <button v-if="submitting" type="button" class="ghost-button workspace-stop" :disabled="stopBatchRequested" @click="stopBatchRequested = true">{{ stopBatchRequested ? '正在停止继续提交…' : '停止继续提交' }}</button>
+      </aside>
 
-    <section ref="resultsPanel" class="workspace-results" aria-label="创作结果" :aria-busy="loading">
-      <div class="workspace-results-heading"><h2>{{ drafting ? '新的绘图' : activeJobs.length ? '创作结果' : '让想法有个起点' }}</h2><span v-if="pendingCount" role="status">{{ pendingCount }} 张生成中</span><router-link v-else-if="isLoggedIn()" to="/history">查看历史<ArrowUpRight :size="14" aria-hidden="true" /></router-link></div>
-      <p v-if="feedback" class="feedback-banner" role="status">{{ feedback }}</p>
-      <p v-if="versions.storageError.value" class="feedback-banner" role="alert">{{ versions.storageError.value }}</p>
-      <div v-if="(!activeJobs.length || drafting) && versions.history.value.pending" class="feedback-banner" role="status">上次改图的提交结果尚未确认。<button type="button" class="ghost-button" :disabled="versions.busy.value" @click="versions.confirm">确认上次改图任务</button></div>
-
-      <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
-      <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :membership="jobBatches" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :drafting="drafting" :can-start-new="canStartNewDrawing" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="modelCreditCost(versions.editModel.value, versions.editSize.value)" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
-        @select="selectResult" @new="startNewDrawing" @revise="versions.revise" @confirm="versions.confirm" @canvas="versions.addToCanvas" @details="openArtwork($event)" @gallery="handleAddToGallery" @refresh="refreshJobMedia" @retry="retryJob" @dismiss="removeActiveJob" />
-      <div v-if="!activeJobs.length || drafting" class="workspace-empty">
-        <div class="workspace-intro"><span class="workspace-intro-icon"><Image :size="28" aria-hidden="true" /></span><h3>{{ drafting ? '换一个全新的想法' : '这次想创作什么？' }}</h3><p>{{ drafting ? '描述和参考图已清空，写下这次想画的内容。' : '选一个用途带入示例，或直接写下你的想法。' }}<br />{{ activeJobs.length ? '之前的作品保留在上方「最近绘图」，随时可以切回。' : '生成的作品会显示在这里。' }}</p></div>
-        <div class="workspace-templates">
-          <button v-for="item in creationTemplates.filter(item => item.id !== 'free')" :key="item.id" type="button" :disabled="submitting" @click="mode === 'edit' && (mode = 'text'); generatePanel?.applyTemplate(item.id)">
-            <component :is="templateIcons[item.id]" :size="22" aria-hidden="true" /><strong>{{ item.label }}</strong><span>{{ item.detail }}</span><ArrowUpRight :size="15" class="template-arrow" aria-hidden="true" />
-          </button>
+      <section ref="resultsPanel" class="workspace-results" aria-label="创作结果" :aria-busy="loading">
+        <div class="results-toolbar">
+          <span v-if="pendingCount" class="results-toolbar-status" role="status"><span class="results-toolbar-dot" aria-hidden="true" />{{ pendingCount }} 张生成中</span>
+          <span v-else class="results-toolbar-status results-toolbar-status--idle">作品</span>
+          <div class="results-toolbar-actions">
+            <router-link v-if="activeJobs.length" type="button" class="results-toolbar-button" to="/history">历史</router-link>
+            <button type="button" class="results-toolbar-button results-toolbar-button--primary" :disabled="!canStartNewDrawing" @click="startNewDrawing"><Plus :size="14" aria-hidden="true" />新绘图</button>
+          </div>
         </div>
-        <p class="workspace-empty-note">模板帮助组织描述。模型与费用可以在左侧查看，科研内容请核对细节。</p>
-      </div>
-    </section>
+
+        <p v-if="feedback" class="feedback-banner" role="status">{{ feedback }}</p>
+        <p v-if="versions.storageError.value" class="feedback-banner" role="alert">{{ versions.storageError.value }}</p>
+        <div v-if="(!activeJobs.length || drafting) && versions.history.value.pending" class="feedback-banner" role="status">上次改图的提交结果尚未确认。<button type="button" class="ghost-button" :disabled="versions.busy.value" @click="versions.confirm">确认上次改图任务</button></div>
+
+        <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
+        <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :membership="jobBatches" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :drafting="drafting" :can-start-new="canStartNewDrawing" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="modelCreditCost(versions.editModel.value, versions.editSize.value)" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
+          @select="selectResult" @new="startNewDrawing" @revise="versions.revise" @confirm="versions.confirm" @canvas="versions.addToCanvas" @details="openArtwork($event)" @gallery="handleAddToGallery" @refresh="refreshJobMedia" @retry="retryJob" @dismiss="removeActiveJob" />
+        <div v-if="!activeJobs.length || drafting" class="workspace-empty">
+          <span class="workspace-empty-mark" aria-hidden="true"><Image :size="26" /></span>
+          <h3>{{ drafting ? '换一个全新的想法' : '这次想创作什么？' }}</h3>
+          <p>{{ drafting ? '描述和参考图已清空，写下这次想画的内容。' : '在左边写下描述就可以开始。默认设置已经能画得很好。' }}</p>
+          <p class="workspace-empty-tip">粘贴或拖入图片即可使用参考图 · ⌘ ↵ 提交</p>
+        </div>
+      </section>
     </div>
   </section>
 </template>
 
 <style scoped>
-.creation-workspace { font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; scroll-margin-top: 20px; }
-.workspace-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
-.workspace-heading .section-label { margin: 0 0 8px; font-size: 11px; font-weight: 500; }
-.workspace-heading h1 { margin: 0; font-size: 26px; font-weight: 500; line-height: 1.3; }
-.workspace-heading p:last-child { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
-.workspace-canvas-link { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); text-decoration: none; font-size: 13px; white-space: nowrap; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; }
-.workspace-canvas-link:hover { color: var(--accent-strong); border-color: var(--border-accent); }
-.workspace-heading-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.workspace-new-drawing { display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: var(--text-inverse); font: inherit; font-size: 13px; white-space: nowrap; }
-.workspace-new-drawing:hover:not(:disabled) { background: var(--accent-strong); }
-.workspace-new-drawing:disabled { opacity: .5; cursor: not-allowed; }
-.workspace-new-drawing:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.workspace-results-jump { display: none; border: 0; background: transparent; color: var(--accent-strong); font: inherit; font-size: 12px; padding: 8px 0; cursor: pointer; }
-.workspace-columns { display: grid; grid-template-columns: 340px minmax(0, 1fr); align-items: start; gap: 24px; }
-.workspace-settings, .workspace-results { min-width: 0; scroll-margin-top: 20px; }
-.workspace-results { padding: 24px; min-height: 650px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); scroll-margin-top: 16px; }
-.workspace-results-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
-.workspace-results-heading h2 { font-size: 15px; font-weight: 500; margin: 0; }
-.workspace-results-heading > span, .workspace-results-heading a { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); text-decoration: none; }
-.workspace-results .feedback-banner { margin: 16px 0 0; padding: 12px; font-size: 13px; border-radius: 6px; background: var(--bg-input); overflow-wrap: anywhere; }
-.workspace-intro { text-align: center; padding: 48px 0 32px; }
-.workspace-intro-icon { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-strong); }
-.workspace-intro h3 { font-size: 22px; font-weight: 500; margin: 20px 0 12px; }
-.workspace-intro p { color: var(--text-secondary); font-size: 13px; line-height: 1.8; margin: 0; }
-.workspace-templates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.workspace-templates button { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; padding: 20px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--accent-strong); text-align: left; font: inherit; cursor: pointer; transition: background 160ms, border-color 160ms; }
-.workspace-templates button:hover { background: var(--bg-elevated); border-color: var(--border-accent); }
-.workspace-templates button:focus-visible, .workspace-canvas-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.workspace-templates strong { color: var(--text-primary); font-size: 14px; font-weight: 500; }
-.workspace-templates span { color: var(--text-secondary); font-size: 12px; }
-.workspace-templates .template-arrow { position: absolute; right: 16px; top: 20px; color: var(--text-muted); }
-.workspace-empty-note { margin: 24px 0 0; font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
-@media (max-width: 1050px) { .workspace-columns { grid-template-columns: 310px minmax(0, 1fr); gap: 16px; } .workspace-results { padding: 20px; } .workspace-templates button { padding: 16px; } }
-@media (max-width: 900px) { .workspace-columns { grid-template-columns: minmax(0, 1fr); } .workspace-results { min-height: 0; } .workspace-heading { margin-bottom: 20px; } .workspace-intro { padding-top: 24px; } }
-@media (max-width: 900px) { .workspace-results-jump { display: block; } }
-@media (max-width: 450px) { .workspace-heading h1 { font-size: 22px; } .workspace-canvas-link { gap: 4px; padding: 8px; font-size: 12px; } .workspace-results { padding: 16px; } .workspace-templates { grid-template-columns: minmax(0, 1fr); } .workspace-heading .section-label { letter-spacing: .06em; } }
+.creation-workspace { font-family: var(--font-body); scroll-margin-top: 20px; }
+.workspace-columns { display: grid; grid-template-columns: 396px minmax(0, 1fr); align-items: start; gap: 22px; }
+.workspace-settings { min-width: 0; }
+.workspace-stop { width: 100%; margin-top: 10px; }
+
+.workspace-results {
+  display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 590px;
+  padding: 16px 18px 18px; border: 1px solid var(--border); border-radius: 18px;
+  background: var(--bg-surface); box-shadow: var(--shadow-sm); scroll-margin-top: 16px;
+}
+.results-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.results-toolbar-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--accent-strong); }
+.results-toolbar-status--idle { color: var(--text-muted); }
+.results-toolbar-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: results-pulse 1.6s ease-in-out infinite; }
+@keyframes results-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+.results-toolbar-actions { display: flex; align-items: center; gap: 6px; }
+.results-toolbar-button {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 11px;
+  border: 1px solid var(--border); border-radius: 8px; background: transparent;
+  color: var(--text-primary); font: inherit; font-size: 12.5px; text-decoration: none; cursor: pointer;
+}
+.results-toolbar-button:hover { border-color: var(--border-accent); background: var(--bg-hover); }
+.results-toolbar-button--primary { border-color: var(--accent); background: var(--accent); color: var(--text-inverse); }
+.results-toolbar-button--primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.results-toolbar-button:disabled { opacity: .5; cursor: not-allowed; }
+
+.workspace-results .feedback-banner { margin: 0; padding: 10px 12px; font-size: 12.5px; line-height: 1.6; border-radius: 8px; background: var(--bg-input); overflow-wrap: anywhere; }
+
+.workspace-empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 56px 24px; text-align: center; }
+.workspace-empty-mark {
+  display: grid; place-items: center; width: 62px; height: 62px; margin-bottom: 4px;
+  border: 1px dashed var(--border-accent); border-radius: 12px; background: var(--accent-glow); color: var(--accent);
+}
+.workspace-empty h3 { margin: 0; font-size: 18px; font-weight: 500; }
+.workspace-empty p { margin: 0; max-width: 320px; color: var(--text-secondary); font-size: 13px; line-height: 1.8; }
+.workspace-empty-tip { font-size: 11.5px !important; color: var(--text-muted) !important; }
+
+@media (max-width: 1080px) { .workspace-columns { grid-template-columns: 340px minmax(0, 1fr); gap: 16px; } }
+@media (max-width: 900px) { .workspace-columns { grid-template-columns: minmax(0, 1fr); } .workspace-results { min-height: 0; } }
+@media (max-width: 450px) { .workspace-results { padding: 14px; } .workspace-empty { padding: 36px 16px; } }
+@media (prefers-reduced-motion: reduce) { .results-toolbar-dot { animation: none; } }
 </style>
