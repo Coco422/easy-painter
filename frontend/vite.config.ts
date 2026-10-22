@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { parseChangelog } from './src/lib/release'
+import { easyPainterMock } from './mock/plugin'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url))
 const appVersion = readFileSync(resolve(projectRoot, 'VERSION'), 'utf-8').trim()
@@ -11,7 +12,7 @@ const appReleases = parseChangelog(readFileSync(resolve(projectRoot, 'CHANGELOG.
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), easyPainterMock()],
   define: {
     __APP_VERSION__: JSON.stringify(appVersion || 'dev'),
     __APP_RELEASES__: JSON.stringify(appReleases),
