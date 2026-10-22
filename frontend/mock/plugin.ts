@@ -173,6 +173,11 @@ export function easyPainterMock(): Plugin {
     }
     if (pathname === '/__mock/state') {
       const { name, t0 } = scenarioFor(request)
+      // Persist the scenario clock. Without this every request mints a new t0,
+      // which changes the token and makes the client reload in a loop.
+      if (readCookie(request, T0_COOKIE) !== String(t0) || readCookie(request, SCENARIO_COOKIE) !== name) {
+        setCookies(response, { [SCENARIO_COOKIE]: name, [T0_COOKIE]: String(t0) })
+      }
       const owner = mockUser.id
       const jobs = buildJobs(mockScenarios[name] ?? mockScenarios['idle'], t0)
       const membership: Record<string, string> = {}
@@ -210,7 +215,8 @@ export function easyPainterMock(): Plugin {
   }
 
   function fakeToken(seed: number) {
-    const payload = { sub: mockUser.id, sid: `mock-${seed}`, typ: 'access', exp: Math.floor(Date.now() / 1000) + 86400 }
+    // Fully derived from t0: a stable token is what stops the client reloading.
+    const payload = { sub: mockUser.id, sid: `mock-${seed}`, typ: 'access', exp: Math.floor(seed / 1000) + 86400 * 30 }
     const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url')
     return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(payload)}.mock`
   }

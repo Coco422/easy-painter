@@ -229,14 +229,22 @@ function stageText(job: JobDetailResponse) {
 
 /* ---- candidates rail ---- */
 .candidate-batch { min-width: 0; }
-.candidate-grid { display: flex; gap: 8px; overflow-x: auto; padding: 2px; scrollbar-width: thin; }
-.candidate-card { position: relative; flex: 0 0 84px; display: grid; place-items: stretch; width: 84px; height: 84px; padding: 0; overflow: hidden; border-radius: 9px; }
+.candidate-grid { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px; }
+/* Responsive square tiles: widen with the pane, wrap when there are many. */
+.candidate-card { position: relative; flex: 1 1 84px; min-width: 84px; max-width: 148px; aspect-ratio: 1 / 1; display: grid; place-items: stretch; padding: 0; overflow: hidden; border-radius: 9px; }
 .candidate-card[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.candidate-card :deep(.protected-image), .candidate-placeholder, .candidate-waiting { height: 84px; min-height: 0; border-radius: 8px; }
+.candidate-card :deep(.protected-image), .candidate-placeholder, .candidate-waiting { height: 100%; min-height: 0; border-radius: 8px; }
 .candidate-placeholder { display: grid; place-content: center; justify-items: center; gap: 4px; color: var(--text-secondary); font-size: 11px; }
-.candidate-waiting :deep(.waiting-quip-slot) { font-size: 10.5px; max-width: 74px; }
+/* The quip needs room to be read: reserve the badge strip and clamp to three lines. */
+.candidate-waiting { padding: 8px 4px 20px; }
+.candidate-waiting :deep(.waiting-status) { font-size: 10px; gap: 3px; }
+.candidate-waiting :deep(.waiting-quip-slot) {
+  flex: 0 0 auto; width: 100%; max-width: none; min-height: 0; margin: 3px 0 0; padding: 0 6px;
+  font-size: 10.5px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
 .candidate-waiting :deep(.waiting-mark) { display: none; }
-.candidate-badge { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 3px; background: color-mix(in srgb, var(--bg-surface) 86%, transparent); color: var(--text-secondary); font-size: 9.5px; line-height: 1.5; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.candidate-badge { position: absolute; left: 0; right: 0; bottom: 0; min-height: 19px; padding: 2px 3px; background: var(--bg-surface); box-shadow: 0 -1px 0 var(--border-subtle); color: var(--text-secondary); font-size: 9.5px; line-height: 1.5; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .candidate-badge--refunded { color: var(--success); }
 .candidate-index { position: absolute; top: 3px; left: 4px; font: 600 9.5px var(--font-mono); color: var(--text-inverse); background: rgba(20, 14, 6, .45); border-radius: 3px; padding: 0 3px; }
 
@@ -292,8 +300,8 @@ textarea { width: 100%; min-height: 84px; padding: 10px 12px; font-size: 14px; l
 .workspace-new-drawing:hover:not(:disabled) { border-color: var(--border-accent); background: var(--bg-hover); }
 button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 560px) {
-  .candidate-card { flex-basis: 64px; width: 64px; height: 64px; }
-  .candidate-card :deep(.protected-image), .candidate-placeholder, .candidate-waiting { height: 64px; }
+  .candidate-card { flex-basis: 72px; min-width: 72px; }
+  .candidate-waiting :deep(.waiting-quip-slot) { padding: 0 4px; -webkit-line-clamp: 2; }
   .version-preview { height: 46vh; }
   .version-canvas-actions label { width: 100%; }
   .version-canvas-actions select { flex: 1; max-width: none; }

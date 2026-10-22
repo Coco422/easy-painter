@@ -32,18 +32,21 @@ async function readState(): Promise<MockState | null> {
 }
 
 /** Keeps a stable fake identity per tab so polling and session checks behave. */
-async function applyState(state: MockState, reload: boolean): Promise<void> {
+async function applyState(state: MockState, reload: boolean): Promise<boolean> {
   const fingerprint = `${state.scenario}:${state.token}`
   const seeded = sessionStorage.getItem(SEEDED_KEY)
   const ownToken = state.token.split('.')[1]
   localStorage.setItem(TOKEN_KEY, state.token)
   for (const [key, value] of Object.entries(state.storage)) localStorage.setItem(key, value)
   sessionStorage.setItem(SEEDED_KEY, fingerprint)
-  // One reload per distinct fingerprint: scenario switches reload, repeats never loop.
-  if (reload && seeded !== fingerprint && ownToken && sessionStorage.getItem(RELOADED_KEY) !== fingerprint) {
-    sessionStorage.setItem(RELOADED_KEY, fingerprint)
-    location.reload()
-  }
+  if (!reload || !ownToken || seeded === fingerprint) return false
+  // A time-based brake, not a fingerprint check: any drift in the mock's state
+  // must never be able to reload the page faster than twice a second.
+  const lastReload = Number(sessionStorage.getItem(RELOADED_KEY) ?? '0')
+  if (Date.now() - lastReload < 2000) return false
+  sessionStorage.setItem(RELOADED_KEY, String(Date.now()))
+  location.reload()
+  return true
 }
 
 let panel: HTMLElement | null = null
@@ -77,8 +80,9 @@ function renderPanel(scenarios: MockScenarioInfo[], current: string) {
           sessionStorage.removeItem(SEEDED_KEY)
           sessionStorage.removeItem(RELOADED_KEY)
           const state = await readState()
-          if (state) await applyState(state, true)
-          else location.reload()
+          // A deliberate switch always lands on the new scenario, even if the
+          // brake declined to reload above.
+          if (!state || !(await applyState(state, true))) location.reload()
         })
     })
     list.append(item)
