@@ -124,36 +124,37 @@ function stageText(job: JobDetailResponse) {
       </div>
     </section>
 
-    <section v-if="hasPeers" class="candidate-batch" :aria-label="`第 ${currentBatch.number} 批候选图`">
-      <div class="candidate-grid" role="group" :aria-label="`选择第 ${currentBatch.number} 批候选图`">
-        <button v-for="candidate in currentBatch.candidates" :key="candidate.id" type="button" class="candidate-card" :class="{ 'candidate-card--live': candidate.job.status === 'queued' || candidate.job.status === 'processing' }" :aria-pressed="selected.rootId === candidate.id" :aria-label="`第 ${currentBatch.number} 批，${candidate.label}，${statusLabel[candidate.job.status]}`" @click="emit('select', candidate.job.job_id)">
-          <ProtectedImage v-if="candidate.job.status === 'succeeded'" :src="candidate.job.thumbnail_url || candidate.job.image_url" :state="candidate.job.media_state" :expires-at="candidate.job.media_expires_at" :alt="candidate.label" @invalid="emit('refresh', candidate.job)" />
-          <GenerationWaiting v-else-if="candidate.job.status === 'queued' || candidate.job.status === 'processing'" class="candidate-waiting" :status="candidate.job.status" :quip="quips.get(candidate.job.job_id)!" compact />
-          <span v-else class="candidate-placeholder" role="status">{{ statusLabel[candidate.job.status] }}</span>
-          <span class="candidate-badge" :class="{ 'candidate-badge--refunded': candidate.job.billing_status === 'refunded' }">{{ candidate.rows.some(row => row.parentId) ? `${candidate.rows.filter(row => row.parentId).length} 个修改` : billingLabel(candidate.job) }}</span>
-          <span class="candidate-index" aria-hidden="true">{{ candidate.rows[0]!.candidateNumber }}</span>
-        </button>
-      </div>
-    </section>
+    <div class="batch-results">
+      <section v-if="hasPeers" class="candidate-batch" :aria-label="`第 ${currentBatch.number} 批候选图`">
+        <div class="candidate-grid" role="group" :aria-label="`选择第 ${currentBatch.number} 批候选图`">
+          <button v-for="candidate in currentBatch.candidates" :key="candidate.id" type="button" class="candidate-card" :class="{ 'candidate-card--live': candidate.job.status === 'queued' || candidate.job.status === 'processing' }" :aria-pressed="selected.rootId === candidate.id" :aria-label="`第 ${currentBatch.number} 批，${candidate.label}，${statusLabel[candidate.job.status]}`" @click="emit('select', candidate.job.job_id)">
+            <ProtectedImage v-if="candidate.job.status === 'succeeded'" :src="candidate.job.thumbnail_url || candidate.job.image_url" :state="candidate.job.media_state" :expires-at="candidate.job.media_expires_at" :alt="candidate.label" @invalid="emit('refresh', candidate.job)" />
+            <GenerationWaiting v-else-if="candidate.job.status === 'queued' || candidate.job.status === 'processing'" class="candidate-waiting" :status="candidate.job.status" :quip="quips.get(candidate.job.job_id)!" compact />
+            <span v-else class="candidate-placeholder" role="status">{{ statusLabel[candidate.job.status] }}</span>
+            <span class="candidate-badge" :class="{ 'candidate-badge--refunded': candidate.job.billing_status === 'refunded' }">{{ candidate.rows.some(row => row.parentId) ? `${candidate.rows.filter(row => row.parentId).length} 个修改` : billingLabel(candidate.job) }}</span>
+            <span class="candidate-index" aria-hidden="true">{{ candidate.rows[0]!.candidateNumber }}</span>
+          </button>
+        </div>
+      </section>
 
-    <div class="result-stage">
-      <div class="result-frame">
-        <div v-if="showVersionTitle" class="result-frame-top">
-          <span class="result-chip">{{ batchTitle }} · {{ resultLabel }}</span>
-          <span class="result-chip-state" :class="{ live: selected.job.status === 'queued' || selected.job.status === 'processing' }">{{ stageText(selected.job) }}</span>
-        </div>
-        <div class="version-preview">
-          <ProtectedImage v-if="selected.job.status === 'succeeded'" :key="selected.job.job_id" :src="selected.job.image_url" :state="selected.job.media_state" :expires-at="selected.job.media_expires_at" :alt="hasPeers || hasBranch ? `${batchTitle} · ${resultLabel}` : '生成结果'" eager preview @invalid="emit('refresh', selected.job)" />
-          <GenerationWaiting v-else-if="selected.job.status === 'queued' || selected.job.status === 'processing'" :key="selected.job.job_id" :status="selected.job.status" :quip="quips.get(selected.job.job_id)!" :hint="selected.job.error_message" />
-          <div v-else class="version-placeholder" role="status"><strong>{{ statusLabel[selected.job.status] }}</strong><span>{{ selected.job.error_message || '这张图片生成失败。' }}</span></div>
-        </div>
-        <div v-if="selected.job.status === 'succeeded'" class="result-frame-foot">
-          <MediaExpiry :state="selected.job.media_state ?? 'none'" :expires-at="selected.job.media_expires_at" :permanent="selected.job.retention_kind === 'permanent'" />
-          <span class="result-frame-params">{{ selected.job.model_label || selected.job.model }} · {{ selected.job.size }} · {{ billingLabel(selected.job) }}</span>
+      <div class="result-stage">
+        <div class="result-frame">
+          <div v-if="showVersionTitle" class="result-frame-top">
+            <span class="result-chip">{{ batchTitle }} · {{ resultLabel }}</span>
+            <span class="result-chip-state" :class="{ live: selected.job.status === 'queued' || selected.job.status === 'processing' }">{{ stageText(selected.job) }}</span>
+          </div>
+          <div class="version-preview">
+            <ProtectedImage v-if="selected.job.status === 'succeeded'" :key="selected.job.job_id" :src="selected.job.image_url" :state="selected.job.media_state" :expires-at="selected.job.media_expires_at" :alt="hasPeers || hasBranch ? `${batchTitle} · ${resultLabel}` : '生成结果'" eager preview @invalid="emit('refresh', selected.job)" />
+            <GenerationWaiting v-else-if="selected.job.status === 'queued' || selected.job.status === 'processing'" :key="selected.job.job_id" :status="selected.job.status" :quip="quips.get(selected.job.job_id)!" :hint="selected.job.error_message" />
+            <div v-else class="version-placeholder" role="status"><strong>{{ statusLabel[selected.job.status] }}</strong><span>{{ selected.job.error_message || '这张图片生成失败。' }}</span></div>
+          </div>
+          <div v-if="selected.job.status === 'succeeded'" class="result-frame-foot">
+            <MediaExpiry :state="selected.job.media_state ?? 'none'" :expires-at="selected.job.media_expires_at" :permanent="selected.job.retention_kind === 'permanent'" />
+            <span class="result-frame-params">{{ selected.job.model_label || selected.job.model }} · {{ selected.job.size }} · {{ billingLabel(selected.job) }}</span>
+          </div>
         </div>
       </div>
     </div>
-
     <div v-if="selected.job.status === 'failed'" class="version-failure" role="alert"><p>{{ selected.job.error_message || '这张图片生成失败。' }}<span v-if="selected.job.billing_status === 'refunded'"> {{ selected.job.credit_cost }} 丝已全额退回余额。</span></p><div class="version-actions"><button type="button" :disabled="busy || pending" @click="emit('retry', selected.job)">重新生成</button><button type="button" :disabled="busy" @click="emit('dismiss', selected.job.job_id)">收起这张图</button></div></div>
     <div v-else class="version-actions">
       <button type="button" class="version-primary" :disabled="!usable || busy || pending" @click="openEditor"><PencilLine :size="15" />继续修改{{ selected.parentId ? ` V${selected.number}` : '' }}</button>
@@ -228,6 +229,7 @@ function stageText(job: JobDetailResponse) {
 .batch-billing-refund { color: var(--success); }
 
 /* ---- candidates rail ---- */
+.batch-results { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .candidate-batch { min-width: 0; }
 .candidate-grid { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px; }
 /* Responsive square tiles: widen with the pane, wrap when there are many. */
@@ -299,6 +301,9 @@ textarea { width: 100%; min-height: 84px; padding: 10px 12px; font-size: 14px; l
 .workspace-new-drawing { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text-primary); font: inherit; font-size: 12.5px; cursor: pointer; }
 .workspace-new-drawing:hover:not(:disabled) { border-color: var(--border-accent); background: var(--bg-hover); }
 button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .batch-results { flex-direction: column-reverse; }
+}
 @media (max-width: 560px) {
   .candidate-card { flex-basis: 72px; min-width: 72px; }
   .candidate-waiting :deep(.waiting-quip-slot) { padding: 0 4px; -webkit-line-clamp: 2; }
