@@ -83,10 +83,30 @@ jobs:
           provenance: mode=max
           sbom: true
 
+  release-target:
+    name: Resolve release target
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      primary: ${{ steps.target.outputs.primary }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Check primary release ancestry
+        id: target
+        run: |
+          if git merge-base --is-ancestor HEAD origin/main; then
+            echo "primary=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "primary=false" >> "$GITHUB_OUTPUT"
+            echo "Independent site release: skip primary production deployment."
+          fi
+
   deploy:
     name: Deploy production release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, release-target]
+    if: needs.release-target.outputs.primary == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

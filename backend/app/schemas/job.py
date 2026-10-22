@@ -36,6 +36,7 @@ class PublicModel(BaseModel):
 
 class PublicMetaResponse(BaseModel):
     site_name: str
+    related_sites_enabled: bool = True
     registration_enabled: bool = True
     email_delivery_enabled: bool = False
     prompt_max_length: int

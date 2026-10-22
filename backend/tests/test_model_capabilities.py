@@ -300,3 +300,14 @@ def test_model_reference_limit_is_positive_and_environment_seed_is_configurable(
             CreateModelRequest(id='test', provider_id='test', label='test', max_reference_images=invalid)
     [model] = Settings(public_models_json='[{"id":"gpt-image-2-b","max_reference_images":12}]').public_models
     assert model['max_reference_images'] == 12
+
+
+def test_public_meta_respects_independent_site_links_setting(monkeypatch):
+    monkeypatch.setattr(routes, "get_default_group", lambda db: None)
+    monkeypatch.setattr(routes, "_load_models", lambda db, settings: [])
+    for enabled in (False, True):
+        settings = Settings(_env_file=None, related_sites_enabled=enabled)
+        result = routes.get_public_meta(db=object(), settings=settings, current_user=None)
+        assert result.related_sites_enabled is enabled
+        assert result.models == []
+    assert Settings(_env_file=None).related_sites_enabled is True

@@ -7,7 +7,7 @@ import VersionReleaseDialog from '@/components/VersionReleaseDialog.vue'
 import { authState, isAdmin, isLoggedIn, logout } from '@/lib/auth'
 import { themeState, toggleTheme } from '@/lib/theme'
 
-defineProps<{ siteName: string }>()
+defineProps<{ siteName: string; relatedSitesEnabled: boolean }>()
 const router = useRouter()
 const route = useRoute()
 const logoutError = ref('')
@@ -71,14 +71,16 @@ async function handleLogout() {
               <router-link to="/gallery"><Images :size="16" />我的画廊</router-link>
               <router-link to="/favorites"><Heart :size="16" />我的收藏</router-link>
             </template>
+            <template v-if="relatedSitesEnabled">
             <a href="https://88888888.dog/home" target="_blank" rel="noopener noreferrer"><Plug :size="16" />88dog 中转主站 ↗</a>
             <a href="https://doc.88888888.dog/" target="_blank" rel="noopener noreferrer"><Images :size="16" />使用文档 ↗</a>
             <a href="https://getplus.88888888.dog/" target="_blank" rel="noopener noreferrer"><Wallet :size="16" />会员代充 ↗</a>
+            </template>
             <router-link to="/mcp"><Plug :size="16" />连接 Agent</router-link>
             <router-link v-if="isAdmin()" to="/admin"><Settings :size="16" />管理后台</router-link>
           </div>
           <div class="account-menu-footer">
-            <VersionReleaseDialog />
+            <VersionReleaseDialog v-if="relatedSitesEnabled" />
             <button v-if="isLoggedIn()" type="button" @click="handleLogout"><LogOut :size="14" />退出登录</button>
           </div>
         </div>

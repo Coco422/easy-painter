@@ -98,6 +98,7 @@ class Settings(BaseSettings):
 
     app_name: str = "easy-painter-api"
     site_name: str = "一丝绘画站"
+    related_sites_enabled: bool = True
     app_env: str = "production"
     api_v1_prefix: str = "/api/v1"
     # Empty disables agent endpoints until the canonical external HTTPS URL is configured.

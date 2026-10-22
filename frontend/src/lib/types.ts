@@ -33,6 +33,7 @@ export interface UserGroup extends UserGroupSummary {
 
 export interface PublicMetaResponse {
   site_name: string
+  related_sites_enabled?: boolean
   registration_enabled: boolean
   email_delivery_enabled: boolean
   prompt_max_length: number

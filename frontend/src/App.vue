@@ -10,6 +10,7 @@ import { initTheme } from '@/lib/theme'
 
 const route = useRoute()
 const siteName = ref('一丝绘画站')
+const relatedSitesEnabled = ref(false)
 const isAdminRoute = computed(() => route.path === '/admin')
 const isCanvasRoute = computed(() => route.path === '/canvas' || route.path.startsWith('/canvas/'))
 const isAccountRoute = computed(() => route.path === '/profile' || route.path === '/recharge' || route.path.startsWith('/recharge/'))
@@ -19,6 +20,7 @@ onMounted(async () => {
   try {
     const meta = await fetchPublicMeta()
     siteName.value = meta.site_name
+    relatedSitesEnabled.value = meta.related_sites_enabled ?? true
   } catch {
     // Use default
   }
@@ -30,13 +32,13 @@ onMounted(async () => {
 
 <template>
   <div class="page-shell">
-    <AppHeader v-if="!isAdminRoute" :site-name="siteName" />
+    <AppHeader v-if="!isAdminRoute" :site-name="siteName" :related-sites-enabled="relatedSitesEnabled" />
     <GenerationStatsTicker v-if="!isAdminRoute && !isCanvasRoute && !isAccountRoute" />
     <AnnouncementBanner v-if="!isAdminRoute && !isCanvasRoute" />
     <main class="page-content" :class="{ 'page-content--admin': isAdminRoute, 'page-content--canvas': isCanvasRoute }">
       <router-view />
     </main>
-    <nav v-if="!isAdminRoute && !isCanvasRoute" class="related-sites" aria-label="88dog 站点导航">
+    <nav v-if="relatedSitesEnabled && !isAdminRoute && !isCanvasRoute" class="related-sites" aria-label="88dog 站点导航">
       <a href="https://88888888.dog/home" target="_blank" rel="noopener noreferrer">88dog 中转主站 ↗</a>
       <a href="https://doc.88888888.dog/" target="_blank" rel="noopener noreferrer">使用文档 ↗</a>
       <a href="https://getplus.88888888.dog/" target="_blank" rel="noopener noreferrer">会员代充 ↗</a>

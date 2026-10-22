@@ -13,8 +13,10 @@ import {
   requestBindEmailCode,
   updateProfile,
 } from '@/lib/api'
+import { rechargeApi } from '@/lib/recharge'
 import type { CreditTransactionItem } from '@/lib/types'
 
+const rechargeEnabled = ref(false)
 const redeemInput = ref('')
 const redeeming = ref(false)
 const redeemFeedback = ref('')
@@ -256,6 +258,7 @@ function formatTime(iso: string): string {
 }
 
 onMounted(async () => {
+  void rechargeApi.catalog().then((catalog) => { rechargeEnabled.value = catalog.enabled }).catch(() => {})
   await fetchCurrentUser()
   if (authState.user) {
     usernameInput.value = authState.user.username
@@ -281,7 +284,7 @@ onBeforeUnmount(stopBindCountdown)
         <p class="card-label wallet-label"><Wallet :size="16" aria-hidden="true" />我的钱包</p>
         <p class="credits-value">{{ authState.user?.credits ?? 0 }}<span class="credits-unit">丝</span></p>
         <p class="credits-hint">每张图片消耗模型对应灵感丝线</p>
-        <router-link to="/recharge" class="secondary-button wallet-recharge">前往充值中心<ArrowUpRight :size="16" aria-hidden="true" /></router-link>
+        <router-link v-if="rechargeEnabled" to="/recharge" class="secondary-button wallet-recharge">前往充值中心<ArrowUpRight :size="16" aria-hidden="true" /></router-link>
       </section>
 
       <!-- Redeem card -->

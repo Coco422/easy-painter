@@ -189,6 +189,7 @@ def get_public_meta(
         policy = policy_from_group(default_group) if default_group else STANDARD_POLICY
     return PublicMetaResponse(
         site_name=settings.site_name,
+        related_sites_enabled=settings.related_sites_enabled,
         registration_enabled=settings.registration_enabled,
         email_delivery_enabled=settings.smtp_configured,
         prompt_max_length=settings.prompt_max_length,
