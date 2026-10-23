@@ -13,6 +13,7 @@ import { useCreationVersions } from '@/composables/useCreationVersions'
 import { Image, Plus } from 'lucide-vue-next'
 import type { CreationMode } from '@/lib/creation-presets'
 import { modelCreditCost } from '@/lib/model-pricing'
+import { DEFAULT_GENERATION_SIZE, defaultGenerationSize } from '@/lib/generation-sizes'
 import { useReferenceImages } from '@/composables/useReferenceImages'
 import {
   ApiError,
@@ -59,11 +60,11 @@ const mode = ref<CreationMode>('text')
 const generatePanel = ref<InstanceType<typeof GeneratePanel> | null>(null)
 const resultsPanel = ref<HTMLElement | null>(null)
 const workspacePanel = ref<HTMLElement | null>(null)
-const drafting = ref(false)
+const drafting = ref(true)
 const referenceIds = computed(() => mode.value === 'text' ? [] : selectedReferenceImage.value.map(item => item.id))
 const pendingCount = computed(() => activeJobs.value.filter(isLiveJob).length)
 const selectedModel = ref('')
-const selectedSize = ref<ImageSize>('auto')
+const selectedSize = ref<ImageSize>(DEFAULT_GENERATION_SIZE)
 const selectedBatchCount = ref<BatchCount>(1)
 const { selected: selectedReferenceImage } = useReferenceImages()
 const selectedArtwork = ref<Artwork | null>(null)
@@ -153,7 +154,7 @@ function ensureSelectableModel() {
 function ensureSelectableSize() {
   const currentModel = availableModels.value.find((item) => item.id === selectedModel.value)
   if (!currentModel || supportsCurrentSize(currentModel, selectedSize.value)) return
-  selectedSize.value = (currentModel.supported_sizes[0] as ImageSize | undefined) ?? 'auto'
+  selectedSize.value = defaultGenerationSize(currentModel.supported_sizes)
 }
 
 function readCachedJobIds() {
@@ -481,7 +482,7 @@ watch(() => authState.sessionId, () => {
   pollingTimers.forEach(timer => window.clearTimeout(timer))
   pollingTimers.clear()
   activeJobs.value = []
-  drafting.value = false
+  drafting.value = true
   selectedArtwork.value = null
   feedback.value = ''
   submitting.value = false
@@ -543,8 +544,8 @@ onMounted(() => {
           @select="selectResult" @new="startNewDrawing" @revise="versions.revise" @confirm="versions.confirm" @canvas="versions.addToCanvas" @details="openArtwork($event)" @gallery="handleAddToGallery" @refresh="refreshJobMedia" @retry="retryJob" @dismiss="removeActiveJob" />
         <div v-if="!activeJobs.length || drafting" class="workspace-empty">
           <span class="workspace-empty-mark" aria-hidden="true"><Image :size="26" /></span>
-          <h3>{{ drafting ? '换一个全新的想法' : '这次想创作什么？' }}</h3>
-          <p>{{ drafting ? '描述和参考图已清空，写下这次想画的内容。' : '在左边写下描述就可以开始。默认设置已经能画得很好。' }}</p>
+          <h3>{{ drafting && activeJobs.length ? '换一个全新的想法' : '这次想创作什么？' }}</h3>
+          <p>{{ drafting && activeJobs.length ? '描述和参考图已清空，写下这次想画的内容。' : '在左边写下描述就可以开始。默认设置已经能画得很好。' }}</p>
           <p class="workspace-empty-tip">粘贴或拖入图片即可使用参考图 · ⌘ ↵ 提交</p>
         </div>
       </section>
@@ -555,7 +556,7 @@ onMounted(() => {
 <style scoped>
 .creation-workspace { font-family: var(--font-body); scroll-margin-top: 20px; }
 .workspace-columns { display: grid; grid-template-columns: 396px minmax(0, 1fr); align-items: start; gap: 22px; }
-.workspace-settings { min-width: 0; }
+.workspace-settings { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 18px; background: var(--bg-surface); box-shadow: var(--shadow-sm); }
 .workspace-stop { width: 100%; margin-top: 10px; }
 
 .workspace-results {

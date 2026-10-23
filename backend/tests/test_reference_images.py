@@ -363,6 +363,8 @@ def test_reference_fingerprint_preserves_legacy_and_multi_image_order():
     assert fingerprint(reference_image_id='a') == fingerprint(reference_image_ids=['a'])
     assert fingerprint() == fingerprint(reference_image_ids=[])
     assert fingerprint(reference_image_ids=['a', 'b']) != fingerprint(reference_image_ids=['b', 'a'])
+    assert fingerprint(quality=None) == fingerprint()
+    assert fingerprint(quality='high') != fingerprint()
 
 
 @pytest.mark.anyio

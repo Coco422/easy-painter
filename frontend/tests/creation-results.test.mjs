@@ -6,6 +6,7 @@ import { compileComponent, compileModule, node, renderer, all, hasClass, textOf 
 import * as versions from '../src/lib/creation-versions.ts'
 import * as media from '../src/lib/media-state.ts'
 import * as quipLibrary from '../src/lib/generation-quips.ts'
+import * as imageLayout from '../src/lib/image-layout.ts'
 
 // Mount the real SFC with Vue's renderer; media is stubbed to avoid private image requests.
 const filename = new URL('../src/components/CreationVersions.vue', import.meta.url)
@@ -15,12 +16,13 @@ const mediaClock = { useMediaClock: () => clock }
 const modules = {
   vue,
   'lucide-vue-next': { ArrowRight: icon, GitBranch: icon, Layers: icon, Loader2: icon, PencilLine: icon, Plus: icon, Sparkles: icon },
-  './ProtectedImage.vue': { __esModule: true, default: { props: ['alt'], setup: props => () => vue.h('img', { alt: props.alt }) } },
+  './ProtectedImage.vue': { __esModule: true, default: { props: ['alt'], setup: (props, { attrs }) => () => vue.h('img', { ...attrs, alt: props.alt }) } },
   './MediaExpiry.vue': { __esModule: true, default: () => vue.h('span') },
   '@/lib/creation-versions': versions,
   '@/lib/media-state': media,
   '@/composables/useMediaClock': mediaClock, './useMediaClock': mediaClock,
   '@/lib/generation-quips': quipLibrary,
+  '@/lib/image-layout': imageLayout,
 }
 modules['@/composables/useGenerationQuips'] = compileModule(fs.readFileSync(new URL('../src/composables/useGenerationQuips.ts', import.meta.url), 'utf8'), modules)
 modules['./GenerationWaiting.vue'] = { __esModule: true, default: compileComponent(new URL('../src/components/GenerationWaiting.vue', import.meta.url), modules) }
@@ -35,6 +37,19 @@ function mount({ parents = {}, selectedId = 'a', ids = ['a', 'b', 'c'], edits = 
   app.mount(root)
   return { root, props, selected, events, app, find: cls => all(root).filter(item => hasClass(item, cls)) }
 }
+
+test('candidate thumbnail frames use the loaded image ratio instead of fixed squares', async () => {
+  const view = mount()
+  try {
+    const card = view.find('candidate-card')[0]
+    assert.equal(card.props.style.aspectRatio, '1', 'auto size is only an initial estimate')
+    const image = all(card).find(item => item.tag === 'img')
+    image.props.onLoaded({ target: { naturalWidth: 1600, naturalHeight: 900 } })
+    await vue.nextTick()
+    assert.equal(card.props.style.aspectRatio, String(1600 / 900))
+    assert.equal(view.find('version-preview')[0].props.style.aspectRatio, String(1600 / 900), 'the selected result follows its measured source ratio too')
+  } finally { view.app.unmount() }
+})
 
 test('results render separate batches of peer candidate cards without version labels before an edit', async () => {
   const view = mount()

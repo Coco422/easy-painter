@@ -107,6 +107,7 @@ export function createJob(payload: CreateJobRequest, idempotencyKey: string) {
     model: payload.model,
     size: payload.size,
   }
+  if (payload.quality === 'high') body.quality = payload.quality
   if (payload.reference_image_ids) {
     body.reference_image_ids = payload.reference_image_ids
   }

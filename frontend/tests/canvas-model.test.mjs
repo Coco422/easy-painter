@@ -11,6 +11,7 @@ import {
   validateProject,
   assetIds,
 } from '../src/lib/canvas/model.ts'
+import { canvasGenerationSizes } from '../src/lib/generation-sizes.ts'
 
 test('zoom remains anchored to the pointer and is bounded', () => {
   const viewport = { x: -300, y: 90, scale: 0.5 },
@@ -45,6 +46,20 @@ test('ordered references include groups and deduplicate repeated images', () => 
   assert.throws(() => connect(p, output.id, a.id))
   connect(p, g.id, output.id)
   assert.equal(p.edges.length, 4)
+})
+
+test('generation nodes default to the 1K canvas size', () => {
+  const p = newProject('owner'), generation = newNode('generation', { x: 0, y: 0 })
+  p.nodes.push(generation)
+  assert.equal(generation.size, '1024x1024')
+  assert.equal(validateProject(p, 'owner').nodes[0].size, '1024x1024')
+})
+
+test('canvas size picker offers common sizes when unrestricted and respects configured sizes', () => {
+  const unrestricted = canvasGenerationSizes()
+  assert.ok(unrestricted.includes('auto') && unrestricted.includes('1024x1024') && unrestricted.includes('2048x2048') && unrestricted.includes('3840x2160'))
+  assert.deepEqual(canvasGenerationSizes(['auto', '1024x1024']), ['1024x1024', 'auto'])
+  assert.deepEqual(canvasGenerationSizes(['auto', '2048x1024']), ['auto', '2048x1024'])
 })
 
 test('removing nodes leaves paid tasks intact and ungrouping preserves children', () => {

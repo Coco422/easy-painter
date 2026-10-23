@@ -11,6 +11,7 @@ import {
 import type { CanvasNode, CanvasRun } from '@/lib/canvas/model'
 import type { PublicModel } from '@/lib/types'
 import { modelCreditCost } from '@/lib/model-pricing'
+import { canvasGenerationSizes, GENERATION_SIZE_OPTIONS, defaultGenerationSize } from '@/lib/generation-sizes'
 const props = defineProps<{
   node: CanvasNode
   selected: boolean
@@ -40,8 +41,9 @@ const model = computed(() =>
   enabledModels.value.find((m) => m.id === props.node.model),
 )
 const sizes = computed(() =>
-  model.value?.supported_sizes.length ? model.value.supported_sizes : ['auto'],
+  canvasGenerationSizes(model.value?.supported_sizes),
 )
+const sizeLabels = new Map<string, string>(GENERATION_SIZE_OPTIONS.map((option) => [option.value, option.label]))
 const status = computed(() =>
   props.run
     ? {
@@ -56,7 +58,7 @@ const status = computed(() =>
     : '',
 )
 function selectModel() {
-  props.node.size = model.value?.supported_sizes[0] ?? 'auto'
+  props.node.size = defaultGenerationSize(model.value?.supported_sizes)
   emit('edit')
 }
 </script>
@@ -168,25 +170,20 @@ function selectModel() {
           </option>
         </select>
         <div class="generator-options">
-          <select
-            v-model="node.size"
-            aria-label="图片尺寸"
-            @focus="emit('checkpoint')"
-            @change="emit('edit')"
-          >
-            <option v-for="size in sizes" :key="size" :value="size">
-              {{ size === 'auto' ? '自动尺寸' : size }}
-            </option></select
-          ><select
-            v-model.number="node.count"
-            aria-label="生成数量"
-            @focus="emit('checkpoint')"
-            @change="emit('edit')"
-          >
-            <option :value="1">1 张</option>
-            <option :value="2">2 张</option>
-            <option :value="4">4 张</option>
-          </select>
+          <label class="generator-option generator-option--wide">
+            <span>尺寸</span>
+            <select v-model="node.size" aria-label="图片尺寸" @focus="emit('checkpoint')" @change="emit('edit')">
+              <option v-for="size in sizes" :key="size" :value="size">{{ sizeLabels.get(size) ?? size }} · {{ size === 'auto' ? '渠道决定' : size }}</option>
+            </select>
+          </label>
+          <label class="generator-option">
+            <span>数量</span>
+            <select v-model.number="node.count" aria-label="生成数量" @focus="emit('checkpoint')" @change="emit('edit')">
+              <option :value="1">1 张</option>
+              <option :value="2">2 张</option>
+              <option :value="4">4 张</option>
+            </select>
+          </label>
         </div>
         <button
           class="canvas-primary"
@@ -195,7 +192,7 @@ function selectModel() {
         >
           <Sparkles :size="14" />{{ busy ? '正在提交…' : '生成图片'
           }}<span v-if="model"
-            >{{ modelCreditCost(model, node.size) * (node.count ?? 1) }} 丝</span
+            >{{ modelCreditCost(model, node.size ?? 'auto') * (node.count ?? 1) }} 丝</span
           >
         </button>
       </div>
@@ -348,11 +345,15 @@ select:focus {
   font-size: 11px;
 }
 .generator-options {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(82px, .65fr);
   gap: 7px;
 }
-.generator-options select:first-child {
-  flex: 1;
+.generator-option { display: grid; min-width: 0; gap: 4px; color: var(--text-muted); font-size: 10.5px; }
+.generator-option select { width: 100%; min-height: 34px; padding: 7px 9px; cursor: pointer; }
+.node-generator select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 420px) {
+  .generator-options { grid-template-columns: minmax(0, 1fr); }
 }
 .canvas-primary {
   display: flex;

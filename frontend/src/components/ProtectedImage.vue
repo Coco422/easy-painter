@@ -4,15 +4,17 @@ import { authState, fetchImageFile, getAdminAuthHeader, getAuthHeader } from '@/
 import { mediaAvailable, retryableMediaStatus, sameOriginMedia } from '@/lib/media-state'
 import { useMediaClock } from '@/composables/useMediaClock'
 import ImageViewer from '@/components/ImageViewer.vue'
+import { downloadObjectUrl } from '@/lib/image-download'
 
 const props = withDefaults(defineProps<{
-  src?: string | null; state?: string; expiresAt?: string | null; alt?: string; eager?: boolean; admin?: boolean; preview?: boolean
+  src?: string | null; state?: string; expiresAt?: string | null; alt?: string; eager?: boolean; admin?: boolean; preview?: boolean; downloadName?: string
 }>(), { state: 'available', alt: '', eager: false, admin: false })
 const emit = defineEmits<{ invalid: []; loaded: [event: Event]; 'preview-change': [show: boolean] }>()
 const now = useMediaClock()
 const frame = ref<HTMLElement | null>(null)
 const visible = ref(false)
 const objectUrl = ref('')
+const objectType = ref('')
 const loaded = ref(false)
 const previewOpen = ref(false)
 const failed = ref(false)
@@ -32,6 +34,7 @@ function clear() {
   retryTimer = undefined
   if (objectUrl.value) URL.revokeObjectURL(objectUrl.value)
   objectUrl.value = ''
+  objectType.value = ''
   retrying.value = false
 }
 function openPreview(event: Event) {
@@ -40,6 +43,10 @@ function openPreview(event: Event) {
   if (allowed.value && objectUrl.value && loaded.value && !failed.value) previewOpen.value = true
 }
 function imageLoaded(event: Event) { loaded.value = true; emit('loaded', event) }
+function downloadImage() {
+  if (!objectUrl.value || !loaded.value || !allowed.value) return
+  downloadObjectUrl(objectUrl.value, props.downloadName || 'easy-painter-image', objectType.value || 'image/png')
+}
 watch(previewOpen, show => emit('preview-change', show), { flush: 'sync' })
 function begin() {
   clear()
@@ -66,6 +73,7 @@ function begin() {
       const blob = await response.blob()
       if (signal.aborted || version !== generation || !allowed.value) return
       objectUrl.value = URL.createObjectURL(blob)
+      objectType.value = blob.type
       retrying.value = false
     } catch {
       if (signal.aborted || version !== generation || !allowed.value) return
@@ -104,7 +112,7 @@ onBeforeUnmount(() => { observer?.disconnect(); clear() })
       <span v-else-if="failed">图片暂时无法显示</span>
       <span v-else>{{ retrying ? '连接不稳定，重试一次…' : '正在加载图片…' }}</span>
     </span>
-    <ImageViewer v-if="preview && allowed && objectUrl && !failed" v-model:show="previewOpen" :src="objectUrl" />
+    <ImageViewer v-if="preview && allowed && objectUrl && !failed" v-model:show="previewOpen" :src="objectUrl" @download="downloadImage" />
   </span>
 </template>
 <style scoped>

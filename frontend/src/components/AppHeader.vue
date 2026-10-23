@@ -94,7 +94,7 @@ async function handleLogout() {
 <style scoped>
 .site-header { max-width:1280px; gap:24px; padding-block:16px; z-index:5; }
 .brand { display:flex; align-items:center; gap:10px; flex-shrink:0; text-decoration:none; min-width:0; }
-.brand-title { white-space:nowrap; font-size:21px; }
+.brand-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:21px; }
 .brand-logo { width:40px; height:40px; object-fit:contain; flex-shrink:0; }
 .header-primary-nav { display:flex; flex:1; align-items:center; justify-content:center; gap:8px; }
 .primary-nav-link { display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:0 14px; border-radius:6px; font-size:14px; font-weight:500; color:var(--text-secondary); text-decoration:none; white-space:nowrap; transition:background 160ms,color 160ms; }

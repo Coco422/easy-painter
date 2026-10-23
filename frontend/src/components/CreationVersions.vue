@@ -8,6 +8,7 @@ import { useGenerationQuips } from '@/composables/useGenerationQuips'
 import { creationResultBatches, creationVersionRows, type CreationHistory } from '@/lib/creation-versions'
 import { mediaAvailable } from '@/lib/media-state'
 import { useMediaClock } from '@/composables/useMediaClock'
+import { resolveImageLayout } from '@/lib/image-layout'
 import type { JobDetailResponse } from '@/lib/types'
 
 const props = defineProps<{
@@ -41,6 +42,7 @@ const now = useMediaClock()
 const quips = useGenerationQuips(computed(() => props.jobs))
 const instruction = ref('')
 const target = ref('')
+const actualImageRatios = ref<Record<string, number>>({})
 const rows = computed(() => creationVersionRows(props.jobs, props.parents, props.membership))
 const batches = computed(() => creationResultBatches(rows.value).map(batch => {
   const jobs = batch.candidates.flatMap(candidate => candidate.rows.map(row => row.job))
@@ -75,6 +77,17 @@ const raceLabel = computed(() => {
 const editCount = computed(() => Math.max(0, summary.value.total - (currentBatch.value?.candidates.length ?? 0)))
 const overviewSubtitle = computed(() => hasPeers.value ? `${currentBatch.value?.candidates.length} 张候选图` : '单张作品')
 const showVersionTitle = computed(() => !props.drafting && Boolean(hasPeers.value || hasBranch.value || selected.value?.parentId))
+function imageRatio(job: JobDetailResponse) {
+  return actualImageRatios.value[job.job_id] ?? resolveImageLayout(job.size, job.aspect_ratio).ratio
+}
+function imageAspectStyle(job: JobDetailResponse) {
+  return { '--image-ratio': imageRatio(job), aspectRatio: `${imageRatio(job)}` }
+}
+function rememberImageRatio(jobId: string, event: Event) {
+  const image = event.target as HTMLImageElement
+  if (image.naturalWidth > 0 && image.naturalHeight > 0)
+    actualImageRatios.value[jobId] = image.naturalWidth / image.naturalHeight
+}
 watch([() => props.selectedId, () => props.drafting], () => { showEditor.value = false; instruction.value = '' })
 function openEditor() { showEditor.value = true }
 function billingLabel(job: JobDetailResponse) {
@@ -92,7 +105,7 @@ function stageText(job: JobDetailResponse) {
 <template>
   <section v-if="selected" class="version-workspace" aria-label="绘图结果">
     <nav class="drawing-navigation" aria-label="最近绘图">
-      <span class="drawing-navigation-label">最近绘图</span>
+      <span class="drawing-navigation-label" title="刷新后按本地保留的最多 100 条版本关系恢复作品；完整任务记录见全部历史。">最近绘图</span>
       <div class="drawing-tabs" role="group" aria-label="切换绘图批次">
         <button v-if="drafting" type="button" class="drawing-tab drawing-tab--draft" aria-pressed="true"><Plus :size="14" aria-hidden="true" /><strong>新的绘图</strong><small>待创作</small></button>
         <button v-for="batch in batches" :key="batch.id" type="button" class="drawing-tab" :class="{ 'drawing-tab--live': batch.pending }" :aria-pressed="!drafting && currentBatch?.id === batch.id" :aria-label="`查看第 ${batch.number} ${batch.candidates.length > 1 ? '批绘图' : '次绘图'}，${batch.candidates.length} 张${batch.candidates.length > 1 ? '候选图' : '图片'}${batch.pending ? `，${batch.pending} 张生成中` : ''}`" :title="batch.candidates[0]?.job.prompt" @click="emit('select', batch.candidates[0]!.job.job_id)">
@@ -127,8 +140,8 @@ function stageText(job: JobDetailResponse) {
     <div class="batch-results">
       <section v-if="hasPeers" class="candidate-batch" :aria-label="`第 ${currentBatch.number} 批候选图`">
         <div class="candidate-grid" role="group" :aria-label="`选择第 ${currentBatch.number} 批候选图`">
-          <button v-for="candidate in currentBatch.candidates" :key="candidate.id" type="button" class="candidate-card" :class="{ 'candidate-card--live': candidate.job.status === 'queued' || candidate.job.status === 'processing' }" :aria-pressed="selected.rootId === candidate.id" :aria-label="`第 ${currentBatch.number} 批，${candidate.label}，${statusLabel[candidate.job.status]}`" @click="emit('select', candidate.job.job_id)">
-            <ProtectedImage v-if="candidate.job.status === 'succeeded'" :src="candidate.job.thumbnail_url || candidate.job.image_url" :state="candidate.job.media_state" :expires-at="candidate.job.media_expires_at" :alt="candidate.label" @invalid="emit('refresh', candidate.job)" />
+          <button v-for="candidate in currentBatch.candidates" :key="candidate.id" type="button" class="candidate-card" :class="{ 'candidate-card--live': candidate.job.status === 'queued' || candidate.job.status === 'processing' }" :style="imageAspectStyle(candidate.job)" :aria-pressed="selected.rootId === candidate.id" :aria-label="`第 ${currentBatch.number} 批，${candidate.label}，${statusLabel[candidate.job.status]}`" @click="emit('select', candidate.job.job_id)">
+            <ProtectedImage v-if="candidate.job.status === 'succeeded'" :src="candidate.job.thumbnail_url || candidate.job.image_url" :state="candidate.job.media_state" :expires-at="candidate.job.media_expires_at" :alt="candidate.label" @loaded="rememberImageRatio(candidate.job.job_id, $event)" @invalid="emit('refresh', candidate.job)" />
             <GenerationWaiting v-else-if="candidate.job.status === 'queued' || candidate.job.status === 'processing'" class="candidate-waiting" :status="candidate.job.status" :quip="quips.get(candidate.job.job_id)!" compact />
             <span v-else class="candidate-placeholder" role="status">{{ statusLabel[candidate.job.status] }}</span>
             <span class="candidate-badge" :class="{ 'candidate-badge--refunded': candidate.job.billing_status === 'refunded' }">{{ candidate.rows.some(row => row.parentId) ? `${candidate.rows.filter(row => row.parentId).length} 个修改` : billingLabel(candidate.job) }}</span>
@@ -143,8 +156,8 @@ function stageText(job: JobDetailResponse) {
             <span class="result-chip">{{ batchTitle }} · {{ resultLabel }}</span>
             <span class="result-chip-state" :class="{ live: selected.job.status === 'queued' || selected.job.status === 'processing' }">{{ stageText(selected.job) }}</span>
           </div>
-          <div class="version-preview">
-            <ProtectedImage v-if="selected.job.status === 'succeeded'" :key="selected.job.job_id" :src="selected.job.image_url" :state="selected.job.media_state" :expires-at="selected.job.media_expires_at" :alt="hasPeers || hasBranch ? `${batchTitle} · ${resultLabel}` : '生成结果'" eager preview @invalid="emit('refresh', selected.job)" />
+          <div class="version-preview" :style="imageAspectStyle(selected.job)">
+            <ProtectedImage v-if="selected.job.status === 'succeeded'" :key="selected.job.job_id" :src="selected.job.image_url" :state="selected.job.media_state" :expires-at="selected.job.media_expires_at" :alt="hasPeers || hasBranch ? `${batchTitle} · ${resultLabel}` : '生成结果'" :download-name="selected.job.job_id" eager preview @loaded="rememberImageRatio(selected.job.job_id, $event)" @invalid="emit('refresh', selected.job)" />
             <GenerationWaiting v-else-if="selected.job.status === 'queued' || selected.job.status === 'processing'" :key="selected.job.job_id" :status="selected.job.status" :quip="quips.get(selected.job.job_id)!" :hint="selected.job.error_message" />
             <div v-else class="version-placeholder" role="status"><strong>{{ statusLabel[selected.job.status] }}</strong><span>{{ selected.job.error_message || '这张图片生成失败。' }}</span></div>
           </div>
@@ -231,9 +244,9 @@ function stageText(job: JobDetailResponse) {
 /* ---- candidates rail ---- */
 .batch-results { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .candidate-batch { min-width: 0; }
-.candidate-grid { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px; }
-/* Responsive square tiles: widen with the pane, wrap when there are many. */
-.candidate-card { position: relative; flex: 1 1 84px; min-width: 84px; max-width: 148px; aspect-ratio: 1 / 1; display: grid; place-items: stretch; padding: 0; overflow: hidden; border-radius: 9px; }
+.candidate-grid { display: flex; flex-wrap: nowrap; gap: 8px; min-width: 0; overflow-x: auto; padding: 2px; scrollbar-width: thin; }
+/* Thumbnail frames follow the source ratio while keeping a consistent visual height. */
+.candidate-card { position: relative; flex: 0 0 auto; width: clamp(64px, calc(116px * var(--image-ratio, 1)), 220px); display: grid; place-items: stretch; padding: 0; overflow: hidden; border-radius: 9px; }
 .candidate-card[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .candidate-card :deep(.protected-image), .candidate-placeholder, .candidate-waiting { height: 100%; min-height: 0; border-radius: 8px; }
 .candidate-placeholder { display: grid; place-content: center; justify-items: center; gap: 4px; color: var(--text-secondary); font-size: 11px; }
@@ -257,7 +270,7 @@ function stageText(job: JobDetailResponse) {
 .result-chip { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: blur(6px); font-size: 11px; color: var(--text-secondary); }
 .result-chip-state { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-accent); background: color-mix(in srgb, var(--bg-surface) 82%, transparent); font-size: 11px; color: var(--accent-strong); }
 .result-chip-state.live { animation: pending-pulse 1.6s ease-in-out infinite; }
-.version-preview { height: clamp(320px, 52vh, 560px); min-height: 0; }
+.version-preview { width: 100%; max-width: min(100%, calc(72vh * var(--image-ratio, 1))); min-height: 0; margin-inline: auto; overflow: hidden; border-radius: 8px; background: var(--bg-input); }
 .version-preview :deep(.protected-image) { height: 100%; min-height: 0; }
 .version-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 100%; background: var(--bg-input); color: var(--text-secondary); font-size: 13px; padding: 24px; text-align: center; }
 .result-frame-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--bg-surface); }
@@ -305,9 +318,8 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
   .batch-results { flex-direction: column-reverse; }
 }
 @media (max-width: 560px) {
-  .candidate-card { flex-basis: 72px; min-width: 72px; }
+  .candidate-card { width: clamp(64px, calc(96px * var(--image-ratio, 1)), 180px); }
   .candidate-waiting :deep(.waiting-quip-slot) { padding: 0 4px; -webkit-line-clamp: 2; }
-  .version-preview { height: 46vh; }
   .version-canvas-actions label { width: 100%; }
   .version-canvas-actions select { flex: 1; max-width: none; }
 }

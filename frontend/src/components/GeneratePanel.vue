@@ -3,6 +3,7 @@ import ProtectedImage from '@/components/ProtectedImage.vue'
 import MediaExpiry from '@/components/MediaExpiry.vue'
 import { Check, ChevronDown, History, ImagePlus, Loader2, Sparkles, X } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { NSelect } from 'naive-ui'
 
 import ReferenceHistoryDrawer from '@/components/ReferenceHistoryDrawer.vue'
 import { useReferenceImages } from '@/composables/useReferenceImages'
@@ -10,6 +11,7 @@ import { ApiError } from '@/lib/api'
 import { resolveImageLayout } from '@/lib/image-layout'
 import { modelBaseCreditCost, modelCreditCost } from '@/lib/model-pricing'
 import { validGenerationCount } from '@/lib/generation-batch'
+import { GENERATION_SIZE_OPTIONS } from '@/lib/generation-sizes'
 import { buildCreationPrompt, creationInputError, creationLanguages, creationStyles, creationTemplates, type CreationMode } from '@/lib/creation-presets'
 import type { BatchCount, ImageSize, PublicModel, ReferenceImageItem } from '@/lib/types'
 
@@ -60,6 +62,14 @@ const finalPrompt = computed(() => buildCreationPrompt(props.prompt, {
 const currentTemplate = computed(() => creationTemplates.find(item => item.id === template.value) ?? creationTemplates[0])
 const currentModelLabel = computed(() => selectedModelConfig.value?.label ?? '暂无可用模型')
 const editMode = computed(() => props.mode === 'edit')
+const templateOptions = computed(() => creationTemplates.map(item => ({ label: item.label, value: item.id })))
+const styleOptions = computed(() => creationStyles.map(item => ({ label: item.label, value: item.id })))
+const languageOptions = computed(() => creationLanguages.map(item => ({ label: item.label, value: item.id })))
+const modelOptions = computed(() => props.models.filter(item => item.enabled).map(model => ({
+  label: `${model.label} · ${modelCreditCost(model, props.selectedSize)} 丝${props.mode !== 'text' && model.supports_reference_image === false ? '（不支持参考图）' : ''}`,
+  value: model.id,
+  disabled: !modelSupportsCurrentInput(model),
+})))
 const activePresets = computed(() => editMode.value ? [] : [
   { id: 'template', label: currentTemplate.value.label, active: template.value !== 'free' },
   { id: 'style', label: creationStyles.find(item => item.id === style.value)?.label ?? '', active: style.value !== 'auto' },
@@ -96,21 +106,7 @@ function resetDraft() {
 }
 function focusPrompt() { promptInput.value?.focus({ preventScroll: true }) }
 defineExpose({ applyTemplate, resetDraft, focusPrompt, isUploading })
-const sizeOptions: Array<{ value: ImageSize; label: string; detail: string }> = [
-  { value: 'auto', label: '自动', detail: '由渠道决定' },
-  { value: '1024x1024', label: '方图', detail: '1024 × 1024' },
-  { value: '1280x720', label: '横图', detail: '1280 × 720' },
-  { value: '720x1280', label: '竖图', detail: '720 × 1280' },
-  { value: '1792x1024', label: '横图', detail: '1792 × 1024' },
-  { value: '1024x1792', label: '竖图', detail: '1024 × 1792' },
-  { value: '1536x1024', label: '横图', detail: '1536 × 1024' },
-  { value: '1024x1536', label: '竖图', detail: '1024 × 1536' },
-  { value: '2048x2048', label: '2K 方图', detail: '2048 × 2048' },
-  { value: '2048x1152', label: '2K 横图', detail: '2048 × 1152' },
-  { value: '1152x2048', label: '2K 竖图', detail: '1152 × 2048' },
-  { value: '3840x2160', label: '4K 横图', detail: '3840 × 2160' },
-  { value: '2160x3840', label: '4K 竖图', detail: '2160 × 3840' },
-]
+const sizeOptions = GENERATION_SIZE_OPTIONS
 const batchOptions: BatchCount[] = [1, 2, 4]
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -238,6 +234,24 @@ function modelSupportsCurrentInput(model: PublicModel) {
   return model.enabled && (props.mode === 'text' || model.supports_reference_image !== false)
 }
 
+function updateTemplate(value: string | number | null) {
+  if (typeof value !== 'string') return
+  template.value = value
+  presetNotice.value = ''
+}
+
+function updateStyle(value: string | number | null) {
+  if (typeof value === 'string') style.value = value
+}
+
+function updateLanguage(value: string | number | null) {
+  if (typeof value === 'string') language.value = value
+}
+
+function updateModel(value: string | number | null) {
+  if (typeof value === 'string') emit('update:model', value)
+}
+
 function sizeSupportedBySelectedModel(size: ImageSize) {
   const model = selectedModelConfig.value
   return !model?.supported_sizes.length || model.supported_sizes.includes(size)
@@ -363,28 +377,19 @@ function removePreset(id: string) {
     <p v-if="presetNotice && !editMode" class="creation-notice" role="status">{{ presetNotice }}</p>
 
     <div class="parameter-pills" role="group" aria-label="生成参数">
-      <label v-if="!editMode" class="pill">
+      <div v-if="!editMode" class="pill pill--select">
         <span class="pill-label">创作用途</span>
-        <select v-model="template" :disabled="submitting" @change="presetNotice = ''">
-          <option v-for="item in creationTemplates" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-        <ChevronDown :size="13" aria-hidden="true" />
-      </label>
-      <label v-if="!editMode" class="pill">
+        <NSelect class="parameter-select" aria-label="创作用途" :value="template" :options="templateOptions" :disabled="submitting" size="small" @update:value="updateTemplate" />
+      </div>
+      <div v-if="!editMode" class="pill pill--select">
         <span class="pill-label">视觉风格</span>
-        <select v-model="style" :disabled="submitting">
-          <option v-for="item in creationStyles" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-        <ChevronDown :size="13" aria-hidden="true" />
-      </label>
-      <label v-if="!editMode" class="pill">
+        <NSelect class="parameter-select" aria-label="视觉风格" :value="style" :options="styleOptions" :disabled="submitting" size="small" @update:value="updateStyle" />
+      </div>
+      <div v-if="!editMode" class="pill pill--select">
         <span class="pill-label">图中文字</span>
-        <select v-model="language" :disabled="submitting">
-          <option v-for="item in creationLanguages" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-        <ChevronDown :size="13" aria-hidden="true" />
-      </label>
-      <label class="pill pill--action">
+        <NSelect class="parameter-select" aria-label="图中文字" :value="language" :options="languageOptions" :disabled="submitting" size="small" @update:value="updateLanguage" />
+      </div>
+      <div class="pill pill--action">
         <span class="pill-label">尺寸</span>
         <button
           type="button"
@@ -397,14 +402,14 @@ function removePreset(id: string) {
           <span
             class="size-trigger-preview"
             :class="{ 'is-auto': selectedSizeOption.value === 'auto' }"
-            :style="{ aspectRatio: selectedSizeLayout.aspectRatio }"
+            :style="{ aspectRatio: selectedSizeLayout.aspectRatio, '--image-ratio': selectedSizeLayout.ratio }"
             aria-hidden="true"
           />
           <span class="size-trigger-copy">{{ selectedSizeOption.label }} <small>{{ selectedSizeOption.detail }}</small></span>
           <ChevronDown :size="13" aria-hidden="true" />
         </button>
-      </label>
-      <label class="pill pill--action">
+      </div>
+      <div class="pill pill--action pill--quantity">
         <span class="pill-label">数量</span>
         <span class="batch-segmented" role="group" aria-label="生成数量">
           <button
@@ -420,20 +425,11 @@ function removePreset(id: string) {
           </button>
         </span>
         <input class="batch-custom-count" type="number" min="1" step="1" aria-label="自定义生成数量" :value="selectedBatchCount" :disabled="submitting" @input="emit('update:batch-count', Number(($event.target as HTMLInputElement).value))" />
-      </label>
-      <label class="pill">
+      </div>
+      <div class="pill pill--select pill--model">
         <span class="pill-label">模型</span>
-        <select
-          :value="selectedModel"
-          :disabled="submitting || uploading || uploadingBatch"
-          @change="emit('update:model', ($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="model in models.filter((item) => item.enabled)" :key="model.id" :value="model.id" :disabled="!modelSupportsCurrentInput(model)">
-            {{ model.label }} · {{ modelCreditCost(model, selectedSize) }} 丝{{ mode !== 'text' && model.supports_reference_image === false ? '（不支持参考图）' : '' }}
-          </option>
-        </select>
-        <ChevronDown :size="13" aria-hidden="true" />
-      </label>
+        <NSelect class="parameter-select" aria-label="模型" :value="selectedModel" :options="modelOptions" :disabled="submitting || uploading || uploadingBatch" size="small" @update:value="updateModel" />
+      </div>
       <button
         v-for="preset in activePresets"
         :key="preset.id"
@@ -482,7 +478,7 @@ function removePreset(id: string) {
           <header class="size-picker-header">
             <div>
               <p class="section-label">Canvas size</p>
-              <h2 id="size-picker-title">选择画布尺寸</h2>
+              <h2 id="size-picker-title">选择图片尺寸</h2>
               <span>方框展示成图的大致宽高比例。</span>
             </div>
             <button type="button" aria-label="关闭尺寸选择" @click="sizePickerOpen = false"><X :size="19" /></button>
@@ -513,7 +509,7 @@ function removePreset(id: string) {
               <Check v-if="selectedSize === option.value" :size="16" class="size-option-check" aria-hidden="true" />
             </button>
           </div>
-          <p class="size-picker-note">低成本渠道对尺寸的执行并不严格，成图以实际比例为准。</p>
+          <p class="size-picker-note">遵循 OpenAI 官方尺寸上限。4K 高于 2560 × 1440，属于实验性尺寸，仅在渠道明确支持时开放；自动按 1K 计费。</p>
         </section>
       </div>
     </Teleport>
@@ -521,7 +517,7 @@ function removePreset(id: string) {
 </template>
 
 <style scoped>
-.generate-panel { display: grid; gap: 14px; padding: 0; }
+.generate-panel { display: grid; min-width: 0; gap: 16px; padding: 16px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 .prompt-card { border: 1px solid var(--border); border-radius: 14px; background: var(--bg-input); transition: border-color 160ms, box-shadow 160ms; }
@@ -559,38 +555,46 @@ function removePreset(id: string) {
 .reference-count { margin: 0 12px 6px; font-size: 11.5px; color: var(--text-muted); }
 .reference-error { margin: 0 12px 8px; color: var(--error); font-size: 12px; line-height: 1.6; }
 
-.parameter-pills { display: flex; flex-wrap: wrap; gap: 7px; }
+.parameter-pills { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pill {
-  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  position: relative; display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
   min-height: 34px; padding: 0 10px;
   border: 1px solid var(--border); border-radius: 999px;
   background: transparent; color: var(--text-primary); font: inherit; font-size: 12.5px;
 }
 .pill:hover { border-color: var(--border-accent); background: var(--accent-glow); }
-.pill-label { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
-.pill select {
-  appearance: none; border: 0; background: transparent; outline: none; cursor: pointer;
-  color: var(--text-primary); font: inherit; font-size: 12.5px; max-width: 132px;
-  padding: 0 1px 0 0; text-overflow: ellipsis;
-}
-.pill select:disabled { cursor: not-allowed; opacity: .55; }
+.pill-label { flex: 0 0 auto; color: var(--text-muted); font-size: 11.5px; white-space: nowrap; }
+.parameter-select { flex: 1 1 0; min-width: 0; }
+.parameter-select :deep(.n-base-selection) { min-width: 0; width: 100%; height: 28px; border: 0; background: transparent; box-shadow: none; }
+.parameter-select :deep(.n-base-selection-label) { min-width: 0; padding: 0 2px; background: transparent; }
+.parameter-select :deep(.n-base-selection-input) { min-width: 0; color: var(--text-primary); font: inherit; font-size: 12px; }
+.parameter-select :deep(.n-base-selection-input__content) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parameter-select :deep(.n-base-selection__border), .parameter-select :deep(.n-base-selection__state-border) { display: none; }
+.parameter-select :deep(.n-base-selection .n-base-suffix) { width: 18px; }
+.parameter-select :deep(.n-base-selection .n-base-suffix__arrow) { font-size: 11px; color: var(--text-muted); }
+.parameter-select :deep(.n-base-selection--disabled) { opacity: .6; }
+.pill--select { display: grid; gap: 4px; padding: 8px 12px; border-radius: 10px; }
 .pill > svg { color: var(--text-muted); flex: none; }
-.pill--action { padding-right: 6px; }
+.pill--action { min-width: 0; padding-right: 6px; }
+.pill--model, .pill--quantity { grid-column: 1 / -1; }
+.pill--removable { justify-self: start; width: fit-content; max-width: 100%; }
 .pill--removable { color: var(--accent-strong); border-color: var(--border-accent); background: var(--accent-soft); cursor: pointer; }
 .pill--removable svg { opacity: .7; }
 
 .size-picker-trigger {
-  display: inline-flex; align-items: center; gap: 6px; padding: 0;
-  border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
+  display: inline-flex; flex: 1 1 auto; align-items: center; gap: 4px; width: auto; min-width: 0; min-height: 0; height: auto;
+  padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
-.size-trigger-preview { width: 14px; border: 1.5px solid var(--text-muted); border-radius: 2px; }
+.size-trigger-preview { width: 12px; height: min(20px, calc(12px / var(--image-ratio, 1))); border: 1.5px solid var(--text-muted); border-radius: 2px; flex: 0 0 auto; }
 .size-trigger-preview.is-auto { border-style: dashed; }
-.size-trigger-copy small { color: var(--text-muted); font-size: 10.5px; }
+.size-trigger-copy { display: inline-flex; flex: 1 1 auto; min-width: 0; align-items: baseline; gap: 4px; overflow: hidden; white-space: nowrap; }
+.size-trigger-copy small { overflow: hidden; color: var(--text-muted); font-size: 9.5px; text-overflow: ellipsis; }
+.pill--action > svg { flex: 0 0 auto; }
 
-.batch-segmented { display: inline-flex; gap: 2px; }
+.batch-segmented { display: inline-flex; flex: 1 1 auto; min-width: 0; min-height: 0; justify-content: center; gap: 2px; overflow: visible; border: 0; border-radius: 0; background: transparent; }
 .batch-segmented button {
-  min-height: 26px; padding: 0 8px; border: 1px solid transparent; border-radius: 999px;
-  background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+  flex: 1 1 0; min-width: 0; min-height: 26px; padding: 0 5px; border: 1px solid transparent; border-radius: 999px;
+  background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer;
 }
 .batch-segmented button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
 .batch-segmented button:disabled { opacity: .5; cursor: not-allowed; }
@@ -608,20 +612,20 @@ function removePreset(id: string) {
 }
 .primary-button:hover:not(:disabled) { background: var(--accent-strong); }
 .primary-button:disabled { opacity: .5; cursor: not-allowed; }
-.billing-estimate { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; padding: 0 3px; }
-.billing-estimate strong { font: 500 12px var(--font-mono); color: var(--text-primary); white-space: nowrap; line-height: 1.45; }
-.billing-estimate span { font-size: 11px; color: var(--text-muted); white-space: nowrap; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; }
+.generate-panel .billing-estimate { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: baseline; gap: 4px 12px; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-secondary); }
+.billing-estimate strong { min-width: 0; font: 500 12px/1.45 var(--font-mono); color: var(--text-primary); overflow-wrap: anywhere; }
+.billing-estimate span { min-width: 0; font-size: 11px; color: var(--text-muted); line-height: 1.4; text-align: right; overflow-wrap: anywhere; }
 .billing-estimate.insufficient strong { color: var(--error); }
 .billing-estimate.insufficient span { color: var(--error); }
-.foot-note { margin: -6px 1px 0; font-size: 11.5px; line-height: 1.6; color: var(--text-muted); }
+.foot-note { min-width: 0; margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--text-muted); overflow-wrap: anywhere; }
 
 .creation-notice { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
 .creation-submit-error { margin: 0; color: var(--error); font-size: 13px; line-height: 1.6; }
 .creation-advanced summary {
-  display: flex; justify-content: space-between; gap: 10px; cursor: pointer;
+  display: flex; min-width: 0; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; cursor: pointer;
   font-size: 11.5px; color: var(--text-muted);
 }
-.creation-advanced summary span { font-family: var(--font-mono); }
+.creation-advanced summary span { flex: none; margin-left: auto; font-family: var(--font-mono); }
 .creation-final-prompt {
   margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg-input); color: var(--text-secondary); font-size: 12px;
@@ -630,8 +634,17 @@ function removePreset(id: string) {
 .generate-panel button:focus-visible, .generate-panel select:focus-visible, .generate-panel summary:focus-visible,
 .size-picker-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .size-picker-note { margin: 14px 0 0; font-size: 11.5px; color: var(--text-muted); line-height: 1.6; }
+
+@media (max-width: 360px) {
+  .parameter-pills { grid-template-columns: minmax(0, 1fr); }
+  .pill { gap: 4px; padding-inline: 8px; font-size: 11.5px; }
+  .pill-label { font-size: 10.5px; }
+  .pill--quantity { gap: 4px; }
+  .batch-segmented button { padding-inline: 2px; font-size: 11px; }
+  .batch-custom-count { width: 34px; }
+}
 @media (pointer: coarse) {
-  .prompt-textarea, .pill select, .batch-custom-count { font-size: 16px; }
+  .prompt-textarea, .batch-custom-count { font-size: 16px; }
   .prompt-tool-button { min-height: 44px; }
 }
 </style>

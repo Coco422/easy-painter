@@ -34,7 +34,7 @@ export const mockModels: PublicModel[] = [
   {
     id: 'gpt-image-2', label: 'GPT-Image-2', enabled: true,
     supports_reference_image: true, max_reference_images: 5,
-    supported_sizes: ['auto', '1024x1024', '1280x720', '720x1280', '1536x1024', '1024x1536'],
+    supported_sizes: ['1024x1024', '1280x720', '720x1280', '1536x1024', '1024x1536', '1792x1024', '1024x1792', '2048x2048', '2048x1152', '1152x2048', '3840x2160', '2160x3840', 'auto'],
     base_credit_cost: 8, credit_cost: 5,
     credit_cost_by_size: { auto: 5, '1k': 5, '2k': 9, '4k': 15 },
     base_credit_cost_by_size: { auto: 8, '1k': 8, '2k': 12, '4k': 20 },

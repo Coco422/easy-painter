@@ -36,6 +36,7 @@ import {
 import type { CanvasNode, CanvasProject, Point } from '@/lib/canvas/model'
 import { downloadBlob, exportProject } from '@/lib/canvas/storage'
 import { useCanvasSession } from '@/lib/canvas/session'
+import { defaultGenerationSize } from '@/lib/generation-sizes'
 const props = defineProps<{ initial: CanvasProject; canCloud: boolean }>()
 const router = useRouter()
 const session = useCanvasSession(props.initial)
@@ -121,7 +122,7 @@ function add(type: CanvasNode['type'], position = center()) {
   if (type === 'generation') {
     const m = meta.value?.models.find((m) => m.enabled)
     node.model = m?.id ?? ''
-    node.size = m?.supported_sizes[0] ?? 'auto'
+    node.size = defaultGenerationSize(m?.supported_sizes)
   }
   project.value.nodes.push(node)
   selected.value = [node.id]

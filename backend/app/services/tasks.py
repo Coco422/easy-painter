@@ -19,6 +19,7 @@ from app.services.job_lifecycle import (
 )
 from app.services.model_service import (
     load_failover_providers_for_model,
+    load_size_route_providers_for_model,
     load_primary_upstream_model_id,
     load_provider_by_id,
     load_provider_for_model,
@@ -27,6 +28,7 @@ from app.services.media_lifecycle import enqueue_deletion
 from app.services.reference_images import job_reference_images
 from app.services.storage import MinioStorageService, StorageError
 from app.services.upstream import ReferenceImageForUpstream, UpstreamImageClient, UpstreamServiceError
+from app.services.model_pricing import size_pricing_tier
 
 
 configure_logging()
@@ -62,10 +64,53 @@ def _generate_with_failover(
     provider_config: dict,
     reference_images: list[ReferenceImageForUpstream],
 ):
+    routed = load_size_route_providers_for_model(db, job.model, job.size)
+    if routed:
+        last_error: UpstreamServiceError | None = None
+        for provider in routed:
+            if len(reference_images) > provider.max_reference_images:
+                logger.info(
+                    "Skipping size route provider=%s because it supports at most %s reference images.",
+                    provider.name,
+                    provider.max_reference_images,
+                )
+                continue
+            logger.info(
+                "Routing image generation size=%s model=%s to provider=%s model=%s.",
+                job.size,
+                job.model,
+                provider.name,
+                provider.model_id,
+            )
+            try:
+                return UpstreamImageClient(provider.config.as_dict()).generate_image(
+                    prompt=job.prompt,
+                    model=provider.model_id,
+                    size=job.size,
+                    quality=getattr(job, "quality", None),
+                    aspect_ratio=job.aspect_ratio,
+                    reference_images=reference_images,
+                )
+            except UpstreamServiceError as error:
+                last_error = error
+                if not error.failover_safe:
+                    raise
+        if last_error:
+            raise last_error
+
+    # 4K is an explicitly paid, provider-specific capability. Never silently
+    # send it to the ordinary 1K channel when the dedicated route is missing.
+    if size_pricing_tier(job.size) == "4k":
+        raise UpstreamServiceError(
+            "当前模型的 4K 专用渠道不可用，请稍后选择 1K 或 2K。",
+            retryable=False,
+        )
+
     request = {
         "prompt": job.prompt,
         "model": load_primary_upstream_model_id(job.model),
         "size": job.size,
+        "quality": getattr(job, "quality", None),
         "aspect_ratio": job.aspect_ratio,
         "reference_images": reference_images,
     }

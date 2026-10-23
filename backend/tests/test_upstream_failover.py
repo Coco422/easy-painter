@@ -126,6 +126,114 @@ def test_fallback_skipped_when_reference_image_limit_is_exceeded(monkeypatch):
     assert calls == ["https://primary.example.com/v1"]
 
 
+def test_4k_request_uses_only_the_configured_size_route(monkeypatch):
+    calls = []
+    result = object()
+
+    class FakeClient:
+        def __init__(self, config):
+            self.config = config
+
+        def generate_image(self, **request):
+            calls.append((self.config["base_url"], request))
+            return result
+
+    dedicated = FailoverProvider(
+        name="ggwk1（4K专用）",
+        config=_provider("https://4k.example.com/v1"),
+        model_id="gpt-image-2",
+        max_reference_images=1,
+    )
+    monkeypatch.setattr(tasks, "UpstreamImageClient", FakeClient)
+    monkeypatch.setattr(tasks, "load_size_route_providers_for_model", lambda db, model_id, size: [dedicated])
+    job = SimpleNamespace(model="gpt-image-2", prompt="draw a lake", size="3840x2160", aspect_ratio="auto")
+
+    actual = tasks._generate_with_failover(
+        object(),
+        job=job,
+        provider_config={"base_url": "https://cheap.example.com/v1", "api_key": "cheap-key"},
+        reference_images=[],
+    )
+
+    assert actual is result
+    assert len(calls) == 1
+    assert calls[0][0] == "https://4k.example.com/v1"
+    assert calls[0][1]["size"] == "3840x2160"
+
+
+def test_4k_request_never_falls_back_to_the_ordinary_provider(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        def __init__(self, config):
+            self.config = config
+
+        def generate_image(self, **request):
+            calls.append(self.config["base_url"])
+            return object()
+
+    monkeypatch.setattr(tasks, "UpstreamImageClient", FakeClient)
+    monkeypatch.setattr(tasks, "load_size_route_providers_for_model", lambda db, model_id, size: [])
+    job = SimpleNamespace(model="gpt-image-2", prompt="draw a lake", size="3840x2160", aspect_ratio="auto")
+
+    with pytest.raises(UpstreamServiceError, match="4K 专用渠道不可用"):
+        tasks._generate_with_failover(
+            object(),
+            job=job,
+            provider_config={"base_url": "https://cheap.example.com/v1", "api_key": "cheap-key"},
+            reference_images=[],
+        )
+
+    assert calls == []
+
+
+def test_4k_route_resolves_the_matching_upstream_key_and_supported_size(monkeypatch):
+    import json
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.core.config import Settings
+    from app.db.base import Base
+    from app.models.model_config import ModelConfig
+    from app.models.upstream_provider import UpstreamProvider
+    from app.services import model_service
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        primary = UpstreamProvider(name="primary", base_url="https://cheap.example.com/v1", api_key="cheap-key")
+        cheap = UpstreamProvider(name="ggwk1（1K/2K）", base_url="https://same.example.com/v1", api_key="cheap-key")
+        dedicated = UpstreamProvider(name="ggwk1（4K专用）", base_url="https://same.example.com/v1", api_key="4k-key")
+        db.add_all([primary, cheap, dedicated])
+        db.flush()
+        db.add(ModelConfig(id="gpt-image-2", provider_id=primary.id, label="image"))
+        db.commit()
+        config = Settings(
+            public_models_json='[{"id":"gpt-image-2"}]',
+            additional_upstreams_json=json.dumps([{
+                "name": "ggwk1（4K专用）",
+                "base_url": "https://same.example.com/v1",
+                "api_key": "4k-key",
+                "models": [{
+                    "id": "gpt-image-2",
+                    "fallback_for": "gpt-image-2",
+                    "upstream_model_id": "gpt-image-2",
+                    "route_for_sizes": ["4k"],
+                    "supported_sizes": ["3840x2160", "2160x3840"],
+                }],
+            }]),
+        )
+        monkeypatch.setattr(model_service, "get_settings", lambda: config)
+
+        [route] = model_service.load_size_route_providers_for_model(db, "gpt-image-2", "3840x2160")
+        assert route.name == "ggwk1（4K专用）"
+        assert route.config.api_key == "4k-key"
+        assert route.config.base_url == "https://same.example.com/v1"
+        assert route.model_id == "gpt-image-2"
+        assert model_service.load_size_route_providers_for_model(db, "gpt-image-2", "2048x2048") == []
+        assert model_service.load_size_route_providers_for_model(db, "gpt-image-2", "3200x1800") == []
+    engine.dispose()
+
+
 @pytest.mark.parametrize("supports_reference_image,expected_limit", [(True, 1), (False, 0)])
 def test_fallback_loader_preserves_reference_capabilities(monkeypatch, supports_reference_image, expected_limit):
     import json

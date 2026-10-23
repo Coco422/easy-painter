@@ -63,6 +63,13 @@ function nowIso(offsetSeconds: number) {
   return new Date(Date.now() + offsetSeconds * 1000).toISOString()
 }
 
+function mockCostForSize(model: (typeof mockModels)[number], size: string) {
+  const match = /^(\d+)x(\d+)$/.exec(size)
+  const longEdge = match ? Math.max(Number(match[1]), Number(match[2])) : 0
+  const tier = longEdge > 2560 ? '4k' : longEdge > 1792 ? '2k' : '1k'
+  return model.credit_cost_by_size?.[size] ?? model.credit_cost_by_size?.[tier] ?? model.credit_cost
+}
+
 /** Deterministic, cheap landscape/portrait artwork so media tests have a real image. */
 function sceneSvg(seed: string, width: number, height: number) {
   let hash = 2166136261
@@ -125,7 +132,7 @@ export function easyPainterMock(): Plugin {
         size: seed.size ?? '1024x1024',
         status,
         billing_status: status === 'failed' ? 'refunded' : status === 'succeeded' ? 'settled' : 'reserved',
-        credit_cost: seed.creditCost ?? model.credit_cost,
+        credit_cost: seed.creditCost ?? mockCostForSize(model, seed.size ?? '1024x1024'),
         created_at: createdAt,
         finished_at: status === 'succeeded' || status === 'failed' ? new Date(startedAt + 9000).toISOString() : null,
         error_message: failed ? seed.errorMessage ?? '生成失败，费用已全额退回。' : null,
@@ -312,7 +319,7 @@ export function easyPainterMock(): Plugin {
         size: body.size ?? 'auto',
         status: 'queued',
         billing_status: 'reserved',
-        credit_cost: model.credit_cost,
+        credit_cost: mockCostForSize(model, body.size ?? '1024x1024'),
         created_at: new Date().toISOString(),
         finished_at: null,
         error_message: null,
