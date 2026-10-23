@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 PASSWORD = 'Painter123!'
 ACCOUNTS = {'demo': '00000000-0000-4000-8000-000000000001', 'demo2': '00000000-0000-4000-8000-000000000002'}
-MODELS = [dict(id='mock-image', label='Mock 绘图模型', enabled=True, supports_reference_image=True, max_reference_images=5, supported_sizes=['auto', '1280x720', '1024x1024'], base_credit_cost=5, credit_cost=5)]
+MODELS = [dict(id='mock-image', label='Mock 绘图模型', enabled=True, supports_reference_image=True, max_reference_images=5, supported_sizes=['1024x1024', '1280x720', '720x1280', '1536x1024', '1024x1536', '1792x1024', '1024x1792', '2048x2048', '2048x1152', '1152x2048', '3840x2160', '2160x3840', 'auto'], base_credit_cost=5, credit_cost=5)]
 JOBS, REFERENCES, TOKENS, IDEMPOTENCY = {}, {}, {}, {}
 REQUESTS = []
 CONTROL = {}

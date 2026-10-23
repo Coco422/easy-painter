@@ -1,5 +1,6 @@
 // Interaction model inspired by basketikun/infinite-canvas; see THIRD_PARTY_NOTICES.md.
 import { randomId } from '../browser-crypto.ts'
+export type CanvasQuality = 'default' | 'high'
 export type Point = { x: number; y: number }
 export type Viewport = Point & { scale: number }
 export type NodeKind = 'text' | 'image' | 'generation' | 'group'
@@ -15,6 +16,7 @@ export interface CanvasNode extends Point {
   prompt?: string
   model?: string
   size?: string
+  quality?: CanvasQuality
   count?: number
 }
 export interface CanvasEdge {
@@ -29,6 +31,7 @@ export interface CanvasRun {
   prompt: string
   model: string
   size: string
+  quality?: CanvasQuality
   referenceIds: string[]
   uploadedIds: string[]
   jobId?: string
@@ -101,11 +104,11 @@ export function newNode(type: NodeKind, point: Point): CanvasNode {
       generation: '生成图片',
       group: '素材组',
     }[type],
-    width: type === 'generation' ? 320 : 280,
-    height: type === 'generation' ? 350 : type === 'text' ? 210 : 260,
+    width: type === 'generation' ? 360 : 280,
+    height: type === 'generation' ? 420 : type === 'text' ? 210 : 260,
     ...(type === 'text' ? { text: '' } : {}),
     ...(type === 'generation'
-      ? { prompt: '', model: '', size: 'auto', count: 1 }
+      ? { prompt: '', model: '', size: '1024x1024', count: 1 }
       : {}),
   }
 }
@@ -239,6 +242,7 @@ export function validateProject(raw: unknown, ownerId: string): CanvasProject {
       (n.assetId !== undefined && !hash(n.assetId)) ||
       (n.model !== undefined && !str(n.model, 128)) ||
       (n.size !== undefined && !str(n.size, 32)) ||
+      (n.quality !== undefined && !['default', 'high'].includes(n.quality)) ||
       (n.count !== undefined && ![1, 2, 4].includes(n.count))
     )
       throw new Error('画布节点数据无效。')
@@ -275,6 +279,7 @@ export function validateProject(raw: unknown, ownerId: string): CanvasProject {
       !str(r.prompt, 20000) ||
       !str(r.model, 128) ||
       !str(r.size, 32) ||
+      (r.quality !== undefined && !['default', 'high'].includes(r.quality)) ||
       !Array.isArray(r.referenceIds) ||
       r.referenceIds.length > 100 ||
       !r.referenceIds.every(hash) ||

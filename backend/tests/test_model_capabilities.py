@@ -1,3 +1,5 @@
+import json
+
 from app.api import routes
 from app.core.config import Settings
 
@@ -67,6 +69,62 @@ def test_additional_upstreams_json_parses_provider_and_model_config():
 
     assert provider["name"] == "第三方"
     assert provider["models"][0]["id"] == "image-model"
+
+
+def test_additional_upstreams_accept_explicit_size_routes_and_reject_invalid_routes():
+    import pytest
+
+    common = {
+        "name": "4K 专用渠道",
+        "base_url": "https://images.example.com/v1",
+        "api_key": "test-key",
+        "models": [{"id": "gpt-image-2", "fallback_for": "gpt-image-2", "route_for_sizes": ["4k"]}],
+    }
+    settings = Settings(
+        public_models_json='[{"id":"gpt-image-2"}]',
+        additional_upstreams_json=json.dumps([common]),
+    )
+    assert settings.additional_upstreams[0]["models"][0]["route_for_sizes"] == ["4k"]
+
+    invalid_tier = {**common, "models": [{**common["models"][0], "route_for_sizes": ["8k"]}]}
+    with pytest.raises(ValueError, match="1k, 2k or 4k"):
+        Settings(
+            public_models_json='[{"id":"gpt-image-2"}]',
+            additional_upstreams_json=json.dumps([invalid_tier]),
+        ).additional_upstreams
+
+    missing_target = {**common, "models": [{"id": "gpt-image-2", "route_for_sizes": ["4k"]}]}
+    with pytest.raises(ValueError, match="fallback_for"):
+        Settings(
+            public_models_json='[{"id":"gpt-image-2"}]',
+            additional_upstreams_json=json.dumps([missing_target]),
+        ).additional_upstreams
+
+
+def test_gpt_image_4k_sizes_are_hidden_until_a_4k_route_is_configured(monkeypatch):
+    from app.services import model_service
+
+    no_route = Settings(public_models_json='[{"id":"gpt-image-2"}]')
+    monkeypatch.setattr(model_service, "get_settings", lambda: no_route)
+    sizes = model_service._public_model_sizes("gpt-image-2", [])
+    assert "1024x1024" in sizes
+    assert "2048x2048" in sizes
+    assert "3840x2160" not in sizes
+    assert "2160x3840" not in sizes
+
+    routed = Settings(
+        public_models_json='[{"id":"gpt-image-2"}]',
+        additional_upstreams_json=json.dumps([{
+            "name": "4K 专用渠道",
+            "base_url": "https://images.example.com/v1",
+            "api_key": "test-key",
+            "models": [{"id": "gpt-image-2", "fallback_for": "gpt-image-2", "route_for_sizes": ["4k"]}],
+        }]),
+    )
+    monkeypatch.setattr(model_service, "get_settings", lambda: routed)
+    sizes = model_service._public_model_sizes("gpt-image-2", [])
+    assert "3840x2160" in sizes
+    assert "2160x3840" in sizes
 
 
 def test_additional_upstreams_json_rejects_invalid_provider_shape():

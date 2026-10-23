@@ -48,6 +48,7 @@ class UpstreamImageClient:
         model: str,
         size: str | None = None,
         aspect_ratio: str | None = None,
+        quality: str | None = None,
         reference_image: ReferenceImageForUpstream | None = None,
         reference_images: list[ReferenceImageForUpstream] | None = None,
     ) -> GeneratedImageResult:
@@ -56,7 +57,7 @@ class UpstreamImageClient:
         if not base_url or not api_key:
             raise UpstreamServiceError("生成服务尚未配置完成。", retryable=False)
 
-        request_payload = self._generation_payload(prompt=prompt, model=model, size=size, aspect_ratio=aspect_ratio)
+        request_payload = self._generation_payload(prompt=prompt, model=model, size=size, aspect_ratio=aspect_ratio, quality=quality)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -73,7 +74,7 @@ class UpstreamImageClient:
             request_kwargs = {
                 "data": {
                     key: self._form_value(value)
-                    for key, value in self._edit_payload(request_payload, model=model).items()
+                    for key, value in self._edit_payload(request_payload, model=model, quality=quality).items()
                 },
                 "headers": {"Authorization": headers["Authorization"]},
                 "files": files if len(files) > 1 else dict(files),
@@ -180,13 +181,14 @@ class UpstreamImageClient:
         model: str,
         size: str | None,
         aspect_ratio: str | None,
+        quality: str | None = None,
     ) -> dict[str, int | str | bool]:
         payload: dict[str, int | str | bool] = {
             "model": model,
             "prompt": prompt,
             "n": 1,
             "size": self._resolve_size(size=size, aspect_ratio=aspect_ratio),
-            "quality": self.config.get("default_quality", "high"),
+            "quality": quality or self.config.get("default_quality", "high"),
             "output_format": self.config.get("default_output_format", "jpeg"),
             "output_compression": self.config.get("default_output_compression", 85),
             "background": self.config.get("default_background", "auto"),
@@ -198,16 +200,19 @@ class UpstreamImageClient:
             payload["watermark"] = False
         return payload
 
-    def _edit_payload(self, request_payload: dict[str, int | str | bool], *, model: str) -> dict[str, int | str | bool]:
+    def _edit_payload(self, request_payload: dict[str, int | str | bool], *, model: str, quality: str | None = None) -> dict[str, int | str | bool]:
         if not self._is_doubao_seedream(model):
             return request_payload
 
-        return {
+        payload = {
             "model": request_payload["model"],
             "prompt": request_payload["prompt"],
             "size": request_payload["size"],
             "watermark": False,
         }
+        if quality == "high":
+            payload["quality"] = "high"
+        return payload
 
     @staticmethod
     def _is_doubao_seedream(model: str) -> bool:

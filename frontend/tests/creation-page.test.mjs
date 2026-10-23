@@ -7,6 +7,7 @@ import * as versions from '../src/lib/creation-versions.ts'
 import * as media from '../src/lib/media-state.ts'
 import * as batches from '../src/lib/generation-batch.ts'
 import * as layout from '../src/lib/image-layout.ts'
+import * as generationSizes from '../src/lib/generation-sizes.ts'
 import * as pricing from '../src/lib/model-pricing.ts'
 import * as quipLibrary from '../src/lib/generation-quips.ts'
 import { compileComponent, compileModule, node, renderer, all, hasClass, textOf, teleportTarget } from './helpers/vue-renderer.mjs'
@@ -54,10 +55,28 @@ function mount({ live = false, pending = null } = {}) {
   }
   const modules = {
     vue, 'lucide-vue-next': new Proxy({}, { get: () => icon }),
+    'naive-ui': {
+      NSelect: {
+        props: ['value', 'options', 'disabled'],
+        setup(props, { attrs, emit }) {
+          return () => vue.h('select', {
+            ...attrs,
+            value: props.value,
+            disabled: props.disabled,
+            onChange: event => emit('update:value', event.target.value),
+          }, (props.options ?? []).map(option => vue.h('option', {
+            key: option.value,
+            value: option.value,
+            disabled: option.disabled,
+          }, option.label)))
+        },
+      },
+    },
     'vue-router': { useRoute: () => ({ query: { prompt: '旧海报' } }), useRouter: () => ({ push() {} }) },
     '@/lib/api': api, '@/lib/auth': { authState: vue.reactive({ user: { id: 'owner', credits: 1000 }, sessionId: 'session' }), fetchCurrentUser: async () => {}, isLoggedIn: () => true },
     '@/lib/browser-crypto': { randomId: () => `key-${++identifier}` },
     '@/lib/creation-presets': presets, '@/lib/generation-batch': batches, '@/lib/image-layout': layout, '@/lib/model-pricing': pricing,
+    '@/lib/generation-sizes': generationSizes,
     '@/lib/creation-versions': versions, '@/lib/media-state': media,
     '@/lib/generation-quips': quipLibrary,
     '@/composables/useMediaClock': { useMediaClock: () => vue.ref(Date.now()) },
@@ -80,7 +99,8 @@ function mount({ live = false, pending = null } = {}) {
   app.mount(root)
   const find = cls => all(root).filter(item => hasClass(item, cls))
   const choose = async (label, value) => {
-    const select = all(root).find(item => item.tag === 'label' && textOf(item).startsWith(label)).children.find(item => item.tag === 'select')
+    const field = all(root).find(item => hasClass(item, 'pill--select') && textOf(item).startsWith(label))
+    const select = all(field).find(item => item.tag === 'select')
     select.options.forEach(option => { option.selected = option.value === value })
     select.value = value
     if (select.listeners.change) select.listeners.change({ target: select })
@@ -95,6 +115,9 @@ test('new drawing clears content and all presets, keeps generation parameters an
   const view = mount()
   try {
     await flush()
+    assert.equal(view.find('candidate-card').length, 0, 'refresh keeps the workspace on a new drawing')
+    assert.equal(view.find('workspace-empty')[0] !== undefined, true)
+    assert.equal(all(view.root).some(item => item.tag === 'img' && String(item.props.src ?? '').startsWith('/image/')), false, 'draft state does not fetch historical result images')
     await view.choose('创作用途', 'poster')
     await view.choose('视觉风格', 'photo')
     await view.choose('图中文字', 'en')
@@ -105,7 +128,7 @@ test('new drawing clears content and all presets, keeps generation parameters an
     view.find('batch-segmented')[0].children.find(item => item.tag === 'button' && textOf(item).includes('4 张')).props.onClick()
     await vue.nextTick()
     assert.match(textOf(view.find('creation-final-prompt')[0]), /海报.*写实摄影.*英语/s)
-    await view.find('workspace-new-drawing')[0].props.onClick()
+    await view.find('results-toolbar-button--primary')[0].props.onClick()
     await flush()
     assert.equal(view.find('prompt-textarea')[0].props.value, '')
     assert.equal(view.find('prompt-textarea')[0].focused, true)
@@ -139,8 +162,8 @@ test('a previous batch finishing cannot replace the new drawing or clear its new
   const view = mount({ live: true })
   try {
     await flush()
-    assert.equal(view.find('workspace-new-drawing')[0].props.disabled, false)
-    await view.find('workspace-new-drawing')[0].props.onClick()
+    assert.equal(view.find('results-toolbar-button--primary')[0].props.disabled, false)
+    await view.find('results-toolbar-button--primary')[0].props.onClick()
     view.input('新的风景')
     view.finishOld()
     await flush()
@@ -159,13 +182,13 @@ test('uploading blocks reset, and a new draft never erases an unknown revision r
     await flush()
     view.uploading.value = true
     await vue.nextTick()
-    assert.equal(view.find('workspace-new-drawing')[0].props.disabled, true)
-    await view.find('workspace-new-drawing')[0].props.onClick()
+    assert.equal(view.find('results-toolbar-button--primary')[0].props.disabled, true)
+    await view.find('results-toolbar-button--primary')[0].props.onClick()
     assert.equal(view.find('prompt-textarea')[0].props.value, '旧海报')
     assert.equal(view.selectedReferences.value.length, 1)
     view.uploading.value = false
     await vue.nextTick()
-    await view.find('workspace-new-drawing')[0].props.onClick()
+    await view.find('results-toolbar-button--primary')[0].props.onClick()
     await flush()
     assert.deepEqual(JSON.parse(JSON.stringify(view.history.pending)), pending)
     assert.match(textOf(view.root), /确认上次改图任务/)

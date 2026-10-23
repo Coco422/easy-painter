@@ -42,7 +42,11 @@ from app.schemas.job import (
     TogglePublicRequest,
 )
 from app.schemas.user_group import UserGroupPolicyResponse
-from app.services.model_service import load_models_from_db
+from app.services.model_service import (
+    apply_public_model_size_capabilities,
+    has_configured_size_route_for_model,
+    load_models_from_db,
+)
 from app.services.billing import InsufficientCreditsError, reserve_job_credits
 from app.services.group_policy import (
     STANDARD_POLICY,
@@ -56,6 +60,7 @@ from app.services.model_pricing import (
     base_credit_cost_for_size,
     effective_credit_cost_map,
     normalize_credit_cost_by_size,
+    size_pricing_tier,
 )
 from app.services.job_lifecycle import mark_generation_failed
 from app.services.media_lifecycle import enqueue_deletion
@@ -130,7 +135,7 @@ def _load_models(db: Session, settings: Settings) -> list[dict[str, str | bool |
         return load_models_from_db(db)
     except Exception:
         logger.exception("Failed to load model configs from database; falling back to settings.")
-    return settings.public_models
+    return apply_public_model_size_capabilities(settings.public_models, settings)
 
 
 def _models_for_policy(
@@ -323,6 +328,13 @@ def create_generation_job(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="当前模型不支持该尺寸，请切换尺寸或模型。",
         )
+    if size_pricing_tier(payload.size) == "4k" and not has_configured_size_route_for_model(
+        payload.model, "4k", size=payload.size, settings=settings,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="当前模型尚未配置 4K 专用渠道，请选择 1K 或 2K 尺寸。",
+        )
 
     reference_ids = payload.ordered_reference_ids
     reference_count = len(reference_ids) + int(parsed_payload.reference_image is not None)
@@ -372,6 +384,7 @@ def create_generation_job(
         prompt=prompt,
         model=payload.model,
         size=payload.size,
+        quality=payload.quality,
         aspect_ratio=payload.aspect_ratio or "auto",
         status=JobStatus.QUEUED,
         user_id=current_user.id,
@@ -535,14 +548,17 @@ def _job_request_fingerprint(parsed_payload: ParsedCreateJobPayload, prompt: str
     reference_value = reference_ids if len(reference_ids) > 1 else (reference_ids[0] if reference_ids else None)
     if parsed_payload.reference_image:
         reference_value = hashlib.sha256(parsed_payload.reference_image.image_bytes).hexdigest()
-    canonical = json.dumps(
-        {
+    canonical_data = {
             "prompt": prompt,
             "model": payload.model,
             "size": payload.size,
             "aspect_ratio": payload.aspect_ratio or "auto",
             "reference": reference_value,
-        },
+    }
+    if payload.quality is not None:
+        canonical_data["quality"] = payload.quality
+    canonical = json.dumps(
+        canonical_data,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -580,6 +596,7 @@ async def _parse_create_job_payload(request: Request) -> ParsedCreateJobPayload:
             "prompt": form.get("prompt"),
             "model": form.get("model"),
             "size": form.get("size") or None,
+            "quality": form.get("quality") or None,
             "aspect_ratio": form.get("aspect_ratio") or "auto",
         }
         try:
@@ -657,6 +674,7 @@ def _build_job_detail_response(
         model_label=job.model_label_snapshot,
         provider_name=job.provider_name_snapshot,
         size=job.size,
+        quality=job.quality,
         aspect_ratio=job.aspect_ratio,
         error_message=job.error_message,
         credit_cost=charge.amount if charge else job.credit_cost_snapshot,

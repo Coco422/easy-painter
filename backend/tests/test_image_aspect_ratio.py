@@ -37,6 +37,24 @@ def test_upstream_falls_back_to_legacy_aspect_ratio_when_size_is_auto():
     assert client._resolve_size(size="auto", aspect_ratio="9:16") == "1024x1792"
 
 
+def test_upstream_quality_override_wins_and_missing_override_uses_channel_default():
+    client = UpstreamImageClient({**TEST_PROVIDER_CONFIG, "default_quality": "medium"})
+
+    assert client._generation_payload(
+        prompt="画一朵花", model="gpt-image-2", size="auto", aspect_ratio="auto",
+    )["quality"] == "medium"
+    assert client._generation_payload(
+        prompt="画一朵花", model="gpt-image-2", size="auto", aspect_ratio="auto", quality="high",
+    )["quality"] == "high"
+
+
+def test_create_job_quality_only_allows_explicit_high_override():
+    assert CreateJobRequest(prompt="画一朵花", model="gpt-image-2", quality="high").quality == "high"
+    assert CreateJobRequest(prompt="画一朵花", model="gpt-image-2").quality is None
+    with pytest.raises(ValidationError):
+        CreateJobRequest(prompt="画一朵花", model="gpt-image-2", quality="medium")
+
+
 def test_upstream_size_matches_legacy_aspect_ratio():
     client = UpstreamImageClient(TEST_PROVIDER_CONFIG)
 

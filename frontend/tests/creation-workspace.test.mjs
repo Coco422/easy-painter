@@ -6,6 +6,7 @@ import ts from 'typescript'
 import * as presets from '../src/lib/creation-presets.ts'
 import * as versions from '../src/lib/creation-versions.ts'
 import * as media from '../src/lib/media-state.ts'
+import * as generationSizes from '../src/lib/generation-sizes.ts'
 
 const compiled = ts.transpileModule(fs.readFileSync(new URL('../src/composables/useCreationVersions.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -29,6 +30,7 @@ function setup({ storage = new Map(), storageFailure = false, create, upload, so
     '@/lib/auth': { authState, fetchCurrentUser: async () => {}, fetchImageFile: async url => { calls.images.push(url); return new Response(new Blob(['png'], { type: 'image/png' })) } },
     '@/lib/browser-crypto': { randomId: () => 'stable-key' },
     '@/lib/creation-presets': presets, '@/lib/creation-versions': versions, '@/lib/media-state': media,
+    '@/lib/generation-sizes': generationSizes,
     '@/lib/canvas/model': {}, '@/lib/canvas/from-generation': {}, '@/lib/canvas/storage': { listProjects: async () => [] },
   }
   const context = {

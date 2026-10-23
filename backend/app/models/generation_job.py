@@ -48,6 +48,7 @@ class GenerationJob(MediaDerivativeMixin, Base):
     billing_multiplier_bps_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     generated_retention_hours_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size: Mapped[str] = mapped_column(String(32), default="auto")
+    quality: Mapped[str | None] = mapped_column(String(32), nullable=True)
     aspect_ratio: Mapped[str] = mapped_column(String(16), default="auto")
     reference_images: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
     reference_image_key: Mapped[str | None] = mapped_column(String(512), nullable=True)

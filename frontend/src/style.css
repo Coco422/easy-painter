@@ -721,9 +721,9 @@ a {
 
 .size-picker-dialog {
   width: min(880px, 100%);
-  max-height: min(760px, calc(100vh - 48px));
+  max-height: min(860px, calc(100vh - 32px));
   overflow: auto;
-  padding: 24px;
+  padding: 24px 24px 28px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-surface);

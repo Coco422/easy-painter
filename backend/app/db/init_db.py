@@ -1,6 +1,6 @@
 import logging
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from app.core.auth import hash_password
 from app.core.config import get_settings
@@ -25,6 +25,22 @@ from app.services.model_pricing import normalize_credit_cost_by_size
 
 
 logger = logging.getLogger(__name__)
+
+
+def _find_provider(db, *, name: str, base_url: str, api_key: str) -> UpstreamProvider | None:
+    provider = db.scalar(
+        select(UpstreamProvider)
+        .where(UpstreamProvider.name == name, UpstreamProvider.base_url == base_url)
+        .limit(1)
+    )
+    if provider:
+        return provider
+    provider = db.scalar(
+        select(UpstreamProvider)
+        .where(UpstreamProvider.base_url == base_url, UpstreamProvider.api_key == api_key)
+        .limit(1)
+    )
+    return provider or db.scalar(select(UpstreamProvider).where(UpstreamProvider.name == name).limit(1))
 
 
 def init_db() -> None:
@@ -79,13 +95,11 @@ def _seed_providers_and_models() -> None:
     settings = get_settings()
     db = SessionLocal()
     try:
-        provider = db.scalar(
-            select(UpstreamProvider).where(
-                or_(
-                    UpstreamProvider.name == settings.upstream_provider_name,
-                    UpstreamProvider.base_url == settings.upstream_base_url,
-                )
-            )
+        provider = _find_provider(
+            db,
+            name=settings.upstream_provider_name,
+            base_url=settings.upstream_base_url,
+            api_key=settings.upstream_api_key,
         )
         if not provider:
             provider = UpstreamProvider(
@@ -135,13 +149,11 @@ def _seed_providers_and_models() -> None:
             model.credit_cost_by_size = normalize_credit_cost_by_size(model_dict.get("credit_cost_by_size"))
 
         for provider_config in settings.additional_upstreams:
-            provider = db.scalar(
-                select(UpstreamProvider).where(
-                    or_(
-                        UpstreamProvider.name == provider_config["name"],
-                        UpstreamProvider.base_url == provider_config["base_url"],
-                    )
-                )
+            provider = _find_provider(
+                db,
+                name=provider_config["name"],
+                base_url=provider_config["base_url"],
+                api_key=provider_config["api_key"],
             )
             if provider and (
                 provider.name != provider_config["name"]

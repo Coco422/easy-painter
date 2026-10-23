@@ -22,14 +22,15 @@ cp .env.example .env
 模型下拉列表、参考图能力、单次参考图上限和尺寸限制以管理后台的模型配置为准。`PUBLIC_MODELS_JSON` 用于首次初始化与数据库读取失败时的回退；修改它不会覆盖已经入库的模型。 `upstream_model_id` 可在公共模型 ID 与主 chatgpt2api 实际模型名不同的时候使用。若要将现有数据库收敛到唯一公共模型并禁用旧模型，设置 `SYNC_PUBLIC_MODELS_FROM_ENV=true` 后重启 API/worker；该操作只禁用，不删除历史记录。
 
 模型可选配置 `credit_cost_by_size`，按档设置基础价格，例如 `{"1k":5,"2k":8,"4k":12}`；`auto` 按 1K 档计费。具体尺寸按长边归档：不超过 1792px 为 1K，1793–2560px 为 2K，超过 2560px 为 4K。管理后台也可直接编辑此映射。创建任务时由服务端按请求尺寸选价，再应用用户组倍率并将价格快照写入账务；未配置档位的旧模型继续使用 `credit_cost`。
+OpenAI GPT Image 2 的尺寸校验遵循官方上限：宽高必须是 16 的倍数，最长边不超过 3840px，长短边比例不超过 3:1，总像素在 655,360–8,294,400 之间；高于 2560×1440 的尺寸属于 experimental。前台只展示模型实际配置并且符合上述上限的尺寸。
 部分绘图模型生成时间可能达到 30 到 600 秒，生产环境的 `UPSTREAM_TIMEOUT_SECONDS` 应保持在 700 左右。
 
-需要同时接入多个 OpenAI 兼容渠道时，可在 `.env` 设置 `ADDITIONAL_UPSTREAMS_JSON`。默认只新增不存在的渠道和模型，不覆盖现有数据库配置；设置 `SYNC_PUBLIC_MODELS_FROM_ENV=true` 后会更新环境中配置的模型并停用未列出的模型，但不会删除历史记录。公共模型 ID 在数据库中全局唯一。备用映射可复用公共模型 ID，并设置 `fallback_for` 指向该模型，这样只保留一个前台选项。渠道凭证仅放在私有 `.env`，不能提交。渠道返回 `/v1/models` 不代表每个模型都兼容本站调用的 `/images/generations` 和 `/images/edits`，需要分别实测生成和参考图编辑；渠道价格也不自动换算为本站丝数。
+需要同时接入多个 OpenAI 兼容渠道时，可在 `.env` 设置 `ADDITIONAL_UPSTREAMS_JSON`。默认只新增不存在的渠道和模型，不覆盖现有数据库配置；设置 `SYNC_PUBLIC_MODELS_FROM_ENV=true` 后会更新环境中配置的模型并停用未列出的模型，但不会删除历史记录。公共模型 ID 在数据库中全局唯一。备用映射可复用公共模型 ID，并设置 `fallback_for` 指向该模型，这样只保留一个前台选项。`route_for_sizes` 可配置 `1k`、`2k`、`4k` 尺寸路由；4K 请求只会调用标记了 `route_for_sizes:["4k"]` 的已验证渠道，缺少该渠道时直接失败并退款，不会静默降级到普通渠道。两个渠道使用同一 `base_url` 时必须使用不同的 `name` 和各自的 API Key。渠道凭证仅放在私有 `.env`，不能提交。渠道返回 `/v1/models` 不代表每个模型都兼容本站调用的 `/images/generations` 和 `/images/edits`，需要分别实测生成和参考图编辑；渠道价格也不自动换算为本站丝数。
 
 示例：
 
 ```dotenv
-ADDITIONAL_UPSTREAMS_JSON=[{"name":"ggwk1（第一第三方）","base_url":"https://www.ggwk1.online/v1","api_key":"replace-with-private-key","timeout_seconds":700,"models":[{"id":"gpt-image-2","label":"备用模型","upstream_model_id":"gpt-image-2","fallback_for":"gpt-image-2","enabled":true,"supports_reference_image":true,"max_reference_images":1,"supported_sizes":[],"credit_cost":5,"credit_cost_by_size":{"1k":5,"2k":8,"4k":12}}]}]
+ADDITIONAL_UPSTREAMS_JSON=[{"name":"ggwk1（1K/2K）","base_url":"https://www.ggwk1.online/v1","api_key":"replace-with-private-1k-key","timeout_seconds":700,"models":[{"id":"gpt-image-2","label":"备用模型","upstream_model_id":"gpt-image-2","fallback_for":"gpt-image-2","enabled":true,"supports_reference_image":true,"max_reference_images":1,"supported_sizes":[],"credit_cost":5,"credit_cost_by_size":{"1k":5,"2k":8},"route_for_sizes":["1k","2k"]}]},{"name":"ggwk1（4K专用）","base_url":"https://www.ggwk1.online/v1","api_key":"replace-with-private-4k-key","timeout_seconds":700,"models":[{"id":"gpt-image-2","label":"4K 专用路由","upstream_model_id":"gpt-image-2","fallback_for":"gpt-image-2","enabled":true,"supports_reference_image":true,"max_reference_images":1,"supported_sizes":["3840x2160","2160x3840"],"credit_cost":12,"route_for_sizes":["4k"]}]}]
 ```
 
 示例价格是本站按请求尺寸收取的丝数，与渠道自身定价分开核算。备用映射不会创建重复的公共模型；独立模型 ID 被其他渠道占用时会保留原配置并跳过冲突项，后台可查看日志。主渠道连接失败或明确返回失败响应时才立即切换备用；读取超时或成功响应解析失败不立即切换，以减少结果不明时重复调用的风险。参考图数量超过备用配置上限时会跳过该备用；示例只启用已验证的单参考图备用能力。

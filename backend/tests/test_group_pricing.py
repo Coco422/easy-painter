@@ -17,6 +17,7 @@ from app.models.user_group import UserGroup
 from app.services.group_policy import calculate_effective_credit_cost
 from app.services.billing import refund_job_charge
 from app.services.model_pricing import base_credit_cost_for_size, size_pricing_tier
+from fastapi import HTTPException
 
 
 def make_session():
@@ -199,4 +200,30 @@ async def test_create_job_charges_price_for_requested_size(monkeypatch):
     assert job.base_credit_cost_snapshot == 8
     assert job.credit_cost_snapshot == 8
     assert db.get(User, user.id).credits == 12
+    db.close()
+
+
+@pytest.mark.anyio
+async def test_unconfigured_4k_request_is_rejected_before_reserving_credits(monkeypatch):
+    db = make_session()
+    user = User(id="user-no-4k", username="no4k", password_hash="hash", group_code="standard", credits=20)
+    db.add(user)
+    db.add(CreditTransaction(user_id=user.id, amount=20, balance_after=20, reason="test:opening",
+                             transaction_type=CreditTransactionType.OPENING_BALANCE, idempotency_key="opening:no4k"))
+    db.commit()
+    monkeypatch.setattr(routes, "load_models_from_db", lambda _: [{
+        "id": "model-1", "label": "Model One", "enabled": True,
+        "supports_reference_image": True, "supported_sizes": [], "credit_cost": 5,
+    }])
+
+    with pytest.raises(HTTPException) as error:
+        await routes.create_job(
+            make_request("3840x2160"), idempotency_key="no-4k-route", db=db,
+            redis_client=object(), settings=Settings(), current_user=user,
+        )
+
+    assert error.value.status_code == 422
+    assert "4K 专用渠道" in error.value.detail
+    assert db.get(User, user.id).credits == 20
+    assert db.scalar(select(GenerationJob).where(GenerationJob.idempotency_key == "no-4k-route")) is None
     db.close()

@@ -29,6 +29,7 @@ MODEL_SUPPORTED_SIZES = {
     "grok-4.1-image": GROK_SUPPORTED_SIZES,
     "grok-imagine-image": GROK_SUPPORTED_SIZES,
 }
+SIZE_ROUTE_TIERS = {"1k", "2k", "4k"}
 
 DEFAULT_PUBLIC_MODELS = [
     {
@@ -246,6 +247,13 @@ class Settings(BaseSettings):
                     raise ValueError("A fallback upstream model must be enabled.")
                 if "upstream_model_id" in model and not str(model["upstream_model_id"]).strip():
                     raise ValueError("Additional upstream model upstream_model_id must not be empty.")
+                route_for_sizes = model.get("route_for_sizes", [])
+                if not isinstance(route_for_sizes, list):
+                    raise ValueError("Additional upstream model route_for_sizes must be a JSON array.")
+                if route_for_sizes and not model.get("fallback_for"):
+                    raise ValueError("A size-routed upstream model must target a public model with fallback_for.")
+                if any(str(size).strip().lower() not in SIZE_ROUTE_TIERS for size in route_for_sizes):
+                    raise ValueError("Additional upstream route_for_sizes values must be 1k, 2k or 4k.")
         primary_model_ids = {str(model["id"]) for model in self.public_models}
         for provider in data:
             for model in provider["models"]:

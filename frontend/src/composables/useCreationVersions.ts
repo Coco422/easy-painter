@@ -6,6 +6,7 @@ import { randomId } from '@/lib/browser-crypto'
 import { buildCreationPrompt } from '@/lib/creation-presets'
 import { creationHistoryKey, creationVersionRows, emptyCreationHistory, MAX_CREATION_VERSIONS, parseCreationHistory } from '@/lib/creation-versions'
 import { mediaAvailable, sameOriginMedia } from '@/lib/media-state'
+import { defaultGenerationSize } from '@/lib/generation-sizes'
 import { assetIds, MAX_ASSETS, MAX_PROJECT_BYTES, newProject } from '@/lib/canvas/model'
 import { appendGenerationImage } from '@/lib/canvas/from-generation'
 import { getAsset, getProject, listProjects, makeAsset, saveProject } from '@/lib/canvas/storage'
@@ -37,7 +38,7 @@ export function useCreationVersions(options: {
     const sizes = editModel.value?.supported_sizes ?? []
     if (!sizes.length || sizes.includes(options.selectedSize.value)) return options.selectedSize.value
     if (selectedJob.value && sizes.includes(selectedJob.value.size)) return selectedJob.value.size as ImageSize
-    return (sizes[0] ?? 'auto') as ImageSize
+    return defaultGenerationSize(sizes)
   })
   let epoch = 0
   let disposed = false
@@ -59,12 +60,10 @@ export function useCreationVersions(options: {
   }
   function record(id: string, parent: string | null = null) {
     if (Object.prototype.hasOwnProperty.call(history.value.parents, id)) {
-      if (!selectedId.value) selectedId.value = id
       return
     }
     history.value.parents[id] = parent
     try { persist() } catch (error) { options.feedback.value = (error as Error).message }
-    if (!selectedId.value) selectedId.value = id
   }
   function forget(id: string) {
     delete history.value.parents[id]
@@ -90,8 +89,7 @@ export function useCreationVersions(options: {
       }))
     }
     assertOwner()
-    const rows = creationVersionRows(options.jobs.value, history.value.parents, options.membership.value)
-    selectedId.value = rows[rows.length - 1]?.job.job_id ?? ''
+    selectedId.value = ''
     try {
       const projects = await listProjects(owner)
       assertOwner()

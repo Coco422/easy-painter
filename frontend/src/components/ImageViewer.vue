@@ -4,7 +4,7 @@ import { NImagePreview } from 'naive-ui'
 import type { ImageRenderToolbarProps } from 'naive-ui'
 
 const props = defineProps<{ src: string; show: boolean }>()
-const emit = defineEmits<{ 'update:show': [value: boolean] }>()
+const emit = defineEmits<{ 'update:show': [value: boolean]; download: [] }>()
 const session = ref(0)
 const toolbar = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
@@ -29,7 +29,7 @@ function renderToolbar({ nodes }: ImageRenderToolbarProps) {
     return h('button', {
       type: 'button', title: label, 'aria-label': label,
       style: { border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '8px' },
-      onClick: node.props?.onClick,
+      onClick: key === 'download' ? () => emit('download') : node.props?.onClick,
     }, [icon])
   }))
 }

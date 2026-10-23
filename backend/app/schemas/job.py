@@ -54,6 +54,7 @@ class CreateJobRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=32000)
     model: str = Field(min_length=1, max_length=128)
     size: str = "auto"
+    quality: Literal["high"] | None = None
     aspect_ratio: ImageAspectRatio | None = None
     reference_image_id: str | None = None
     reference_image_ids: list[str] = Field(default_factory=list)
@@ -143,6 +144,7 @@ class JobDetailResponse(BaseModel):
     model_label: str | None = None
     provider_name: str | None = None
     size: str
+    quality: Literal["high"] | None = None
     aspect_ratio: str | None = None
     error_message: str | None = None
     credit_cost: int = 0

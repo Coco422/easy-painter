@@ -11,3 +11,13 @@ export function imageDownloadFilename(id: string, contentType: string): string {
   const mime = contentType.split(';')[0].trim().toLowerCase()
   return `${id}.${extensions[mime] || 'bin'}`
 }
+
+export function downloadObjectUrl(url: string, id: string, contentType: string) {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = imageDownloadFilename(id, contentType)
+  anchor.rel = 'noopener'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}

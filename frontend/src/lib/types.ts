@@ -51,6 +51,7 @@ export interface CreateJobRequest {
   prompt: string
   model: string
   size: ImageSize
+  quality?: 'high' | null
   reference_image_id?: string | null
   reference_image_ids?: string[]
 }
@@ -93,6 +94,7 @@ export interface JobDetailResponse {
   model_label: string | null
   provider_name: string | null
   size: string
+  quality?: 'high' | null
   aspect_ratio?: ImageAspectRatio | null
   error_message: string | null
   credit_cost: number
