@@ -45,8 +45,8 @@ def recharge_catalog(response: Response, settings: Settings = Depends(get_settin
         methods = runtime.zpay_payment_methods
     except ZpayError:
         enabled, methods = False, []
-    return {"enabled": enabled, "payment_methods": methods,
-            "packages": [package_response(p) for p in packages]}
+    return {"enabled": enabled, "payment_methods": methods if enabled else [],
+            "packages": [package_response(p) for p in packages] if enabled else []}
 
 
 @payment_router.post("/recharge/orders", response_model=RechargeCheckoutResponse)

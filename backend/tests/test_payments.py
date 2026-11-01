@@ -129,6 +129,13 @@ def test_disabled_checkout_and_packages_do_not_create_orders(env):
     with env.factory() as db: assert db.scalar(select(func.count()).select_from(RechargeOrder)) == 0
 
 
+def test_disabled_catalog_hides_direct_sale_packages_and_payment_methods(env):
+    env.settings.zpay_enabled = False
+    response = env.client.get('/api/v1/recharge/catalog')
+    assert response.status_code == 200
+    assert response.json() == {'enabled': False, 'payment_methods': [], 'packages': []}
+
+
 def test_order_idempotency_and_price_snapshot(env):
     first = create(env); again = create(env)
     assert first == again

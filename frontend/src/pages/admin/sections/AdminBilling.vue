@@ -22,7 +22,7 @@ import {
   type FormInst,
   type FormRules,
 } from 'naive-ui'
-import { ArrowRightLeft, Copy, RefreshCw, Ticket, Wallet } from 'lucide-vue-next'
+import { ArrowRightLeft, Copy, Download, RefreshCw, Ticket, Wallet } from 'lucide-vue-next'
 
 import {
   ApiError,
@@ -161,6 +161,23 @@ async function generateCodes() {
     generating.value = false
   }
 }
+
+function downloadCodes(values: string[]) {
+  if (!values.length) return
+  const url = URL.createObjectURL(new Blob([values.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `redemption-cards-${new Date().toISOString().slice(0, 10)}.txt`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+const selectedCodes = computed(() => {
+  const selected = new Set(selectedCodeKeys.value)
+  return codes.value.filter(item => selected.has(item.id)).map(item => item.code)
+})
 
 async function copyGeneratedCodes() {
   if (generateResult.value.length === 0) return
@@ -335,7 +352,7 @@ onBeforeUnmount(() => { if (userSearchTimer) clearTimeout(userSearchTimer) })
       <div>
         <p class="section-kicker">Billing</p>
         <h1>计费管理</h1>
-        <span>生成兑换码、调整用户余额并检查灵感丝线流水。</span>
+        <span>批量生成并导出兑换卡，交付给代理商；可按前缀区分代理或批次。</span>
       </div>
       <NButton :loading="codesLoading || usersLoading || transactionsLoading" @click="refreshAll">
         <template #icon><RefreshCw :size="15" /></template>刷新全部
@@ -360,7 +377,7 @@ onBeforeUnmount(() => { if (userSearchTimer) clearTimeout(userSearchTimer) })
       </NForm>
 
       <div v-if="generateResult.length > 0" class="generated-result">
-        <div class="generated-result-head"><span>本次生成 {{ generateResult.length }} 个兑换码</span><NButton size="tiny" @click="copyGeneratedCodes"><template #icon><Copy :size="14" /></template>复制全部</NButton></div>
+        <div class="generated-result-head"><span>本次生成 {{ generateResult.length }} 个兑换码</span><NButton size="tiny" @click="downloadCodes(generateResult)"><template #icon><Download :size="14" /></template>导出 TXT</NButton><NButton size="tiny" @click="copyGeneratedCodes"><template #icon><Copy :size="14" /></template>复制全部</NButton></div>
         <NInput type="textarea" :value="generateResult.join('\n')" readonly :autosize="{ minRows: 4, maxRows: 8 }" />
       </div>
 
@@ -374,6 +391,7 @@ onBeforeUnmount(() => { if (userSearchTimer) clearTimeout(userSearchTimer) })
               复制已选（{{ selectedCodeKeys.length }}）
             </NButton>
           </div>
+          <NButton size="small" :disabled="selectedCodeKeys.length === 0" @click="downloadCodes(selectedCodes)"><template #icon><Download :size="14" /></template>导出已选 TXT</NButton>
           <NDataTable
             v-model:checked-row-keys="selectedCodeKeys"
             :columns="codeColumns"

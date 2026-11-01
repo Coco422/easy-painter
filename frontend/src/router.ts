@@ -13,7 +13,8 @@ const routes = [
   } },
   { path: '/login', component: () => import('@/pages/LoginPage.vue') },
   { path: '/profile', component: () => import('@/pages/ProfilePage.vue') },
-  { path: '/recharge/:result(return)?', component: () => import('@/pages/RechargePage.vue'), beforeEnter: (to: RouteLocationNormalized) => {
+  { path: '/recharge', redirect: '/profile#redeem' },
+  { path: '/recharge/return', component: () => import('@/pages/RechargePage.vue'), beforeEnter: (to: RouteLocationNormalized) => {
     if (!isLoggedIn()) return { path: '/login', query: { redirect: to.fullPath } }
   } },
   {

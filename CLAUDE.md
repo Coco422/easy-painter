@@ -80,6 +80,8 @@ Production backup contents, snapshot validation, and disaster recovery procedure
 
 ### Recharge and Credit Provenance
 
+- Public credit acquisition uses reseller redemption cards at `/profile#redeem`; `/recharge` redirects there. `/recharge/return` only displays historical orders and confirmation. Admin Billing generates and exports card batches as TXT; prefixes can identify reseller batches. Deployments must disable checkout through the existing payment configuration while retaining historical credentials and callbacks.
+
 - ZPAY checkout defaults off. V13 adds packages, recharge orders and credit provenance; V14 stores immutable payment configurations with Fernet-encrypted merchant keys. Admin sets credentials in Recharge Management; only `PAYMENT_CONFIG_ENCRYPTION_KEY` lives in private env. Never return keys/ciphertext, reuse JWT keys, or replace a master key without re-encrypting every revision. Setup: `docs/recharge-center.md`; SDK findings: `docs/zpay-sdk-security-review.md`.
 - Only verified ZPAY notifications or active queries grant credits. Use the order's original `config_revision` credentials, check merchant/order/amount/method/trade number, lock user then order, and commit paid state/ledger/lots together. Repeated delivery must credit once. Browser return parameters are never evidence of payment; query credentials/signatures must be redacted from logs.
 - All new debits allocate noncash lots first, then paid FIFO. Refund failed reservations to original lots. Existing balances, redemption codes and admin adjustments have zero cash basis. Future commissions use only settled, unreversed paid allocations and the exact rational cash-basis snapshots, never inferred yuan-per-credit values.

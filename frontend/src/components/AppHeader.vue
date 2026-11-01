@@ -67,13 +67,14 @@ async function handleLogout() {
           <div class="account-menu-links" @click="closeMenu">
             <template v-if="isLoggedIn()">
               <router-link to="/profile"><UserRound :size="16" />个人中心</router-link>
+              <router-link to="/profile#redeem"><Wallet :size="16" />兑换卡入账</router-link>
               <router-link to="/history"><History :size="16" />生图历史</router-link>
               <router-link to="/gallery"><Images :size="16" />我的画廊</router-link>
               <router-link to="/favorites"><Heart :size="16" />我的收藏</router-link>
             </template>
             <a href="https://88888888.dog/home" target="_blank" rel="noopener noreferrer"><Plug :size="16" />88dog 中转主站 ↗</a>
             <a href="https://doc.88888888.dog/" target="_blank" rel="noopener noreferrer"><Images :size="16" />使用文档 ↗</a>
-            <a href="https://getplus.88888888.dog/" target="_blank" rel="noopener noreferrer"><Wallet :size="16" />会员代充 ↗</a>
+            <a href="https://getplus.88888888.dog/" target="_blank" rel="noopener noreferrer"><Wallet :size="16" />会员服务 ↗</a>
             <router-link to="/mcp"><Plug :size="16" />连接 Agent</router-link>
             <router-link v-if="isAdmin()" to="/admin"><Settings :size="16" />管理后台</router-link>
           </div>

@@ -281,13 +281,13 @@ onBeforeUnmount(stopBindCountdown)
         <p class="card-label wallet-label"><Wallet :size="16" aria-hidden="true" />我的钱包</p>
         <p class="credits-value">{{ authState.user?.credits ?? 0 }}<span class="credits-unit">丝</span></p>
         <p class="credits-hint">每张图片消耗模型对应灵感丝线</p>
-        <router-link to="/recharge" class="secondary-button wallet-recharge">前往充值中心<ArrowUpRight :size="16" aria-hidden="true" /></router-link>
+        <a href="#redeem" class="secondary-button wallet-recharge">兑换卡入账<ArrowUpRight :size="16" aria-hidden="true" /></a>
       </section>
 
       <!-- Redeem card -->
-      <section class="profile-card redeem-card">
+      <section id="redeem" class="profile-card redeem-card">
         <p class="card-label">兑换灵感丝线</p>
-        <p class="redeem-hint">已有兑换码？在这里兑换到钱包。</p>
+        <p class="redeem-hint">输入代理商提供的兑换卡，额度将存入当前账户。</p>
         <div class="redeem-row">
           <input
             v-model="redeemInput"

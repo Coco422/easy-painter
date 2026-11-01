@@ -39,7 +39,7 @@ onMounted(async () => {
     <nav v-if="!isAdminRoute && !isCanvasRoute" class="related-sites" aria-label="88dog 站点导航">
       <a href="https://88888888.dog/home" target="_blank" rel="noopener noreferrer">88dog 中转主站 ↗</a>
       <a href="https://doc.88888888.dog/" target="_blank" rel="noopener noreferrer">使用文档 ↗</a>
-      <a href="https://getplus.88888888.dog/" target="_blank" rel="noopener noreferrer">会员代充 ↗</a>
+      <a href="https://getplus.88888888.dog/" target="_blank" rel="noopener noreferrer">会员服务 ↗</a>
     </nav>
   </div>
 </template>

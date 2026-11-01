@@ -41,8 +41,8 @@ const navItems = [
   { key: 'users' as const, label: '用户管理', icon: Users },
   { key: 'groups' as const, label: '用户组', icon: Group },
   { key: 'jobs' as const, label: '任务管理', icon: ListTodo },
-  { key: 'billing' as const, label: '计费管理', icon: Wallet },
-  { key: 'recharge' as const, label: '充值管理', icon: Wallet },
+  { key: 'billing' as const, label: '兑换卡与计费', icon: Wallet },
+  { key: 'recharge' as const, label: '历史支付管理', icon: Wallet },
   { key: 'inspirations' as const, label: '社区内容', icon: GalleryVerticalEnd },
   { key: 'announcements' as const, label: '通知管理', icon: Megaphone },
 ]

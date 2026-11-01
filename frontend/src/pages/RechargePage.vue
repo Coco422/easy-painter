@@ -1,106 +1,38 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Check, RefreshCw, Wallet } from 'lucide-vue-next'
+import { RefreshCw, Wallet } from 'lucide-vue-next'
 import { authState, fetchCurrentUser } from '@/lib/auth'
-import { ApiError } from '@/lib/api'
-import { rechargeApi, type Checkout, type RechargeIntent, type RechargeOrder, type RechargePackage } from '@/lib/recharge'
+import { rechargeApi, type RechargeOrder } from '@/lib/recharge'
 import { money, rechargeStatus } from '@/lib/recharge-format'
-import { randomId } from '@/lib/browser-crypto'
 
+// Keep payment returns and reconciliation available for historical orders.
+// New credit is obtained through the redemption form in the profile.
 const route = useRoute()
 const router = useRouter()
-const enabled = ref(false)
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
-const packages = ref<RechargePackage[]>([])
-const selected = ref('')
-const method = ref<'alipay' | 'wxpay'>('alipay')
-const paymentMethods = ref<string[]>([])
-const checkout = ref<Checkout | null>(null)
 const returnedOrder = ref<RechargeOrder | null>(null)
 const orders = ref<RechargeOrder[]>([])
 const total = ref(0)
 const page = ref(1)
-const pendingIntent = ref<RechargeIntent | null>(null)
-const owner = ref('')
-let timer: ReturnType<typeof setInterval> | undefined
 let mounted = true
+let timer: ReturnType<typeof setInterval> | undefined
 const currentSession = (session: string | null) => mounted && session === authState.sessionId
-const selectedPackage = computed(() => packages.value.find(p => p.id === selected.value))
-const activeOrder = computed(() => returnedOrder.value ?? checkout.value?.order ?? null)
-const intentKey = () => `easy-painter:recharge-intent:${owner.value}`
 const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
-
-function saveIntent(intent: RechargeIntent | null) {
-  if (intent) localStorage.setItem(intentKey(), JSON.stringify(intent))
-  else localStorage.removeItem(intentKey())
-  pendingIntent.value = intent
-}
 
 async function loadOrders(next = page.value) {
   const session = authState.sessionId
-  const data = await rechargeApi.orders(next)
-  if (!currentSession(session)) return
-  orders.value = data.items
-  total.value = data.total
-  page.value = next
-}
-
-async function confirmPackage() {
-  const pack = selectedPackage.value
-  if (!pendingIntent.value && !pack) return
-  busy.value = true
-  error.value = ''
-  const session = authState.sessionId
   try {
-    const intent = pendingIntent.value ?? { key: randomId(), package_id: pack!.id, package_revision: pack!.revision, payment_method: method.value }
-    saveIntent(intent)
-    const result = await rechargeApi.create(intent)
+    const data = await rechargeApi.orders(next)
     if (!currentSession(session)) return
-    checkout.value = result
-    returnedOrder.value = null
-    saveIntent(null)
-    await loadOrders(1)
-    if (result.order.status === 'paid') await fetchCurrentUser()
+    orders.value = data.items
+    total.value = data.total
+    page.value = next
   } catch (e) {
-    if (currentSession(session)) {
-      error.value = e instanceof Error ? e.message : '订单确认失败，请重试。'
-      if (e instanceof ApiError && [400, 409, 422, 429].includes(e.status)) {
-        saveIntent(null)
-        const data = await rechargeApi.catalog()
-        if (!currentSession(session)) return
-        packages.value = data.packages
-        enabled.value = data.enabled
-        paymentMethods.value = data.payment_methods
-        if (!paymentMethods.value.includes(method.value)) method.value = paymentMethods.value.includes('alipay') ? 'alipay' : 'wxpay'
-      }
-    }
-  } finally {
-    busy.value = false
+    if (currentSession(session)) error.value = e instanceof Error ? e.message : '订单记录加载失败。'
   }
-}
-
-function pay() {
-  const value = checkout.value
-  if (!value?.action || !value.fields || value.order.status === 'paid' || value.order.expired) return
-  const action = new URL(value.action)
-  if (action.protocol !== 'https:' || action.username || action.password || action.pathname !== '/submit.php') {
-    error.value = '支付暂时不可用，请联系管理员。'
-    return
-  }
-  const form = document.createElement('form')
-  form.method = 'POST'
-  form.action = action.href
-  for (const [name, fieldValue] of Object.entries(value.fields)) {
-    const input = document.createElement('input')
-    input.type = 'hidden'; input.name = name; input.value = fieldValue
-    form.appendChild(input)
-  }
-  document.body.appendChild(form)
-  form.submit()
-  form.remove()
 }
 
 async function refreshOrder(id: string, remote = true) {
@@ -112,30 +44,11 @@ async function refreshOrder(id: string, remote = true) {
     const order = await (remote ? rechargeApi.refresh(id) : rechargeApi.order(id))
     if (!currentSession(session)) return
     if (returnedOrder.value?.id === id) returnedOrder.value = order
-    if (checkout.value?.order.id === id) checkout.value = { ...checkout.value, order }
     await loadOrders()
-    if (order.status === 'paid') await fetchCurrentUser()
+    if (order.status === 'paid' && currentSession(session)) await fetchCurrentUser()
   } catch (e) {
     if (currentSession(session)) error.value = e instanceof Error ? e.message : '暂时无法确认，请勿重复付款。'
   } finally { busy.value = false }
-}
-
-function selectAnother() {
-  checkout.value = null
-  returnedOrder.value = null
-  void router.replace('/recharge')
-}
-
-async function resumeOrder(id: string) {
-  busy.value = true; error.value = ''
-  const session = authState.sessionId
-  try {
-    const result = await rechargeApi.checkout(id)
-    if (!currentSession(session)) return
-    checkout.value = result; returnedOrder.value = null
-    window.scrollTo({ top: 0, behavior: 'instant' })
-  } catch (e) { if (currentSession(session)) error.value = e instanceof Error ? e.message : '订单暂时无法打开。' }
-  finally { busy.value = false }
 }
 
 onMounted(async () => {
@@ -143,40 +56,29 @@ onMounted(async () => {
   try {
     await fetchCurrentUser()
     if (!currentSession(session)) return
-    owner.value = authState.user?.id ?? ''
-    if (!owner.value) { error.value = '账号信息暂时无法加载，请稍后重试。'; return }
-    try {
-      const saved = JSON.parse(localStorage.getItem(intentKey()) ?? 'null') as RechargeIntent | null
-      if (saved?.key && saved.package_id && Number.isInteger(saved.package_revision) && ['alipay', 'wxpay'].includes(saved.payment_method)) pendingIntent.value = saved
-    } catch { /* A malformed local draft cannot initiate payment. */ }
-    const data = await rechargeApi.catalog()
-    if (!currentSession(session)) return
-    enabled.value = data.enabled
-    paymentMethods.value = data.payment_methods
-    if (!paymentMethods.value.includes(method.value)) method.value = paymentMethods.value.includes('alipay') ? 'alipay' : 'wxpay'
-    packages.value = data.packages
-    selected.value = data.packages[0]?.id ?? ''
     await loadOrders(1)
     if (!currentSession(session)) return
     const id = route.query.out_trade_no
-    if (route.path === '/recharge/return' && typeof id === 'string' && /^\d{30}$/.test(id)) {
-      const result = await rechargeApi.order(id)
+    if (typeof id === 'string' && /^\d{30}$/.test(id)) {
+      const order = await rechargeApi.order(id)
       if (!currentSession(session)) return
-      returnedOrder.value = result
-      if (result.status !== 'paid') await refreshOrder(id)
+      returnedOrder.value = order
+      if (order.status !== 'paid') await refreshOrder(id)
     }
     if (!currentSession(session)) return
     timer = setInterval(() => {
-      if (!document.hidden && activeOrder.value?.status === 'pending') void refreshOrder(activeOrder.value.id, false)
+      if (!document.hidden && returnedOrder.value?.status === 'pending') void refreshOrder(returnedOrder.value.id, false)
     }, 5000)
-  } catch (e) { error.value = e instanceof Error ? e.message : '充值信息加载失败。' }
-  finally { loading.value = false }
+  } catch (e) {
+    if (currentSession(session)) error.value = e instanceof Error ? e.message : '订单信息加载失败。'
+  } finally { loading.value = false }
 })
 
 watch(() => authState.sessionId, () => {
-  checkout.value = null; returnedOrder.value = null; orders.value = []; owner.value = ''; pendingIntent.value = null
+  returnedOrder.value = null
+  orders.value = []
   if (timer) clearInterval(timer)
-  void router.replace('/login?redirect=/recharge')
+  void router.replace({ path: '/login', query: { redirect: route.fullPath } })
 })
 onBeforeUnmount(() => { mounted = false; if (timer) clearInterval(timer) })
 </script>
@@ -184,39 +86,22 @@ onBeforeUnmount(() => { mounted = false; if (timer) clearInterval(timer) })
 <template>
   <div class="recharge-page">
     <header class="recharge-heading">
-      <div><p class="recharge-kicker">Credits</p><h1>充值中心</h1><p>为下一次灵感，添一点丝线。</p></div>
-      <router-link to="/profile" class="recharge-balance"><Wallet :size="18" /><span>当前余额<strong>{{ authState.user?.credits ?? 0 }} <small>丝</small></strong></span></router-link>
+      <div><p class="recharge-kicker">Orders</p><h1>历史订单</h1><p>查看既有订单的到账状态。</p></div>
+      <router-link to="/profile#redeem" class="recharge-balance"><Wallet :size="18" /><span>兑换卡入账<strong>{{ authState.user?.credits ?? 0 }} <small>丝</small></strong></span></router-link>
     </header>
-
-    <p v-if="loading" class="recharge-message">正在加载充值信息…</p>
+    <p v-if="loading" class="recharge-message">正在加载订单信息…</p>
     <p v-if="error" class="recharge-message recharge-error" role="alert">{{ error }}</p>
-    <p v-if="!loading && !enabled" class="recharge-message">在线充值暂未开放，已有订单仍可查看和确认到账。</p>
-
-    <section v-if="activeOrder" class="recharge-panel recharge-confirm" aria-label="充值订单">
-      <div><span class="recharge-status" :class="{ paid: activeOrder.status === 'paid' }"><Check v-if="activeOrder.status === 'paid'" :size="16" />{{ rechargeStatus(activeOrder) }}</span><h2>{{ activeOrder.status === 'paid' ? '丝线已到账' : '确认这笔充值' }}</h2><p>{{ activeOrder.package_name }}</p></div>
-      <dl class="recharge-summary"><div><dt>支付金额</dt><dd>{{ money(activeOrder.amount_fen) }}</dd></div><div><dt>付费丝线</dt><dd>{{ activeOrder.paid_credits }} 丝</dd></div><div v-if="activeOrder.gift_credits"><dt>额外赠送</dt><dd>{{ activeOrder.gift_credits }} 丝</dd></div><div><dt>支付方式</dt><dd>{{ activeOrder.payment_method === 'alipay' ? '支付宝' : '微信支付' }}</dd></div></dl>
-      <p class="recharge-order-id">订单号 {{ activeOrder.id }}</p>
-      <div class="recharge-actions"><button v-if="checkout?.action && enabled && activeOrder.status === 'pending' && !activeOrder.expired" class="primary-button" @click="pay">确认并支付 {{ money(activeOrder.amount_fen) }} <ArrowRight :size="16" /></button><button v-if="activeOrder.status === 'pending'" class="secondary-button" :disabled="busy" @click="refreshOrder(activeOrder.id)"><RefreshCw :size="15" />{{ busy ? '确认中…' : '我已支付，确认到账' }}</button><button class="ghost-button" @click="selectAnother">{{ activeOrder.status === 'paid' ? '继续充值' : '返回套餐' }}</button></div>
-      <p v-if="activeOrder.status === 'pending'" class="recharge-note">支付结果未确认前，请勿重复付款。链接过期后完成的付款也会核实入账。</p>
+    <section v-if="returnedOrder" class="recharge-panel recharge-confirm" aria-label="历史订单">
+      <h2>{{ rechargeStatus(returnedOrder) }}</h2><p>{{ returnedOrder.package_name }}</p>
+      <p class="recharge-order-id">订单号 {{ returnedOrder.id }}</p>
+      <p>支付金额 {{ money(returnedOrder.amount_fen) }}</p>
+      <button v-if="returnedOrder.status === 'pending'" class="secondary-button" :disabled="busy" @click="refreshOrder(returnedOrder.id)"><RefreshCw :size="15" />{{ busy ? '确认中…' : '我已支付，确认到账' }}</button>
+      <p v-if="returnedOrder.status === 'pending'" class="recharge-note">支付结果未确认前，请勿重复付款。</p>
     </section>
-
-    <section v-else-if="!loading && enabled" class="recharge-panel">
-      <h2>选择充值套餐</h2>
-      <div v-if="packages.length" class="recharge-packages">
-        <button v-for="pack in packages" :key="pack.id" class="recharge-package" :class="{ selected: selected === pack.id }" :aria-pressed="selected === pack.id" :disabled="Boolean(pendingIntent)" @click="selected = pack.id">
-          <span class="recharge-package-name">{{ pack.name }}<Check v-if="selected === pack.id" :size="17" /></span><strong>{{ pack.paid_credits }} <small>丝</small></strong><span v-if="pack.gift_credits" class="recharge-gift">另赠 {{ pack.gift_credits }} 丝</span><span class="recharge-price">{{ money(pack.price_fen) }}</span>
-        </button>
-      </div>
-      <p v-else class="recharge-note">暂时没有可购买的套餐。</p>
-      <fieldset v-if="packages.length" class="recharge-methods"><legend>支付方式</legend><label v-if="paymentMethods.includes('alipay')"><input v-model="method" type="radio" value="alipay" :disabled="Boolean(pendingIntent)" />支付宝</label><label v-if="paymentMethods.includes('wxpay')"><input v-model="method" type="radio" value="wxpay" :disabled="Boolean(pendingIntent)" />微信支付</label></fieldset>
-      <p v-if="pendingIntent" class="recharge-note">上次订单请求尚未确认，将使用同一请求继续核实，不会重复创建。</p>
-      <button v-if="packages.length || pendingIntent" class="primary-button" :disabled="busy || (!selectedPackage && !pendingIntent)" @click="confirmPackage">{{ busy ? '确认中…' : pendingIntent ? '继续确认上次订单' : '确认套餐' }}<ArrowRight :size="16" /></button>
-      <p class="recharge-note">充值到账后即可用于站内创作。</p>
-    </section>
-
-    <section class="recharge-panel recharge-history"><div class="recharge-section-heading"><h2>充值记录</h2><button class="ghost-button" :disabled="busy" @click="loadOrders()">刷新记录</button></div>
-      <p v-if="!orders.length" class="recharge-note">还没有充值记录。</p>
-      <div v-else class="recharge-table-wrap"><table><thead><tr><th>订单 / 时间</th><th>充值内容</th><th>金额</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="order in orders" :key="order.id"><td><code>{{ order.id }}</code><small>{{ date(order.created_at) }}</small></td><td>{{ order.paid_credits }} 丝<span v-if="order.gift_credits"> + {{ order.gift_credits }} 赠送</span></td><td>{{ money(order.amount_fen) }}</td><td>{{ rechargeStatus(order) }}</td><td><button v-if="enabled && order.status === 'pending' && !order.expired" class="ghost-button" :disabled="busy" @click="resumeOrder(order.id)">继续支付</button><button v-if="order.status === 'pending'" class="ghost-button" :disabled="busy" @click="refreshOrder(order.id)">确认到账</button></td></tr></tbody></table></div>
+    <section class="recharge-panel recharge-history">
+      <div class="recharge-section-heading"><h2>订单记录</h2><button class="ghost-button" :disabled="busy" @click="loadOrders()">刷新记录</button></div>
+      <p v-if="!orders.length" class="recharge-note">还没有订单记录。</p>
+      <div v-else class="recharge-table-wrap"><table><thead><tr><th>订单 / 时间</th><th>内容</th><th>金额</th><th>状态</th><th></th></tr></thead><tbody><tr v-for="order in orders" :key="order.id"><td><code>{{ order.id }}</code><small>{{ date(order.created_at) }}</small></td><td>{{ order.paid_credits }} 丝<span v-if="order.gift_credits"> + {{ order.gift_credits }} 赠送</span></td><td>{{ money(order.amount_fen) }}</td><td>{{ rechargeStatus(order) }}</td><td><button v-if="order.status === 'pending'" class="ghost-button" :disabled="busy" @click="refreshOrder(order.id)">确认到账</button></td></tr></tbody></table></div>
       <div v-if="total > 20" class="recharge-pagination"><button class="ghost-button" :disabled="page <= 1" @click="loadOrders(page - 1)">上一页</button><span>{{ page }} / {{ Math.ceil(total / 20) }}</span><button class="ghost-button" :disabled="page * 20 >= total" @click="loadOrders(page + 1)">下一页</button></div>
     </section>
   </div>
