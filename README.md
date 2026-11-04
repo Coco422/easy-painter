@@ -49,9 +49,10 @@ make deploy
 (cd backend && uv run pytest)
 (cd frontend && npm run build)
 (cd frontend && node --experimental-strip-types --test tests/*.test.mjs)
+(cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json && npx vue-tsc --noEmit -p tsconfig.node.json)
 ```
 
-从仓库根目录执行；前端 build 包含类型检查。
+从仓库根目录执行。显式指定 TypeScript 项目检查应用和 Vite 配置；`build` 中的根项目检查不能替代这两项。面向 `main` 的 PR 自动运行后端全量测试、前端测试、类型检查与构建，以及版本和部署脚本检查。
 
 ## 发布
 
@@ -63,7 +64,7 @@ python3 scripts/version.py check vX.Y.Z
 python3 scripts/version.py notes vX.Y.Z
 ```
 
-将代码合入 `main` 后，创建并推送新的 `vX.Y.Z` tag。GitHub Actions 构建 backend、nginx 和 migrations 镜像，创建 Release；配置 `production` 环境后，CD 自动部署并检查服务就绪状态。普通 `main` push 只构建，不部署。
+将代码合入 `main` 后，创建并推送新的 `vX.Y.Z` tag。GitHub Actions 先运行与 PR 相同的 CI 检查，通过后构建 backend、nginx 和 migrations 镜像、创建 Release；配置 `production` 环境后，CD 自动部署并检查服务就绪状态。普通 `main` 相关文件 push 执行 CI 和镜像构建，不部署。测试、构建或 Release 创建失败都会阻止生产部署。
 
 生产必须固定正式版本 tag。配置凭证、备份与失败恢复见 [自动部署指南](docs/continuous-deployment.md)。
 

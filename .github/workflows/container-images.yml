@@ -7,12 +7,13 @@ on:
     tags:
       - "v*.*.*"
     paths:
-      - ".github/workflows/container-images.yml"
+      - ".github/workflows/**"
       - "VERSION"
       - "CHANGELOG.md"
       - "backend/**"
       - "frontend/**"
-      - "deploy/nginx/**"
+      - "deploy/**"
+      - "scripts/**"
   workflow_dispatch:
 
 permissions:
@@ -28,8 +29,15 @@ env:
   IMAGE_PREFIX: coco422/easy-painter
 
 jobs:
+  checks:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
     name: Build ${{ matrix.image }} image
+    needs: checks
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -83,9 +91,17 @@ jobs:
           provenance: mode=max
           sbom: true
 
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+
   deploy:
     name: Deploy production release
-    needs: build
+    needs: [build, release]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -106,8 +122,6 @@ jobs:
           set -euo pipefail
           python3 scripts/version.py check "$RELEASE_TAG"
           git merge-base --is-ancestor HEAD origin/main
-          bash -n scripts/deploy-production.sh
-          python3 -m unittest discover -s scripts/tests -v
       - name: Deploy over SSH
         env:
           RELEASE_TAG: ${{ github.ref_name }}
