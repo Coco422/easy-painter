@@ -1,9 +1,7 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_call:
 
 permissions:
   contents: write
@@ -11,6 +9,7 @@ permissions:
 jobs:
   release:
     name: Create GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
     steps:
@@ -38,6 +37,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          # A full workflow retry may follow a successful Release and failed deploy.
+          if draft=$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft'); then
+            if [[ "$draft" != false ]]; then
+              echo 'Existing release must be published before deploying.' >&2
+              exit 1
+            fi
+            echo "Release already published: ${GITHUB_REF_NAME}"
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
             --title "${GITHUB_REF_NAME}" \
             --notes-file "${{ steps.notes.outputs.path }}"
