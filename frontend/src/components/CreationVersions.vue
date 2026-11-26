@@ -104,8 +104,8 @@ function stageText(job: JobDetailResponse) {
 
 <template>
   <section v-if="selected" class="version-workspace" aria-label="绘图结果">
-    <nav class="drawing-navigation" aria-label="最近绘图">
-      <span class="drawing-navigation-label" title="刷新后按本地保留的最多 100 条版本关系恢复作品；完整任务记录见全部历史。">最近绘图</span>
+    <nav class="drawing-navigation" aria-label="最近一天绘图">
+      <span class="drawing-navigation-label" title="仅显示最近 24 小时的绘图；更早记录请查看全部历史。">最近一天绘图</span>
       <div class="drawing-tabs" role="group" aria-label="切换绘图批次">
         <button v-if="drafting" type="button" class="drawing-tab drawing-tab--draft" aria-pressed="true"><Plus :size="14" aria-hidden="true" /><strong>新的绘图</strong><small>待创作</small></button>
         <button v-for="batch in batches" :key="batch.id" type="button" class="drawing-tab" :class="{ 'drawing-tab--live': batch.pending }" :aria-pressed="!drafting && currentBatch?.id === batch.id" :aria-label="`查看第 ${batch.number} ${batch.candidates.length > 1 ? '批绘图' : '次绘图'}，${batch.candidates.length} 张${batch.candidates.length > 1 ? '候选图' : '图片'}${batch.pending ? `，${batch.pending} 张生成中` : ''}`" :title="batch.candidates[0]?.job.prompt" @click="emit('select', batch.candidates[0]!.job.job_id)">

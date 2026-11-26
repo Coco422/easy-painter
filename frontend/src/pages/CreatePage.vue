@@ -10,6 +10,8 @@ import { fetchArtwork, type Artwork } from '@/lib/artworks'
 import GeneratePanel from '@/components/GeneratePanel.vue'
 import CreationVersions from '@/components/CreationVersions.vue'
 import { useCreationVersions } from '@/composables/useCreationVersions'
+import { useMediaClock } from '@/composables/useMediaClock'
+import { isRecentCreationJob } from '@/lib/creation-versions'
 import { Image, Plus } from 'lucide-vue-next'
 import type { CreationMode } from '@/lib/creation-presets'
 import { modelCreditCost } from '@/lib/model-pricing'
@@ -70,6 +72,8 @@ const { selected: selectedReferenceImage } = useReferenceImages()
 const selectedArtwork = ref<Artwork | null>(null)
 const artworkAction = ref<'gallery' | undefined>()
 const activeJobs = ref<JobDetailResponse[]>([])
+const now = useMediaClock()
+const recentJobs = computed(() => activeJobs.value.filter(job => isRecentCreationJob(job, now.value)))
 const loading = ref(true)
 const submitting = ref(false)
 const stopBatchRequested = ref(false)
@@ -241,7 +245,7 @@ async function handleSettledJob(job: JobDetailResponse) {
   await fetchCurrentUser().catch(() => undefined)
   if (epoch !== pageEpoch) return
   if (job.status === 'succeeded') {
-    feedback.value = drafting.value ? '之前的绘图已生成，可在最近绘图中查看。' : '作品已生成，你可以将其加入画廊。'
+    feedback.value = drafting.value ? (isRecentCreationJob(job) ? '之前的绘图已生成，可在最近一天绘图中查看。' : '之前的绘图已生成，可在历史中查看。') : '作品已生成，你可以将其加入画廊。'
     return
   }
   feedback.value = job.billing_status === 'refunded'
@@ -530,22 +534,22 @@ onMounted(() => {
           <span v-if="pendingCount" class="results-toolbar-status" role="status"><span class="results-toolbar-dot" aria-hidden="true" />{{ pendingCount }} 张生成中</span>
           <span v-else class="results-toolbar-status results-toolbar-status--idle">作品</span>
           <div class="results-toolbar-actions">
-            <router-link v-if="activeJobs.length" type="button" class="results-toolbar-button" to="/history">历史</router-link>
+            <router-link type="button" class="results-toolbar-button" to="/history">历史</router-link>
             <button type="button" class="results-toolbar-button results-toolbar-button--primary" :disabled="!canStartNewDrawing" @click="startNewDrawing"><Plus :size="14" aria-hidden="true" />新绘图</button>
           </div>
         </div>
 
         <p v-if="feedback" class="feedback-banner" role="status">{{ feedback }}</p>
         <p v-if="versions.storageError.value" class="feedback-banner" role="alert">{{ versions.storageError.value }}</p>
-        <div v-if="(!activeJobs.length || drafting) && versions.history.value.pending" class="feedback-banner" role="status">上次改图的提交结果尚未确认。<button type="button" class="ghost-button" :disabled="versions.busy.value" @click="versions.confirm">确认上次改图任务</button></div>
+        <div v-if="(!recentJobs.length || drafting) && versions.history.value.pending" class="feedback-banner" role="status">上次改图的提交结果尚未确认。<button type="button" class="ghost-button" :disabled="versions.busy.value" @click="versions.confirm">确认上次改图任务</button></div>
 
         <ArtworkModal v-if="selectedArtwork" :key="selectedArtwork.id" :item="selectedArtwork" :initial-action="artworkAction" @close="selectedArtwork = null" @updated="selectedArtwork = $event" @deleted="removeActiveJob($event.id)" />
-        <CreationVersions v-if="activeJobs.length" :jobs="activeJobs" :membership="jobBatches" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :drafting="drafting" :can-start-new="canStartNewDrawing" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="modelCreditCost(versions.editModel.value, versions.editSize.value)" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
+        <CreationVersions v-if="recentJobs.length" :jobs="recentJobs" :membership="jobBatches" :parents="versions.history.value.parents" :selected-id="versions.selectedId.value" :drafting="drafting" :can-start-new="canStartNewDrawing" :busy="submitting || versions.busy.value" :pending="!!versions.history.value.pending" :edit-model="versions.editModel.value?.label ?? ''" :edit-cost="modelCreditCost(versions.editModel.value, versions.editSize.value)" :edit-size="versions.editSize.value" :max-length="meta?.prompt_max_length ?? 4000" :canvases="versions.canvases.value"
           @select="selectResult" @new="startNewDrawing" @revise="versions.revise" @confirm="versions.confirm" @canvas="versions.addToCanvas" @details="openArtwork($event)" @gallery="handleAddToGallery" @refresh="refreshJobMedia" @retry="retryJob" @dismiss="removeActiveJob" />
-        <div v-if="!activeJobs.length || drafting" class="workspace-empty">
+        <div v-if="!recentJobs.length || drafting" class="workspace-empty">
           <span class="workspace-empty-mark" aria-hidden="true"><Image :size="26" /></span>
-          <h3>{{ drafting && activeJobs.length ? '换一个全新的想法' : '这次想创作什么？' }}</h3>
-          <p>{{ drafting && activeJobs.length ? '描述和参考图已清空，写下这次想画的内容。' : '在左边写下描述就可以开始。默认设置已经能画得很好。' }}</p>
+          <h3>{{ drafting && recentJobs.length ? '换一个全新的想法' : '这次想创作什么？' }}</h3>
+          <p>{{ drafting && recentJobs.length ? '描述和参考图已清空，写下这次想画的内容。' : '在左边写下描述就可以开始。默认设置已经能画得很好。' }}</p>
           <p class="workspace-empty-tip">粘贴或拖入图片即可使用参考图 · ⌘ ↵ 提交</p>
         </div>
       </section>

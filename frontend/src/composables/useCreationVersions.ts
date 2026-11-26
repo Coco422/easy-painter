@@ -1,10 +1,11 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ApiError, createJob, fetchJob, uploadReferenceImage } from '@/lib/api'
+import { fetchArtworkPage } from '@/lib/artworks'
 import { authState, fetchImageFile, fetchCurrentUser } from '@/lib/auth'
 import { randomId } from '@/lib/browser-crypto'
 import { buildCreationPrompt } from '@/lib/creation-presets'
-import { creationHistoryKey, creationVersionRows, emptyCreationHistory, MAX_CREATION_VERSIONS, parseCreationHistory } from '@/lib/creation-versions'
+import { creationHistoryKey, creationVersionRows, emptyCreationHistory, isRecentCreationJob, MAX_CREATION_VERSIONS, parseCreationHistory, RECENT_CREATION_WINDOW_MS } from '@/lib/creation-versions'
 import { mediaAvailable, sameOriginMedia } from '@/lib/media-state'
 import { defaultGenerationSize } from '@/lib/generation-sizes'
 import { assetIds, MAX_ASSETS, MAX_PROJECT_BYTES, newProject } from '@/lib/canvas/model'
@@ -75,12 +76,29 @@ export function useCreationVersions(options: {
     const assertOwner = scope(), owner = assertOwner()
     try { history.value = parseCreationHistory(localStorage.getItem(creationHistoryKey(owner))) }
     catch { history.value = emptyCreationHistory(); storageError.value = '浏览器无法读取本地版本记录，请检查浏览器存储设置。' }
-    const ids = Object.keys(history.value.parents).filter(id => !options.jobs.value.some(job => job.job_id === id))
+    const missing = new Set(Object.keys(history.value.parents).filter(id => !options.jobs.value.some(job => job.job_id === id)))
+    const ids: string[] = []
+    // Local ancestry has no timestamps. Filter on the server before requesting job details.
+    const now = Date.now()
+    const from_date = new Date(now - RECENT_CREATION_WINDOW_MS).toISOString()
+    try {
+      for (let page = 1; missing.size; page++) {
+        const result = await fetchArtworkPage('history', { page, page_size: 100, from_date })
+        assertOwner()
+        for (const item of result.items) {
+          if (missing.delete(item.id) && item.created_at && isRecentCreationJob({ created_at: item.created_at }, now)) ids.push(item.id)
+        }
+        if (!result.items.length || page * result.page_size >= result.total) break
+      }
+    } catch {
+      assertOwner()
+      options.feedback.value = '最近一天绘图暂时无法恢复，请刷新重试；完整记录可在历史中查看。'
+    }
     // A bounded restore avoids flooding the server with one request per historical job.
     for (let index = 0; index < ids.length; index += 5) {
       assertOwner()
       await Promise.all(ids.slice(index, index + 5).map(async id => {
-        try { const job = await fetchJob(id); assertOwner(); options.restore(job) }
+        try { const job = await fetchJob(id); assertOwner(); if (isRecentCreationJob(job)) options.restore(job) }
         catch (error) {
           assertOwner()
           if (error instanceof ApiError && [403, 404, 410].includes(error.status)) delete history.value.parents[id]

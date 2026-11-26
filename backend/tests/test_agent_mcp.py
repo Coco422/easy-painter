@@ -289,6 +289,66 @@ def test_existing_connections_ignore_retired_daily_limit(env):
     assert 'daily_limit' not in row and 'used_today' not in row
 
 
+def test_connections_paginate_and_filter_before_limiting_with_owner_isolation(env):
+    e = env
+    original = connect(e).grant
+    now = auth_sessions.utcnow()
+    original.created_at = now - timedelta(days=20)
+    rows = []
+    for i in range(137):
+        row = AgentGrant(id=f'{i:036d}', user_id=e.user.id, client_id=original.client_id, resource=RESOURCE,
+                         label='Same client', scopes=SCOPES.split(), password_digest=original.password_digest,
+                         max_per_job=10, daily_limit=10, created_at=now - timedelta(minutes=i // 2),
+                         expires_at=now + timedelta(days=1))
+        if i >= 23:
+            row.revoked_at = now
+        rows.append(row)
+    rows[23].revoked_at = None; rows[23].expires_at = now - timedelta(seconds=1)
+    rows[24].revoked_at = None; rows[24].resource = 'https://old.example/api/mcp'
+    rows[25].revoked_at = None; rows[25].password_digest = 'outdated-password-digest'
+    rows[-1].user_id = e.other.id
+    e.db.add_all(rows); e.db.commit()
+    path = '/api/v1/agent/connections'
+    def get(**params):
+        response = e.client.get(path, headers=headers(e), params={'page': 1, **params})
+        assert response.status_code == 200, response.text
+        assert response.headers['cache-control'] == 'no-store'
+        return response.json()
+    first = get()
+    second = get(page=2)
+    last = get(page=999)
+    assert (first['total'], first['page_size'], len(first['items'])) == (24, 10, 10)
+    assert (second['page'], len(second['items'])) == (2, 10)
+    assert (last['page'], len(last['items'])) == (3, 4)
+    active_ids = [item['id'] for result in [first, second, last] for item in result['items']]
+    expected = sorted(rows[:23], key=lambda row: (row.created_at, row.id), reverse=True)
+    assert active_ids == [row.id for row in expected] + [original.id]
+    assert all(item['active'] for result in [first, second, last] for item in result['items'])
+    inactive = get(state='inactive')
+    assert inactive['total'] == 113 and all(not item['active'] for item in inactive['items'])
+    all_rows = get(state='all', page_size=100)
+    older = get(state='all', page_size=100, page=2)
+    assert (all_rows['total'], len(all_rows['items']), len(older['items'])) == (137, 100, 37)
+    assert original.id in [item['id'] for item in older['items']], 'old connections remain reachable beyond the previous 100-row cutoff'
+    assert rows[-1].id not in [item['id'] for result in [all_rows, older] for item in result['items']]
+    other = e.client.get(path, headers=headers(e, True), params={'page': 1, 'state': 'all'}).json()
+    assert other['total'] == 1 and other['items'][0]['id'] == rows[-1].id
+    assert isinstance(e.client.get(path, headers=headers(e)).json(), list), 'legacy clients keep their array response'
+
+
+def test_connections_pagination_validation_and_last_page_after_revocation(env):
+    e = env
+    c = connect(e)
+    path = '/api/v1/agent/connections'
+    for params in [{'page': 0}, {'page': -1}, {'page_size': 0}, {'page_size': 101}, {'state': 'unknown'}]:
+        assert e.client.get(path, headers=headers(e), params={'page': 1, **params}).status_code == 422
+    assert e.client.get(path, params={'page': 1}).status_code == 401
+    assert e.client.delete(path + '/' + c.grant.id, headers=headers(e)).status_code == 204
+    result = e.client.get(path, headers=headers(e), params={'page': 5}).json()
+    assert result == {'items': [], 'total': 0, 'page': 1, 'page_size': 10}
+    assert e.client.get(path, headers=headers(e), params={'page': 1, 'state': 'inactive'}).json()['total'] == 1
+
+
 def test_legacy_consent_field_is_ignored_and_not_exposed_in_schema(env):
     e=env;c=connect(e,single=5,daily=0)
     value(submit(e,c))

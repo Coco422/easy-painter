@@ -14,12 +14,12 @@ const compiled = ts.transpileModule(fs.readFileSync(new URL('../src/composables/
 const ref = value => ({ value })
 class ApiError extends Error { constructor(status) { super('API ' + status); this.status = status } }
 const normalize = value => JSON.parse(JSON.stringify(value))
-function setup({ storage = new Map(), storageFailure = false, create, upload, sourceOverride = {} } = {}) {
+function setup({ storage = new Map(), storageFailure = false, create, upload, sourceOverride = {}, historyPage, fetchJob } = {}) {
   const authState = { user: { id: 'owner' }, sessionId: 'session' }
   const source = { job_id: 'source', status: 'succeeded', prompt: '原始描述', model: 'm', size: 'auto', created_at: '2026-01-01', image_url: '/files/source', media_state: 'available', media_expires_at: null, ...sourceOverride }
-  const calls = { posts: [], uploads: 0, images: [], registered: [] }, watchers = []
+  const calls = { posts: [], uploads: 0, images: [], registered: [], history: [], details: [], restored: [] }, watchers = []
   const api = {
-    ApiError, fetchJob: async () => source,
+    ApiError, fetchJob: async id => { calls.details.push(id); return fetchJob ? fetchJob(id) : source },
     uploadReferenceImage: async file => { calls.uploads++; return upload ? upload(file) : { id: 'ref-source' } },
     createJob: async (request, key) => { calls.posts.push(normalize({ request, key })); return create ? create(request, key) : { job_id: 'child', status: 'queued' } },
   }
@@ -27,6 +27,10 @@ function setup({ storage = new Map(), storageFailure = false, create, upload, so
     vue: { ref, computed: getter => ({ get value() { return getter() } }), watch: (_, callback) => watchers.push(callback), onBeforeUnmount: () => {} },
     'vue-router': { useRouter: () => ({ push: async () => {} }) },
     '@/lib/api': api,
+    '@/lib/artworks': { fetchArtworkPage: async (path, params) => {
+      calls.history.push({ path, params: normalize(params) })
+      return historyPage ? historyPage(params) : { items: [], total: 0, page: params.page, page_size: 100 }
+    } },
     '@/lib/auth': { authState, fetchCurrentUser: async () => {}, fetchImageFile: async url => { calls.images.push(url); return new Response(new Blob(['png'], { type: 'image/png' })) } },
     '@/lib/browser-crypto': { randomId: () => 'stable-key' },
     '@/lib/creation-presets': presets, '@/lib/creation-versions': versions, '@/lib/media-state': media,
@@ -39,12 +43,57 @@ function setup({ storage = new Map(), storageFailure = false, create, upload, so
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => { if (storageFailure) throw new Error('quota'); storage.set(key, value) } },
   }
   vm.runInNewContext(compiled, context)
-  const options = { jobs: ref([source]), membership: ref({ source: 'batch-one' }), models: ref([{ id: 'm', label: '模型', enabled: true, supports_reference_image: true, max_reference_images: 5, supported_sizes: ['auto'], credit_cost: 5 }]), selectedModel: ref('m'), selectedSize: ref('auto'), maxLength: ref(4000), feedback: ref(''), register: result => calls.registered.push(result), restore: () => {} }
+  const options = { jobs: ref([source]), membership: ref({ source: 'batch-one' }), models: ref([{ id: 'm', label: '模型', enabled: true, supports_reference_image: true, max_reference_images: 5, supported_sizes: ['auto'], credit_cost: 5 }]), selectedModel: ref('m'), selectedSize: ref('auto'), maxLength: ref(4000), feedback: ref(''), register: result => calls.registered.push(result), restore: job => calls.restored.push(job) }
   const app = context.exports.useCreationVersions(options)
   app.selectedId.value = 'source'
   app.history.value.parents.source = null
   return { app, options, source, calls, storage, authState, watchers }
 }
+
+test('restoring an old local history uses one time-filtered list request and never fetches old job details', async () => {
+  const parents = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`old-${i}`, null]))
+  const storage = new Map([[versions.creationHistoryKey('owner'), JSON.stringify({ parents })]])
+  const { app, calls } = setup({ storage })
+  const before = Date.now()
+  await app.load()
+  assert.equal(calls.history.length, 1)
+  assert.equal(calls.history[0].path, 'history')
+  const cutoff = Date.parse(calls.history[0].params.from_date)
+  assert.ok(cutoff >= before - 24 * 60 * 60 * 1000 && cutoff <= Date.now() - 24 * 60 * 60 * 1000)
+  assert.deepEqual(calls.details, [])
+  assert.deepEqual(calls.restored, [])
+  assert.equal(Object.keys(app.history.value.parents).length, 100, 'older ancestry is retained without restoring details')
+})
+
+test('recent restoration handles pagination and only requests locally retained jobs from the last 24 hours', async () => {
+  const recent = new Date(Date.now() - 60_000).toISOString()
+  const parents = { first: null, second: 'old', old: null }
+  const storage = new Map([[versions.creationHistoryKey('owner'), JSON.stringify({ parents })]])
+  const { app, calls } = setup({ storage,
+    historyPage: ({ page }) => ({ items: page === 1
+      ? [{ id: 'first', created_at: recent }, ...Array.from({ length: 99 }, (_, i) => ({ id: `other-${i}`, created_at: recent }))]
+      : [{ id: 'second', created_at: recent }, { id: 'old', created_at: '2000-01-01' }],
+      total: 102, page, page_size: 100 }),
+    fetchJob: async id => ({ job_id: id, created_at: recent }),
+  })
+  await app.load()
+  assert.equal(calls.history.length, 2)
+  assert.equal(calls.history[0].params.from_date, calls.history[1].params.from_date)
+  assert.deepEqual(calls.details, ['first', 'second'])
+  assert.deepEqual(calls.restored.map(job => job.job_id), ['first', 'second'])
+  assert.equal(app.history.value.parents.second, 'old', 'a recent edit retains its older parent relation without loading the parent')
+})
+
+test('a failed recent list cannot fall back to requesting every old job and preserves pending confirmation', async () => {
+  const pending = { key: 'key', parentId: 'old', request: { prompt: '改蓝色', model: 'm', size: 'auto', reference_image_ids: ['ref'] } }
+  const storage = new Map([[versions.creationHistoryKey('owner'), JSON.stringify({ parents: { old: null }, pending })]])
+  const { app, calls, options } = setup({ storage, historyPage: async () => { throw new Error('offline') } })
+  await app.load()
+  assert.deepEqual(calls.details, [])
+  assert.deepEqual(calls.posts, [])
+  assert.deepEqual(normalize(app.history.value.pending), pending)
+  assert.match(options.feedback.value, /最近一天绘图暂时无法恢复/)
+})
 
 test('lost revision response survives reload and confirmation reuses exact request/key without another upload', async () => {
   const first = setup({ create: async () => { throw new ApiError(503) } })

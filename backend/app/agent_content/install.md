@@ -10,11 +10,12 @@ Service: `{{MCP_URL}}` — remote Streamable HTTP with OAuth authorization-code 
 ## Codex CLI
 
 ```bash
-codex mcp add easy-painter --url '{{MCP_URL}}'
-codex mcp login easy-painter --oauth-client-registration dcr
+codex mcp add easy-painter --url '{{MCP_URL}}' --oauth-client-registration dcr
 ```
 
-Use a current CLI with OAuth/DCR support. In the desktop/IDE MCP settings, adding the URL and authenticating is an alternative. Official setup: https://developers.openai.com/codex/mcp/
+Use a current CLI with OAuth/DCR support. The add command starts browser authorization automatically. Once it prints `Successfully logged in.`, setup is complete; do not run `codex mcp login` immediately afterward. Only when authorization did not complete or you need to authorize again, run `codex mcp login easy-painter --oauth-client-registration dcr` separately. Each approved authorization creates an independent connection, even for the same client name. Manage unused connections on [the connection page]({{ORIGIN}}/mcp).
+
+In the desktop/IDE MCP settings, adding the URL and authenticating is an alternative. Official setup: https://developers.openai.com/codex/mcp/
 
 ## Claude Code
 
@@ -58,7 +59,7 @@ Clients must support remote HTTP MCP and OAuth; cloud-hosted clients cannot reac
 - Paid: `generate_image(prompt,model,size,request_id,max_cost)` and `edit_image(source_job_id,prompt,model,size,request_id,max_cost)`; one image per request.
 - Prices depend on enabled models and user-group pricing. Never hardcode prices. There is no daily spending limit or per-minute generation quota on the website, API or MCP, including existing connections. Short burst protection still rejects abnormal request floods. Each paid request checks the account balance, the connection’s per-job cap and max_cost; final failures refund reserved credits.
 - Persist exact arguments and request_id before paid submission. For unknown results replay the identical call; once a job ID is returned, poll get_job. Do not create another paid request just because generation is slow.
-- The connection page can lower/increase the per-job cap or revoke a grant. Revocation blocks future calls, refresh and result links, but does not cancel already accepted jobs.
+- The connection page shows active grants by default, with 10 entries per page and inactive/all filters. It displays creation times and connection IDs so same-name grants can be distinguished. You can lower/increase the per-job cap or revoke a grant. Revocation blocks future calls, refresh and result links, but does not cancel already accepted jobs.
 - First release: text-to-image, editing owned/unexpired generated images, status and balance. No arbitrary image URLs, local upload, SVG/PPTX conversion, data charts or browser-local canvas access.
 
 ## Troubleshooting

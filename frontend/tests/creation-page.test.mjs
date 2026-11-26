@@ -19,7 +19,8 @@ const expiry = component(() => vue.h('span'))
 class ApiError extends Error {}
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); await vue.nextTick() }
 
-function mount({ live = false, pending = null } = {}) {
+function mount({ live = false, pending = null, jobAge = 60_000 } = {}) {
+  const clock = vue.ref(Date.now())
   const selectedReferences = vue.ref([{ id: 'old-reference', filename: '旧海报.png' }])
   const uploading = vue.ref(false)
   const calls = { posts: [], confirms: 0, clearedTimers: [] }
@@ -28,7 +29,7 @@ function mount({ live = false, pending = null } = {}) {
   let timerId = 0, identifier = 0, finishOld
   const window = { localStorage, matchMedia: () => ({ matches: true }), addEventListener() {}, removeEventListener() {},
     setTimeout: () => ++timerId, clearTimeout: id => calls.clearedTimers.push(id) }
-  const oldJobs = ['a', 'b', 'c', 'd'].map((job_id, index) => ({ job_id, status: live && index === 0 ? 'processing' : 'succeeded', prompt: '旧海报', model: 'm', model_label: '模型', size: 'auto', credit_cost: 5, billing_status: live && index === 0 ? 'reserved' : 'settled', created_at: `2026-01-01T00:00:0${index}Z`, image_url: `/image/${job_id}`, media_state: 'available' }))
+  const oldJobs = ['a', 'b', 'c', 'd'].map((job_id, index) => ({ job_id, status: live && index === 0 ? 'processing' : 'succeeded', prompt: '旧海报', model: 'm', model_label: '模型', size: 'auto', credit_cost: 5, billing_status: live && index === 0 ? 'reserved' : 'settled', created_at: new Date(clock.value - jobAge + index).toISOString(), image_url: `/image/${job_id}`, media_state: 'available' }))
   const liveResult = new Promise(resolve => { finishOld = () => resolve({ ...oldJobs[0], status: 'succeeded', billing_status: 'settled' }) })
   const model = { id: 'm', label: '模型', enabled: true, credit_cost: 5, base_credit_cost: 5, supports_reference_image: true, max_reference_images: 5, supported_sizes: ['auto', '1280x720'] }
   const created = new Map()
@@ -39,7 +40,7 @@ function mount({ live = false, pending = null } = {}) {
     createJob: async (payload, key) => {
       const id = `new-${calls.posts.length + 1}`
       calls.posts.push({ payload: JSON.parse(JSON.stringify(payload)), key })
-      created.set(id, { ...oldJobs[0], ...payload, job_id: id, status: 'succeeded', billing_status: 'settled', created_at: `2026-02-01T00:00:0${calls.posts.length}Z` })
+      created.set(id, { ...oldJobs[0], ...payload, job_id: id, status: 'succeeded', billing_status: 'settled', created_at: new Date(Date.now() + calls.posts.length).toISOString() })
       return { job_id: id, status: 'queued', credit_cost: 5, billing_status: 'reserved' }
     },
   }
@@ -79,7 +80,7 @@ function mount({ live = false, pending = null } = {}) {
     '@/lib/generation-sizes': generationSizes,
     '@/lib/creation-versions': versions, '@/lib/media-state': media,
     '@/lib/generation-quips': quipLibrary,
-    '@/composables/useMediaClock': { useMediaClock: () => vue.ref(Date.now()) },
+    '@/composables/useMediaClock': { useMediaClock: () => clock },
     '@/composables/useReferenceImages': { useReferenceImages: () => ({ selected: selectedReferences, uploading, getObjectUrl: () => '', releaseObjectUrls() {}, clearSelected: () => { selectedReferences.value = [] }, deselect() {} }) },
     '@/composables/useCreationVersions': { useCreationVersions },
     './ProtectedImage.vue': image, '@/components/ProtectedImage.vue': image, './MediaExpiry.vue': expiry, '@/components/MediaExpiry.vue': expiry,
@@ -108,8 +109,40 @@ function mount({ live = false, pending = null } = {}) {
     await vue.nextTick()
   }
   const input = value => find('prompt-textarea')[0].props.onInput({ target: { value } })
-  return { app, root, calls, storage, selectedReferences, uploading, find, choose, input, finishOld, get history() { return history.value }, get jobs() { return retainedJobs.value } }
+  return { app, root, calls, storage, clock, selectedReferences, uploading, find, choose, input, finishOld, get history() { return history.value }, get jobs() { return retainedJobs.value } }
 }
+
+test('the rolling 24-hour window removes older drawings while history remains accessible', async () => {
+  const view = mount({ jobAge: 24 * 60 * 60 * 1000 })
+  try {
+    await flush()
+    assert.match(textOf(view.find('drawing-navigation')[0]), /最近一天绘图/)
+    assert.equal(view.find('drawing-tab').length, 2, 'drawings at exactly 24 hours remain visible')
+    view.clock.value += 1000
+    await vue.nextTick()
+    assert.equal(view.find('drawing-navigation').length, 0)
+    assert.equal(view.find('workspace-empty').length, 1)
+    assert.ok(view.find('results-toolbar-button').some(item => textOf(item) === '历史'))
+    assert.equal(view.jobs.length, 4, 'hiding old results does not delete jobs or local ancestry')
+    assert.equal(view.calls.posts.length, 0)
+  } finally { view.app.unmount() }
+})
+
+test('older ongoing jobs keep syncing without entering recent drawings or losing revision confirmation', async () => {
+  const pending = { key: 'unknown', parentId: 'a', request: { prompt: '改图', model: 'm', size: 'auto', reference_image_ids: ['reference'] } }
+  const view = mount({ live: true, pending, jobAge: 25 * 60 * 60 * 1000 })
+  try {
+    await flush()
+    assert.equal(view.find('drawing-tab').length, 0)
+    assert.match(textOf(view.find('results-toolbar-status')[0]), /1 张生成中/)
+    assert.match(textOf(view.root), /确认上次改图任务/)
+    view.finishOld()
+    await flush()
+    assert.equal(view.jobs.find(job => job.job_id === 'a').status, 'succeeded')
+    assert.equal(view.find('drawing-tab').length, 0)
+    assert.deepEqual(JSON.parse(JSON.stringify(view.history.pending)), pending)
+  } finally { view.app.unmount() }
+})
 
 test('new drawing clears content and all presets, keeps generation parameters and starts an independent batch', async () => {
   const view = mount()
