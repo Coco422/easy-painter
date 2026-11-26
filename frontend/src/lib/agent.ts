@@ -5,6 +5,10 @@ export interface AgentConnection {
   id: string; label: string; scopes: string[]; max_per_job: number
   created_at: string; expires_at: string; active: boolean
 }
+export type AgentConnectionState = 'active' | 'inactive' | 'all'
+export interface AgentConnectionPage {
+  items: AgentConnection[]; total: number; page: number; page_size: number
+}
 export interface AgentConfig { enabled: boolean; endpoint: string | null; scopes: Record<string, string> }
 export async function agentApi<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await authenticatedFetch(`/api/v1/agent${path}`, {
@@ -23,7 +27,7 @@ export function installation(client: string, endpoint: string): { text: string; 
     link: `cursor://anysphere.cursor-deeplink/mcp/install?name=easy-painter&config=${encodeURIComponent(btoa(JSON.stringify({ url: endpoint })))}`,
     hint: '点击安装后，在 Cursor 内确认添加，再完成浏览器授权。也可把下面配置合并到 mcp.json。',
   }
-  if (client === 'codex') return { text: `codex mcp add easy-painter --url ${quote(endpoint)}\ncodex mcp login easy-painter --oauth-client-registration dcr`, hint: '复制到支持 OAuth 的新版 Codex CLI 执行，浏览器会打开本站授权页。桌面端也可在 MCP 设置中添加这个服务地址。' }
+  if (client === 'codex') return { text: `codex mcp add easy-painter --url ${quote(endpoint)} --oauth-client-registration dcr`, hint: '使用支持 OAuth/DCR 的新版 Codex CLI；此命令会自动打开浏览器完成授权。看到 Successfully logged in. 后即可使用，无需再运行 mcp login；重复授权会新增独立连接。桌面端也可在 MCP 设置中添加这个服务地址。' }
   if (client === 'claude') return { text: `claude mcp add --transport http easy-painter ${quote(endpoint)}`, hint: '在 Claude Code 的项目终端执行，再通过 /mcp 完成授权。Claude 网页或桌面版可在自定义连接器中添加服务地址。' }
   if (client === 'dsh') return {
     text: `- insert:\n  - id: mcp-easy-painter\n    name: '@deepseek-ai/dsh-mcp-client'\n    config:\n      serverName: easy_painter\n      transport: stdio\n      command: npx\n      args: ['-y', 'mcp-remote@0.15.1', ${quote(endpoint)}, '--host', '127.0.0.1', '--transport', 'http-only']\n      failOnStartupError: true`,

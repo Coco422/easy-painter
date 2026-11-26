@@ -5,10 +5,10 @@ import secrets
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_current_user
@@ -171,7 +171,6 @@ def consent(request_id: str, body: Consent, request: Request, response: Response
     scopes = sorted(set(body.scopes))
     if not scopes or set(scopes) - set(row.scopes):
         raise HTTPException(422, '只能授权客户端请求的权限。')
-    from sqlalchemy import func
     active = db.scalar(select(func.count()).select_from(AgentGrant).where(AgentGrant.user_id == user.id, AgentGrant.revoked_at.is_(None), AgentGrant.expires_at > utcnow()))
     if active >= 50:
         raise HTTPException(409, '有效连接已达 50 个，请先断开不用的连接。')
@@ -216,10 +215,24 @@ def grant_view(db: Session, row: AgentGrant) -> dict:
 
 
 @agent_router.get('/connections')
-def connections(response: Response, db: Session = Depends(get_db), user: User = Depends(require_current_user)):
+def connections(response: Response, page: int | None = Query(None, ge=1),
+                page_size: int = Query(10, ge=1, le=100), state: Literal['active', 'inactive', 'all'] = 'active',
+                db: Session = Depends(get_db), user: User = Depends(require_current_user)):
     no_store(response)
-    rows = db.scalars(select(AgentGrant).where(AgentGrant.user_id == user.id).order_by(AgentGrant.created_at.desc()).limit(100))
-    return [grant_view(db, row) for row in rows]
+    stmt = select(AgentGrant).where(AgentGrant.user_id == user.id)
+    if page is None:
+        # Keep existing clients' array response; the website opts into server pagination.
+        rows = db.scalars(stmt.order_by(AgentGrant.created_at.desc(), AgentGrant.id.desc()).limit(100))
+        return [grant_view(db, row) for row in rows]
+    active = and_(AgentGrant.revoked_at.is_(None), AgentGrant.expires_at > utcnow(),
+                  AgentGrant.resource == service.resource_url(), AgentGrant.password_digest == password_digest(user))
+    if state != 'all':
+        stmt = stmt.where(active if state == 'active' else ~active)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    page = min(page, max(1, (total + page_size - 1) // page_size))
+    rows = db.scalars(stmt.order_by(AgentGrant.created_at.desc(), AgentGrant.id.desc())
+                      .offset((page - 1) * page_size).limit(page_size))
+    return {'items': [grant_view(db, row) for row in rows], 'total': total, 'page': page, 'page_size': page_size}
 
 
 @agent_router.put('/connections/{grant_id}')

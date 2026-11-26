@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -87,6 +87,10 @@ def public_job(job):
     return result
 
 
+def public_artwork(job):
+    j = public_job(job)
+    return dict(kind='job', id=j['job_id'], job_id=j['job_id'], inspiration_id=None, favorite_id=None, title='Mock 实验工作流', prompt=j['prompt'], revised_prompt=None, is_prompt_public=False, can_view_prompt=True, username='demo', is_owner=True, is_in_gallery=False, gallery_visible=False, is_favorite=False, tags=[], status=j['status'], model=j['model'], size=j['size'], aspect_ratio='16:9', created_at=j['created_at'], finished_at=j['finished_at'], credit_cost=5, billing_status=j['billing_status'], error_message=None, media_state=j['media_state'], media_expires_at=j['media_expires_at'], original_expires_at=j['media_expires_at'], retention_kind='temporary', image_url=j['image_url'], thumbnail_url=j['thumbnail_url'], submission_status='none', review_reason=None)
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_): pass
 
@@ -114,6 +118,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/v1/users/me': return self.send(dict(id=owner, username=next(name for name, value in ACCOUNTS.items() if value == owner), display_name='Mock 体验账号', email=None, is_public=False, credits=1000 - 5 * sum(job['_owner'] == owner for job in JOBS.values()), created_at=now()))
             if path == '/api/v1/canvas/capabilities': return self.send(dict(can_write=False, max_projects=0, max_bytes=0, used_bytes=0))
             if path == '/api/v1/canvas/projects': return self.send([])
+            if path == '/api/v1/history':
+                query = parse_qs(urlsplit(self.path).query)
+                page = max(1, int(query.get('page', ['1'])[0]))
+                page_size = min(100, max(1, int(query.get('page_size', ['20'])[0])))
+                from_date = datetime.fromisoformat(query['from_date'][0]) if query.get('from_date') else None
+                jobs = sorted((job for job in JOBS.values() if job['_owner'] == owner and (not from_date or datetime.fromisoformat(job['created_at']) >= from_date)), key=lambda job: (job['created_at'], job['job_id']), reverse=True)
+                return self.send(dict(items=[public_artwork(job) for job in jobs[(page - 1) * page_size:page * page_size]], total=len(jobs), page=page, page_size=page_size, server_time=now()))
             if path == '/api/v1/jobs/active': return self.send([public_job(job) for job in JOBS.values() if job['_owner'] == owner and public_job(job)['status'] in ('queued', 'processing')])
             if path == '/api/v1/reference-images': return self.send(dict(items=[{key: value for key, value in ref.items() if not key.startswith('_')} for ref in REFERENCES.values() if ref['_owner'] == owner], total=sum(ref['_owner'] == owner for ref in REFERENCES.values()), page=1, page_size=20))
             if path.startswith('/api/v1/reference-images/') and path.endswith('/file'):
@@ -128,8 +139,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/v1/artworks/job/'):
                 job = JOBS.get(path.rsplit('/', 1)[-1])
                 if not job or job['_owner'] != owner: return self.send(dict(detail='作品不存在。'), 404)
-                j = public_job(job)
-                return self.send(dict(kind='job', id=j['job_id'], job_id=j['job_id'], inspiration_id=None, favorite_id=None, title='Mock 实验工作流', prompt=j['prompt'], revised_prompt=None, is_prompt_public=False, can_view_prompt=True, username='demo', is_owner=True, is_in_gallery=False, gallery_visible=False, is_favorite=False, tags=[], status=j['status'], model=j['model'], size=j['size'], aspect_ratio='16:9', created_at=j['created_at'], finished_at=j['finished_at'], credit_cost=5, billing_status=j['billing_status'], error_message=None, media_state=j['media_state'], media_expires_at=j['media_expires_at'], original_expires_at=j['media_expires_at'], retention_kind='temporary', image_url=j['image_url'], thumbnail_url=j['thumbnail_url'], submission_status='none', review_reason=None))
+                return self.send(public_artwork(job))
             if 'inspiration' in path: return self.send(dict(items=[], page=1, page_size=20, total=0, tags=[]))
             return self.send(dict(detail='Mock 未实现此接口。'), 404)
 

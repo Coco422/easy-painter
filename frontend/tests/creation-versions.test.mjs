@@ -1,8 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseCreationHistory, creationVersionRows, creationResultBatches, creationHistoryKey } from '../src/lib/creation-versions.ts'
+import { parseCreationHistory, creationVersionRows, creationResultBatches, creationHistoryKey, isRecentCreationJob } from '../src/lib/creation-versions.ts'
 import { appendGenerationImage } from '../src/lib/canvas/from-generation.ts'
 import { newProject, newNode, validateProject } from '../src/lib/canvas/model.ts'
+
+test('recent drawings use a rolling 24-hour cutoff across midnight and timezone offsets', () => {
+  const now = Date.parse('2026-11-26T00:30:00+08:00')
+  assert.equal(isRecentCreationJob({ created_at: '2026-11-25T00:30:00+08:00' }, now), true)
+  assert.equal(isRecentCreationJob({ created_at: '2026-11-24T16:29:59.999Z' }, now), false)
+  assert.equal(isRecentCreationJob({ created_at: '2026-11-25T23:59:00+08:00' }, now), true)
+  assert.equal(isRecentCreationJob({ created_at: 'invalid' }, now), false)
+})
 
 test('versions retain independent branches from older images and sort by creation time', () => {
   const jobs = ['c','a','b'].map(id => ({job_id:id, created_at:{a:'2026-01-01',b:'2026-01-02',c:'2026-01-03'}[id]}))

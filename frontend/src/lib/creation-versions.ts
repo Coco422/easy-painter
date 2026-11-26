@@ -11,6 +11,9 @@ export interface CreationHistory {
   pending: PendingRevision | null
 }
 export const MAX_CREATION_VERSIONS = 100
+export const RECENT_CREATION_WINDOW_MS = 24 * 60 * 60 * 1000
+export const isRecentCreationJob = (job: { created_at: string }, now = Date.now()) =>
+  Date.parse(job.created_at) >= now - RECENT_CREATION_WINDOW_MS
 export const creationHistoryKey = (ownerId: string) => `easy-painter:creation-versions:${ownerId}`
 export const emptyCreationHistory = (): CreationHistory => ({ parents: {}, pending: null })
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[\w-]{1,128}$/.test(value)

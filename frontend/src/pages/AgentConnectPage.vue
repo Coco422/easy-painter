@@ -2,27 +2,37 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowUpRight, Check, Copy, Link2, ShieldCheck, SlidersHorizontal, Unplug } from 'lucide-vue-next'
 import { authState, isLoggedIn } from '@/lib/auth'
-import { agentApi, installation, startConnectionTest, type AgentConfig, type AgentConnection } from '@/lib/agent'
+import { agentApi, installation, startConnectionTest, type AgentConfig, type AgentConnection, type AgentConnectionPage, type AgentConnectionState } from '@/lib/agent'
 import './agent.css'
 
 const client = ref('codex')
 const config = ref<AgentConfig>()
 const connections = ref<AgentConnection[]>([])
+const connectionState = ref<AgentConnectionState>('active')
+const page = ref(1), total = ref(0)
+const pageSize = 10
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const error = ref(''), notice = ref(''), busy = ref(false), loading = ref(true)
 const editing = ref(''), revoking = ref(''), single = ref(10)
 let epoch = 0
 const setup = computed(() => installation(client.value, config.value?.endpoint ?? ''))
-async function load() {
+async function load(nextPage = page.value) {
   const current = ++epoch
-  error.value = ''; loading.value = true
+  error.value = ''; loading.value = true; editing.value = ''; revoking.value = ''
+  connections.value = []
   try {
-    const next = await agentApi<AgentConfig>('/config')
+    const next = config.value ?? await agentApi<AgentConfig>('/config')
     if (epoch !== current) return
     config.value = next
-    const rows = isLoggedIn() && next.enabled ? await agentApi<AgentConnection[]>('/connections') : []
-    if (epoch === current) connections.value = rows
+    const query = new URLSearchParams({ page: String(nextPage), page_size: String(pageSize), state: connectionState.value })
+    const result = isLoggedIn() && next.enabled ? await agentApi<AgentConnectionPage>(`/connections?${query}`) : { items: [], total: 0, page: 1 }
+    if (epoch === current) { connections.value = result.items; total.value = result.total; page.value = result.page }
   } catch (e) { if (epoch === current) error.value = (e as Error).message }
   finally { if (epoch === current) loading.value = false }
+}
+function filterConnections(state: AgentConnectionState) {
+  connectionState.value = state
+  void load(1)
 }
 async function copy() {
   try { await navigator.clipboard.writeText(setup.value.text); notice.value = '已复制配置。' }
@@ -47,8 +57,8 @@ async function mutate(id: string, revoke = false) {
   } catch (e) { if (epoch === current) error.value = (e as Error).message }
   finally { if (session === authState.sessionId) busy.value = false }
 }
-watch(() => authState.sessionId, () => { connections.value = []; editing.value = ''; revoking.value = ''; notice.value = ''; busy.value = false; void load() })
-onMounted(load)
+watch(() => authState.sessionId, () => { config.value = undefined; connections.value = []; total.value = 0; page.value = 1; connectionState.value = 'active'; editing.value = ''; revoking.value = ''; notice.value = ''; busy.value = false; void load(1) })
+onMounted(() => { void load(1) })
 onBeforeUnmount(() => { epoch++ })
 </script>
 
@@ -66,13 +76,25 @@ onBeforeUnmount(() => { epoch++ })
       </section>
       <aside class="agent-card agent-summary"><span class="agent-step">02</span><h2>授权给谁，用多少，由你决定。</h2><ul><li><Check :size="16" /><div><strong>单独授权</strong><p>只开放你勾选的能力，网页登录凭证不交给 Agent。</p></div></li><li><Check :size="16" /><div><strong>单次消费保护</strong><p>单次上限由你设定，日消费不设上限；按账号余额使用。</p></div></li><li><Check :size="16" /><div><strong>随时断开</strong><p>撤销连接后，后续调用与续期立即失效。</p></div></li></ul><a href="/mcp/install.md" target="_blank" rel="noopener" class="agent-doc-link">AI 安装说明<ArrowUpRight :size="14" /></a></aside>
     </div>
-    <section class="agent-card agent-connections"><div class="agent-section-heading"><SlidersHorizontal :size="20" /><div><h2>已授权的连接</h2><p>可调整单次消费上限；修改上限不取消已提交任务。</p></div><button v-if="isLoggedIn()" class="agent-button" :disabled="busy || loading" @click="load">刷新</button></div>
+    <section class="agent-card agent-connections" :aria-busy="loading"><div class="agent-section-heading"><SlidersHorizontal :size="20" /><div><h2>已授权的连接</h2><p>每次确认授权都会新增独立连接，同名连接可能来自不同设备。可按创建时间和编号区分，断开不用的连接。</p></div><button v-if="isLoggedIn()" class="agent-button" :disabled="busy || loading" @click="load()">刷新</button></div>
+      <template v-if="isLoggedIn() && config?.enabled">
+        <div class="agent-tabs" role="group" aria-label="筛选授权连接">
+          <button v-for="item in [{ id: 'active' as const, label: '有效连接' }, { id: 'inactive' as const, label: '已失效' }, { id: 'all' as const, label: '全部' }]" :key="item.id" :aria-pressed="connectionState === item.id" :disabled="busy" @click="filterConnections(item.id)">{{ item.label }}</button>
+        </div>
+        <p class="agent-muted" role="status">{{ loading ? '正在读取连接…' : error ? '连接列表加载失败，请点击刷新重试。' : `共 ${total} 条连接，每页 ${pageSize} 条` }}</p>
+      </template>
       <p v-if="!isLoggedIn()" class="agent-muted">登录后管理你的连接。<router-link to="/login?redirect=/mcp">登录账号 →</router-link></p>
-      <p v-else-if="!connections.length && !loading" class="agent-muted">还没有连接。从上方添加服务，或先在网页体验一次授权流程。</p>
+      <p v-else-if="!connections.length && !loading && !error" class="agent-muted">{{ connectionState === 'active' ? '暂无有效连接。可从上方添加服务，或切换筛选查看旧授权。' : connectionState === 'inactive' ? '暂无已失效的连接。' : '还没有连接。从上方添加服务，或先在网页体验一次授权流程。' }}</p>
       <article v-for="item in connections" :key="item.id" class="agent-connection"><div class="agent-connection-title"><strong>{{ item.label }}</strong><span :class="['agent-status',{ inactive: !item.active }]">{{ item.active ? '已连接' : '已失效' }}</span><time>到期 {{ new Date(item.expires_at).toLocaleDateString('zh-CN') }}</time></div><p class="agent-muted">{{ item.scopes.map(scope => config?.scopes[scope] ?? scope).join(' · ') }}</p><div class="agent-connection-bottom"><span>单次 <strong>{{ item.max_per_job }}</strong> 丝</span><div class="agent-actions"><button v-if="item.active" class="agent-button" :disabled="busy" @click="editing = item.id; single = item.max_per_job; revoking = ''">调整额度</button><button v-if="item.active" class="agent-button" :disabled="busy" @click="revoking = item.id; editing = ''"><Unplug :size="14" />断开</button></div></div>
+        <p class="agent-fine">创建于 <time :datetime="item.created_at">{{ new Date(item.created_at).toLocaleString('zh-CN') }}</time> · 连接编号 <span :title="item.id">{{ item.id.slice(0, 8) }}</span></p>
         <form v-if="editing === item.id" class="agent-inline-form" @submit.prevent="mutate(item.id)"><label>单次上限（丝）<input v-model.number="single" type="number" min="0" max="100000" required /></label><button class="agent-button primary" :disabled="busy">保存额度</button><button type="button" class="agent-button" @click="editing = ''">取消</button></form>
         <div v-if="revoking === item.id" class="agent-inline-form"><p>断开后需重新授权。已提交任务仍继续执行。</p><button class="agent-button primary" :disabled="busy" @click="mutate(item.id,true)">确认断开</button><button class="agent-button" @click="revoking = ''">取消</button></div>
       </article>
+      <nav v-if="isLoggedIn() && total > pageSize" class="agent-actions" aria-label="授权连接分页">
+        <button type="button" class="agent-button" :disabled="busy || loading || page <= 1" @click="load(page - 1)">上一页</button>
+        <span class="agent-muted">第 {{ page }} / {{ pageCount }} 页</span>
+        <button type="button" class="agent-button" :disabled="busy || loading || page >= pageCount" @click="load(page + 1)">下一页</button>
+      </nav>
     </section>
     <section class="agent-resources"><div><p class="agent-eyebrow">SKILL + MCP</p><h2>接上工具，再教会它怎么用。</h2><p>Skill 帮助助手选择模型、估算消耗、组织描述和继续改图。首版提供 6 个工具，每次生成一张，失败按本站规则退款。</p></div><div class="agent-resource-links"><a href="/mcp/easy-painter-skill.zip" class="agent-button">下载 Easy Painter Skill<ArrowUpRight :size="15" /></a><a href="/llms-full.txt" target="_blank" rel="noopener" class="agent-button">AI 可读能力说明<ArrowUpRight :size="15" /></a></div></section>
   </main>

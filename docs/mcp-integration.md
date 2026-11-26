@@ -4,6 +4,10 @@
 
 Codex、Cursor、Claude 和 dsh 配置统一见站内 `/mcp/install.md`，源码是 `backend/app/agent_content/install.md`。dsh 未内置 OAuth 的 MCP 插件可通过 `mcp-remote@0.15.1` stdio 桥接；桥接负责浏览器授权和自动续期，dsh 对话本身仍需要有效的推理模型登录。页面提供可复制的独立 patch，不覆盖现有 profile。
 
+新版 Codex CLI 使用一条 `codex mcp add easy-painter --url '<MCP_URL>' --oauth-client-registration dcr` 完成添加和浏览器授权；出现 `Successfully logged in.` 即完成，不再紧接着执行 `mcp login`。只有授权未完成或需要重新授权时，才单独执行 `codex mcp login easy-painter --oauth-client-registration dcr`。每次在浏览器确认允许都会创建独立授权，即使尚未完成令牌交换或客户端同名，也不会自动替换旧连接。连接列表显示创建时间和编号，可据此区分；不按名称合并或自动撤销，以免影响其他设备。重复授权产生的闲置连接可手动断开，断开不取消已有任务或改变其计费。
+
+连接列表默认筛选「有效连接」，每页 10 条，可切换「已失效／全部」。后端先按当前账号和状态筛选，再统计与分页，不受旧版最新 100 条截断影响；有效性同时检查撤销、期限、规范 resource 和密码摘要。断开后若当前页已不存在，自动回到最后一页。网页请求 `/api/v1/agent/connections?page=1&page_size=10&state=active`，返回 `items/total/page/page_size`；省略 `page` 时保留旧客户端的最新 100 条数组响应。翻页和筛选不自动撤销、合并或删除旧授权，数据库记录仍按现有审计规则保留。
+
 ## 本地预览
 
 此预览使用真实 OAuth、官方 MCP SDK、任务及账务代码，替换为隔离 SQLite 数据、内存限流/对象存储和假图工作器，不连接真实上游或生产服务。它不运行 Flyway，不验证 PostgreSQL 行锁。
